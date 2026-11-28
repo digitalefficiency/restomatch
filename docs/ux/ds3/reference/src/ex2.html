@@ -1,0 +1,36 @@
+<div class="rm rm-app is-rail" dir="rtl" lang="he" data-font="gsans" data-mock="desk">
+  <aside class="rm-side mn" data-menu="desk" data-current="approvals" data-short data-start="rail" aria-label="תפריט צד"></aside>
+
+  <div class="rm-main">
+    <header class="rm-top">
+      <span class="sp"></span>
+      <span class="rm-ico" role="img" aria-label="התראות חדשות"><svg class="i"><use href="#i-bell"/></svg><span class="cnt cnt-dot" aria-hidden="true"></span></span>
+    </header>
+
+    <div class="desk" id="desk">
+      <section class="desk-list" aria-label="פערים שמחכים להחלטה">
+        <div class="desk-head">
+          <h1 aria-level="4">אישורים</h1>
+          <p class="desk-sum" id="desk-sum"></p>
+          <div class="desk-tabs" role="group" aria-label="תצוגות התור">
+            <button aria-pressed="true">להחלטה <span class="c" id="tab-c">4</span></button>
+            <button aria-pressed="false" aria-disabled="true" tabindex="-1">לבדיקה <span class="c">0</span></button>
+            <button aria-pressed="false" aria-disabled="true" tabindex="-1">ממתין לאחרים <span class="c">3</span></button>
+          </div>
+        </div>
+        <div class="desk-rows" id="desk-rows" tabindex="0" role="listbox" aria-label="רשימת הפערים. מקשי J ו־K למעבר, 1 לבקשת זיכוי, 2 לתשלום כפי שחויב, Z לביטול"></div>
+        <div class="desk-keys" aria-hidden="true">
+          <span><kbd>J</kbd><kbd>K</kbd>מעבר</span>
+          <span><kbd>1</kbd>בקשת זיכוי</span>
+          <span><kbd>2</kbd>כפי שחויב</span>
+          <span><kbd>Z</kbd>ביטול</span>
+          <span class="ask-only"><kbd>Esc</kbd>חזרה בלי להחליט</span>
+          <span class="keys-off">קיצורים בתו אחד כבויים, החצים עוברים בין הפערים</span>
+        </div>
+      </section>
+      <section class="desk-ev" id="desk-ev" aria-label="הראיות וההחלטה"></section>
+      <p class="sr" id="desk-live" role="status"></p>
+      <div class="toast" id="desk-toast" hidden></div>
+    </div>
+  </div>
+</div>

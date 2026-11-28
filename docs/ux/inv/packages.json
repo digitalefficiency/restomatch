@@ -1,0 +1,565 @@
+{
+  "generatedFrom": "main@de5cfcf7",
+  "about": {
+    "what": "The decided partition of the invoices batch (INV-00 to INV-06). One package, one coding session, one branch, one draft pull request. Checked by check-partition.cjs beside this file.",
+    "paths": "Relative to the repository root. In a glob only * (inside one path segment), ** (any depth) and ? are special; [ ] ( ) are literal, so [invoiceId] and (register) are written as they are on disk.",
+    "owns": "Everything the package may create or change. A file is the package's when it matches one of its owns globs and none of its reserved globs.",
+    "newFiles": "The entries of owns that do not exist on main yet. An owns glob that matches no tracked file must be repeated here, or the check fails.",
+    "reserved": "Per package: files inside or beside its boundary that are NOT its (mounted, never edited; another package's sub-folder; a neighbour it reads). They are subtracted from owns.",
+    "seams": "The only edits a package makes outside its boundary. who = the package that edits; owner = the package that owns the file, or \"shared\" when no package of this batch owns it.",
+    "base": "The base of the package's pull request. startFrom is the revision the session is created from; mergeIn lists the branches it merges before it starts work, in order.",
+    "nobody": "Files given to no package of this batch. A need there is written into the pull request as a request, never edited (a seam listed for the file is the one exception).",
+    "immutable": "AGENTS.md, \"Immutability list\", plus this batch's hard constraints (no schema change, no migration, nothing in the matching package). Never inside a boundary and never a seam."
+  },
+  "packages": [
+    {
+      "id": "INV-00",
+      "title": "The server reads, and the words every screen shares",
+      "wave": 1,
+      "startFrom": "main",
+      "mergeIn": [],
+      "base": "main",
+      "branch": "claude/inv-00-server-reads",
+      "optional": false,
+      "gates": ["test-sentinel", "tenant-security-warden", "money-format-marshal", "icp-keeper"],
+      "owns": [
+        "packages/api/src/routers/invoices.ts",
+        "packages/api/src/routers/approvals.ts",
+        "packages/api/src/invoices/index.ts",
+        "packages/api/src/invoices/holding.ts",
+        "packages/api/src/invoices/history.ts",
+        "packages/api/src/invoices/payment.ts",
+        "packages/api/src/__tests__/invoices-register.test.ts",
+        "packages/api/src/__tests__/invoices-detail.test.ts",
+        "packages/api/src/__tests__/invoice-holding.test.ts",
+        "packages/api/src/__tests__/routing-reason.test.ts",
+        "packages/api/src/__tests__/invoice-history.test.ts",
+        "packages/api/src/__tests__/invoice-payment.test.ts",
+        "packages/api/src/__tests__/approvals-decided.test.ts",
+        "packages/api/src/__tests__/invoice-area.attack.test.ts",
+        "packages/api/src/__tests__/invoice-area.fixtures.ts",
+        "packages/api/src/__tests__/coverage/IA-04.ts",
+        "apps/web/lib/invoices/**",
+        "apps/web/lib/i18n/messages/invoices/index.ts",
+        "apps/web/lib/i18n/messages/invoices/gap.ts",
+        "apps/web/e2e/__screenshots__/INV-00/**"
+      ],
+      "newFiles": [
+        "packages/api/src/invoices/holding.ts",
+        "packages/api/src/invoices/history.ts",
+        "packages/api/src/invoices/payment.ts",
+        "packages/api/src/__tests__/invoice-holding.test.ts",
+        "packages/api/src/__tests__/routing-reason.test.ts",
+        "packages/api/src/__tests__/invoice-history.test.ts",
+        "packages/api/src/__tests__/invoice-payment.test.ts",
+        "packages/api/src/__tests__/approvals-decided.test.ts",
+        "packages/api/src/__tests__/invoice-area.attack.test.ts",
+        "packages/api/src/__tests__/invoice-area.fixtures.ts",
+        "packages/api/src/__tests__/coverage/IA-04.ts",
+        "apps/web/lib/invoices/**",
+        "apps/web/lib/i18n/messages/invoices/gap.ts",
+        "apps/web/e2e/__screenshots__/INV-00/**"
+      ],
+      "reserved": [
+        "packages/api/src/routers/payRun.ts",
+        "packages/api/src/invoices/state.ts",
+        "packages/api/src/approvals/**",
+        "packages/api/src/lib/roles.ts",
+        "packages/api/src/lib/claims.ts",
+        "packages/api/src/lib/dueDate.ts",
+        "packages/api/src/match/**",
+        "packages/api/src/vat/**",
+        "packages/api/src/lifecycle/**",
+        "packages/api/src/__tests__/fixtures.ts"
+      ],
+      "seams": [
+        {
+          "file": "apps/web/lib/i18n/messages/invoices/screen.ts",
+          "owner": "INV-01",
+          "who": "INV-00",
+          "what": "First commit only: create the file with an empty Hebrew object and an empty English object (screenHe, screenEn) and compose it in messages/invoices/index.ts as the group screen. Never opened again by INV-00."
+        },
+        {
+          "file": "apps/web/lib/i18n/messages/invoices/list.ts",
+          "owner": "INV-02",
+          "who": "INV-00",
+          "what": "First commit only: create the file with an empty Hebrew and an empty English object (listHe, listEn) and compose it as the group list. Never opened again by INV-00."
+        },
+        {
+          "file": "apps/web/lib/i18n/messages/invoices/decide.ts",
+          "owner": "INV-05",
+          "who": "INV-00",
+          "what": "First commit only: create the file with an empty Hebrew and an empty English object (decideHe, decideEn) and compose it as the group decide. Never opened again by INV-00."
+        }
+      ],
+      "dependsOn": [],
+      "dependsOnOutside": []
+    },
+    {
+      "id": "INV-01",
+      "title": "The invoice screen: the document beside the data (reads only; the button still opens the desk)",
+      "wave": 1,
+      "startFrom": "main",
+      "mergeIn": ["claude/ds3-01-components", "claude/inv-00-server-reads"],
+      "base": "claude/ds3-01-components",
+      "branch": "claude/inv-01-invoice-screen",
+      "optional": false,
+      "gates": ["test-sentinel", "money-format-marshal", "rtl-design-steward", "icp-keeper"],
+      "owns": [
+        "apps/web/app/dashboard/invoices/[invoiceId]/**",
+        "apps/web/lib/components/invoice/**",
+        "apps/web/lib/i18n/messages/invoices/he.ts",
+        "apps/web/lib/i18n/messages/invoices/en.ts",
+        "apps/web/lib/i18n/messages/invoices/screen.ts",
+        "apps/web/e2e/W2-02.spec.ts",
+        "apps/web/e2e/INV-01.spec.ts",
+        "apps/web/e2e/INV-01-*.spec.ts",
+        "apps/web/e2e/INV-01/**",
+        "apps/web/e2e/__screenshots__/INV-01/**"
+      ],
+      "newFiles": [
+        "apps/web/lib/i18n/messages/invoices/screen.ts",
+        "apps/web/e2e/INV-01.spec.ts",
+        "apps/web/e2e/INV-01-*.spec.ts",
+        "apps/web/e2e/INV-01/**",
+        "apps/web/e2e/__screenshots__/INV-01/**"
+      ],
+      "reserved": [
+        "apps/web/app/dashboard/invoices/[invoiceId]/consolidated-panel.tsx",
+        "apps/web/app/dashboard/invoices/[invoiceId]/__tests__/consolidated-panel.test.ts",
+        "apps/web/app/dashboard/invoices/[invoiceId]/dock-price-notes.tsx",
+        "apps/web/app/dashboard/invoices/[invoiceId]/allocation-field.tsx",
+        "apps/web/app/dashboard/invoices/[invoiceId]/review-button.tsx",
+        "apps/web/app/dashboard/invoices/[invoiceId]/decide/**",
+        "apps/web/lib/components/invoice/pdf/**"
+      ],
+      "seams": [
+        {
+          "file": "apps/web/e2e/ia/screens.ts",
+          "owner": "shared",
+          "who": "INV-01",
+          "what": "The row invoice-owner-desk only (line 44, its allowance at line 71 on main@de5cfcf7): lower its numbers to what the new screen measures, never raise one, and leave its adopter."
+        },
+        {
+          "file": "apps/web/lib/copy/budget.allow.ts",
+          "owner": "shared",
+          "who": "INV-01",
+          "what": "Delete the lines invoices:correction.* (lines 79 to 97 on main@de5cfcf7) and invoices:status.clean (line 115) whose strings went. There is no invoices:cockpit.* line. Never add a line, never edit a header's count, never run copy:baseline."
+        }
+      ],
+      "dependsOn": ["INV-00"],
+      "dependsOnOutside": ["DS3-00 (pull request 346)", "DS3-01 (pull request 345); the session merges claude/ds3-01-components itself, and nobody merges main into that branch (WORKPLAN.md, S10)"]
+    },
+    {
+      "id": "INV-02",
+      "title": "The invoices list",
+      "wave": 2,
+      "startFrom": "main",
+      "mergeIn": ["claude/ds3-01-components", "claude/inv-00-server-reads"],
+      "base": "claude/ds3-01-components",
+      "branch": "claude/inv-02-invoices-list",
+      "optional": false,
+      "gates": ["test-sentinel", "money-format-marshal", "rtl-design-steward", "icp-keeper"],
+      "owns": [
+        "apps/web/app/dashboard/invoices/(register)/**",
+        "apps/web/app/dashboard/invoices/hold-reasons.ts",
+        "apps/web/app/dashboard/invoices/__tests__/hold-reasons.test.ts",
+        "apps/web/lib/i18n/messages/invoices/list.ts",
+        "apps/web/e2e/INV-02.spec.ts",
+        "apps/web/e2e/INV-02-*.spec.ts",
+        "apps/web/e2e/__screenshots__/INV-02/**"
+      ],
+      "newFiles": [
+        "apps/web/lib/i18n/messages/invoices/list.ts",
+        "apps/web/e2e/INV-02.spec.ts",
+        "apps/web/e2e/INV-02-*.spec.ts",
+        "apps/web/e2e/__screenshots__/INV-02/**"
+      ],
+      "reserved": [
+        "apps/web/lib/components/table/**",
+        "apps/web/lib/components/desk/**",
+        "apps/web/app/dashboard/close/**",
+        "apps/web/e2e/pilot-unread-invoices.spec.ts"
+      ],
+      "seams": [
+        {
+          "file": "apps/web/lib/i18n/messages/invoices/he.ts",
+          "owner": "INV-01",
+          "who": "INV-02",
+          "what": "The group register, and in the group needsLines every key except heldTitle, heldTitleReadOnly, supplierDetails and held.*: delete or change a string there. New strings go to messages/invoices/list.ts. Frozen, key and text: those four, the text of needsLines.reason.ocr_failed, the group state and the key cockpit.backToInvoice (the invoice screen draws them; pilot-unread-invoices.spec.ts and hold-reasons.test.ts pin their Hebrew)."
+        },
+        {
+          "file": "apps/web/lib/i18n/messages/invoices/en.ts",
+          "owner": "INV-01",
+          "who": "INV-02",
+          "what": "The same keys, in the same commit as the Hebrew file; the same keys are frozen."
+        },
+        {
+          "file": "apps/web/e2e/W2-02.spec.ts",
+          "owner": "INV-01",
+          "who": "INV-02",
+          "what": "Only the three tests whose title starts with \"register\" (lines 118, 223 and 316 on main@de5cfcf7). The helpers at lines 1 to 117, the inbox tests and the chef test are nobody's to change."
+        },
+        {
+          "file": "apps/web/lib/copy/screens.ts",
+          "owner": "shared",
+          "who": "INV-02",
+          "what": "One new row for the list (owner, 1440), measured, placed directly after the suppliers row (line 66 on main@de5cfcf7). The spec that reads it opens the current month (W2-16.spec.ts:105) and fails a screen that grew, so mark each place card as a record (data-record): the row's number must not depend on which places hold an invoice on the day of the run."
+        },
+        {
+          "file": "apps/web/e2e/ia/screens.ts",
+          "owner": "shared",
+          "who": "INV-02",
+          "what": "One new row for the list, which is two entries: a row in BASE directly after the inbox-bookkeeper-desk row (line 41 on main@de5cfcf7) and its entry in BASELINE_0711 directly after 'team-owner-desk' (line 77). The row: { id: 'invoices-owner-desk', route: '/dashboard/invoices', role: 'owner', vp: 'desk', type: 'queue', adopter: 'W2-02' }. apps/web/test/ia-density.test.ts:154 needs both entries. The adopter must match the pattern at ia-density.test.ts:147: 'W2-02', never 'INV-02'."
+        },
+        {
+          "file": "apps/web/lib/copy/budget.allow.ts",
+          "owner": "shared",
+          "who": "INV-02",
+          "what": "Delete invoices:needsLines.subtitle (line 114 on main@de5cfcf7) if its string went. The lines invoices:needsLines.held.* (98 to 113) stay: their strings are frozen. There is no invoices:register.* line. Never add a line, never edit a header's count, never run copy:baseline."
+        }
+      ],
+      "dependsOn": ["INV-00"],
+      "dependsOnOutside": ["DS3-00 (pull request 346)", "DS3-01 (pull request 345); the session merges claude/ds3-01-components itself, and nobody merges main into that branch (WORKPLAN.md, S10)"]
+    },
+    {
+      "id": "INV-03",
+      "title": "The pay run",
+      "wave": 2,
+      "startFrom": "main",
+      "mergeIn": ["claude/ds3-01-components", "claude/inv-00-server-reads"],
+      "base": "claude/ds3-01-components",
+      "branch": "claude/inv-03-pay-run",
+      "optional": false,
+      "gates": ["test-sentinel", "money-format-marshal", "rtl-design-steward", "icp-keeper"],
+      "owns": [
+        "apps/web/app/dashboard/approvals/pay-run/**",
+        "apps/web/app/dashboard/__tests__/payrun-dates.test.ts",
+        "apps/web/lib/i18n/messages/payRun/**",
+        "apps/web/e2e/W2-03.spec.ts",
+        "apps/web/e2e/INV-03.spec.ts",
+        "apps/web/e2e/INV-03-*.spec.ts",
+        "apps/web/e2e/__screenshots__/INV-03/**"
+      ],
+      "newFiles": [
+        "apps/web/e2e/INV-03.spec.ts",
+        "apps/web/e2e/INV-03-*.spec.ts",
+        "apps/web/e2e/__screenshots__/INV-03/**"
+      ],
+      "reserved": [
+        "packages/api/src/routers/payRun.ts",
+        "packages/api/src/payRun/**",
+        "packages/api/src/vat/**",
+        "apps/web/lib/components/palette/**"
+      ],
+      "seams": [
+        {
+          "file": "apps/web/lib/copy/screens.ts",
+          "owner": "shared",
+          "who": "INV-03",
+          "what": "The row pay-run only (line 68 on main@de5cfcf7): lower it to what the new screen measures."
+        },
+        {
+          "file": "apps/web/e2e/ia/screens.ts",
+          "owner": "shared",
+          "who": "INV-03",
+          "what": "The row pay-run-bookkeeper-desk only: lower, never raise."
+        },
+        {
+          "file": "apps/web/lib/copy/budget.allow.ts",
+          "owner": "shared",
+          "who": "INV-03",
+          "what": "Delete the payRun:* lines whose strings went (lines 118 to 122 on main@de5cfcf7). Never add a line."
+        }
+      ],
+      "dependsOn": ["INV-00"],
+      "dependsOnOutside": ["DS3-00 (pull request 346)", "DS3-01 (pull request 345); the session merges claude/ds3-01-components itself, and nobody merges main into that branch (WORKPLAN.md, S10)"]
+    },
+    {
+      "id": "INV-04",
+      "title": "Approvals by role, and the decision a second screen can mount",
+      "wave": 2,
+      "startFrom": "main",
+      "mergeIn": ["claude/ds3-04-approvals-desk", "claude/inv-00-server-reads"],
+      "base": "claude/ds3-04-approvals-desk",
+      "branch": "claude/inv-04-approvals-by-role",
+      "optional": false,
+      "gates": ["test-sentinel", "money-format-marshal", "rtl-design-steward", "icp-keeper"],
+      "owns": [
+        "apps/web/app/dashboard/approvals/**",
+        "apps/web/lib/components/desk/**",
+        "apps/web/app/dashboard/lab/desk/**",
+        "apps/web/lib/i18n/messages/approvals/**",
+        "apps/web/e2e/W2-04.spec.ts",
+        "apps/web/e2e/W1-07.spec.ts",
+        "apps/web/e2e/DS3-04.spec.ts",
+        "apps/web/e2e/INV-04.spec.ts",
+        "apps/web/e2e/INV-04-*.spec.ts",
+        "apps/web/e2e/__screenshots__/INV-04/**"
+      ],
+      "newFiles": [
+        "apps/web/e2e/DS3-04.spec.ts",
+        "apps/web/e2e/INV-04.spec.ts",
+        "apps/web/e2e/INV-04-*.spec.ts",
+        "apps/web/e2e/__screenshots__/INV-04/**"
+      ],
+      "reserved": [
+        "apps/web/app/dashboard/approvals/pay-run/**",
+        "packages/api/src/approvals/engine.ts",
+        "packages/api/src/lib/roles.ts",
+        "apps/web/app/dashboard/settings/**"
+      ],
+      "seams": [
+        {
+          "file": "apps/web/e2e/W1-05.spec.ts",
+          "owner": "shared",
+          "who": "INV-04",
+          "what": "Only the assertions that read the desk's head, groups or rows; each named in the pull request with why it keeps its meaning."
+        },
+        {
+          "file": "apps/web/e2e/demo-path.spec.ts",
+          "owner": "shared",
+          "who": "INV-04",
+          "what": "Only the assertions that read the desk's head, groups or rows."
+        },
+        {
+          "file": "apps/web/e2e/W1-04.spec.ts",
+          "owner": "shared",
+          "who": "INV-04",
+          "what": "Only the assertions that read the desk's head, groups or rows."
+        },
+        {
+          "file": "apps/web/e2e/pilot/pilot-journey.spec.ts",
+          "owner": "shared",
+          "who": "INV-04",
+          "what": "Only the assertions that read the desk's head, groups or rows."
+        },
+        {
+          "file": "apps/web/lib/copy/screens.ts",
+          "owner": "shared",
+          "who": "INV-04",
+          "what": "The rows approvals and manager-approvals only (lines 63 and 58 on main@de5cfcf7): lower, never raise."
+        },
+        {
+          "file": "apps/web/e2e/ia/screens.ts",
+          "owner": "shared",
+          "who": "INV-04",
+          "what": "The rows approvals-owner-desk and approvals-manager-phone only: lower, never raise."
+        },
+        {
+          "file": "apps/web/lib/copy/budget.allow.ts",
+          "owner": "shared",
+          "who": "INV-04",
+          "what": "Delete the approvals:* lines whose strings went (lines 124 to 133 on main@de5cfcf7). Never add a line."
+        }
+      ],
+      "dependsOn": ["INV-00"],
+      "dependsOnOutside": ["DS3-04 (pull request 347, finished at a6be4080); this package merges current main in its own branch as its slice 0 (WORKPLAN.md, S10)"]
+    },
+    {
+      "id": "INV-05",
+      "title": "Deciding from the invoice screen",
+      "wave": 3,
+      "startFrom": "main",
+      "mergeIn": ["claude/inv-04-approvals-by-role", "claude/inv-01-invoice-screen"],
+      "base": "claude/inv-04-approvals-by-role",
+      "branch": "claude/inv-05-decide-on-invoice",
+      "optional": false,
+      "gates": ["test-sentinel", "tenant-security-warden", "money-format-marshal", "rtl-design-steward", "icp-keeper"],
+      "owns": [
+        "apps/web/app/dashboard/invoices/[invoiceId]/decide/**",
+        "apps/web/lib/i18n/messages/invoices/decide.ts",
+        "apps/web/e2e/INV-05.spec.ts",
+        "apps/web/e2e/INV-05-*.spec.ts",
+        "apps/web/e2e/__screenshots__/INV-05/**"
+      ],
+      "newFiles": [
+        "apps/web/app/dashboard/invoices/[invoiceId]/decide/**",
+        "apps/web/lib/i18n/messages/invoices/decide.ts",
+        "apps/web/e2e/INV-05.spec.ts",
+        "apps/web/e2e/INV-05-*.spec.ts",
+        "apps/web/e2e/__screenshots__/INV-05/**"
+      ],
+      "reserved": [
+        "apps/web/app/dashboard/approvals/**",
+        "apps/web/lib/components/desk/**",
+        "packages/api/src/routers/**"
+      ],
+      "seams": [
+        {
+          "file": "apps/web/app/dashboard/invoices/[invoiceId]/gap-actions.tsx",
+          "owner": "INV-01",
+          "who": "INV-05",
+          "what": "One import and one branch, and no other file of the screen. The branch hands a mount to [invoiceId]/decide/ when the key is on and the slot and the gap are ones INV-05 draws: in the slots card, dock and dialog the decision in place of the button to the desk, for a gap the viewer may decide; in card the button to the next gap on a decided gap; in bar the button to the decision; in message the undo message and the pass-on sheet. What it needs from the screen arrives as the props INV-01 builds in wave 1 (gap, decided, slot with its five values card, dock, dialog, bar and message, features, screen); the viewer's role comes from useNavViewer(), read and never edited. The branch reads the switch-off key decideOnInvoice from the features prop: with the key absent, the button to the desk stays."
+        },
+        {
+          "file": "apps/web/e2e/W2-02.spec.ts",
+          "owner": "INV-01",
+          "who": "INV-05",
+          "what": "Only the assertions on cockpit-decide in the invoice-screen test INV-01 leaves. It starts at line 150 on main@de5cfcf7, and INV-01 rewrites it first."
+        },
+        {
+          "file": "apps/web/e2e/INV-01.spec.ts",
+          "owner": "INV-01",
+          "who": "INV-05",
+          "what": "Only the tests that expect the button to the desk, no decision control, or the copy numbers of the screen without the decision. Each runs with the restaurant's features.decideOnInvoice stored false (set with e2eSql() before it and put back after it, in this file), or is updated to the decision; each is named in the pull request. Nothing else in the file."
+        },
+        {
+          "file": "apps/web/e2e/ia/screens.ts",
+          "owner": "shared",
+          "who": "INV-05",
+          "what": "The row invoice-owner-desk: measured again once with the decision mounted; the pull request states the numbers before and after. IA-01 measures the newest invoice of the demo restaurant (e2e/IA-01.spec.ts:52): say in the pull request whether it carried an open gap the owner may decide; if not, leave the row as INV-01 set it and state the density with the decision from INV-05.spec.ts's own invoice."
+        },
+        {
+          "file": "packages/api/src/lib/features.ts",
+          "owner": "shared",
+          "who": "INV-05",
+          "what": "The switch-off key decideOnInvoice, on by default: the key in FEATURE_KEYS and in DEFAULT_ON_FEATURES, on its own line."
+        },
+        {
+          "file": "packages/db/scripts/pilot-setup.ts",
+          "owner": "shared",
+          "who": "INV-05",
+          "what": "The mirror of that key in PILOT_FEATURE_KEYS, on its own line (pinned equal by packages/db/scripts/__tests__/pilot-setup.test.ts:347-348). The file is outside web-feature-engineer's paths in AGENTS.md; the one key follows DS3-05's seam and is named in the pull request. Nothing else under packages/db."
+        }
+      ],
+      "dependsOn": ["INV-01", "INV-04"],
+      "dependsOnOutside": []
+    },
+    {
+      "id": "INV-06",
+      "title": "Optional: a PDF in the same viewer (opened only if the owner asks and a person can do the storage check)",
+      "wave": 3,
+      "startFrom": "main",
+      "mergeIn": ["claude/inv-01-invoice-screen"],
+      "base": "claude/inv-01-invoice-screen",
+      "branch": "claude/inv-06-pdf-viewer",
+      "optional": true,
+      "gates": ["test-sentinel", "tenant-security-warden", "rtl-design-steward", "icp-keeper"],
+      "owns": [
+        "apps/web/lib/components/invoice/pdf/**",
+        "apps/web/public/pdfjs/**",
+        "apps/web/e2e/INV-06.spec.ts",
+        "apps/web/e2e/INV-06/**",
+        "apps/web/e2e/__screenshots__/INV-06/**"
+      ],
+      "newFiles": [
+        "apps/web/lib/components/invoice/pdf/**",
+        "apps/web/public/pdfjs/**",
+        "apps/web/e2e/INV-06.spec.ts",
+        "apps/web/e2e/INV-06/**",
+        "apps/web/e2e/__screenshots__/INV-06/**"
+      ],
+      "reserved": [
+        "apps/web/lib/securityHeaders.ts",
+        "apps/web/lib/supabase/**"
+      ],
+      "seams": [
+        {
+          "file": "apps/web/package.json",
+          "owner": "shared",
+          "who": "INV-06",
+          "what": "One dependency line with an exact version."
+        },
+        {
+          "file": "pnpm-lock.yaml",
+          "owner": "shared",
+          "who": "INV-06",
+          "what": "The matching entries, in the same commit (CI installs with --frozen-lockfile)."
+        },
+        {
+          "file": "apps/web/lib/components/invoice/InvoiceScanViewer.tsx",
+          "owner": "INV-01",
+          "who": "INV-06",
+          "what": "One lazy mount of the PDF stage for a PDF file; the sandboxed frame stays as the fallback at run time."
+        }
+      ],
+      "dependsOn": ["INV-01"],
+      "dependsOnOutside": ["The owner's word", "A person for the check against real storage"]
+    }
+  ],
+  "nobody": [
+    "packages/api/src/routers/payRun.ts",
+    "packages/api/src/payRun/**",
+    "packages/api/src/invoices/state.ts",
+    "packages/api/src/lib/roles.ts",
+    "packages/api/src/lib/claims.ts",
+    "packages/api/src/lib/dueDate.ts",
+    "packages/api/src/lib/features.ts",
+    "packages/api/src/approvals/**",
+    "packages/api/src/match/**",
+    "packages/api/src/vat/**",
+    "packages/api/src/lifecycle/**",
+    "packages/api/src/__tests__/fixtures.ts",
+    "packages/api/src/__tests__/approvals-queue-fields.test.ts",
+    "packages/api/src/index.ts",
+    "packages/db/**",
+    "packages/ocr/**",
+    "packages/charts/**",
+    "apps/worker/**",
+    "apps/web/package.json",
+    "pnpm-lock.yaml",
+    "apps/web/lib/supabase/**",
+    "apps/web/lib/securityHeaders.ts",
+    "apps/web/lib/prefs/**",
+    "apps/web/lib/nav/**",
+    "apps/web/lib/hotkeys.ts",
+    "apps/web/lib/roles.ts",
+    "apps/web/lib/copy/**",
+    "apps/web/lib/i18n/messages/index.ts",
+    "apps/web/e2e/ia/**",
+    "apps/web/e2e/helpers/**",
+    "apps/web/e2e/helpers.ts",
+    "apps/web/e2e/prepare-db.ts",
+    "apps/web/e2e/seededMonth.ts",
+    "apps/web/e2e/run-sharded.mjs",
+    "apps/web/playwright.config.ts",
+    "apps/web/e2e/auth.setup.ts",
+    "apps/web/e2e/env.ts",
+    "apps/web/e2e/a11y.spec.ts",
+    "apps/web/e2e/smoke.spec.ts",
+    "apps/web/e2e/i18n-sweep.spec.ts",
+    "apps/web/e2e/invariants/**",
+    "apps/web/e2e/W2-16.spec.ts",
+    "apps/web/e2e/IA-01.spec.ts",
+    "apps/web/test/**",
+    "apps/web/e2e/pilot-unread-invoices.spec.ts",
+    "apps/web/e2e/__screenshots__/W2-02/**",
+    "apps/web/e2e/__screenshots__/DS3-04/**",
+    "apps/web/app/dashboard/invoices/[invoiceId]/consolidated-panel.tsx",
+    "apps/web/app/dashboard/invoices/[invoiceId]/__tests__/consolidated-panel.test.ts",
+    "apps/web/app/dashboard/invoices/[invoiceId]/dock-price-notes.tsx",
+    "apps/web/app/dashboard/invoices/[invoiceId]/allocation-field.tsx",
+    "apps/web/app/dashboard/invoices/[invoiceId]/review-button.tsx",
+    "apps/web/app/dashboard/settings/**",
+    "apps/web/app/dashboard/inbox/**",
+    "apps/web/app/scans/**"
+  ],
+  "immutable": [
+    "packages/matching/**",
+    "packages/types/src/number-input.ts",
+    "packages/types/src/money/**",
+    "packages/api/src/reports/bidi.ts",
+    "packages/api/src/reports/money.ts",
+    "apps/web/lib/money.ts",
+    "packages/db/drizzle/**",
+    "packages/db/drizzle.config.ts",
+    "packages/db/src/schema.ts",
+    "packages/db/src/rls.ts",
+    "packages/db/src/plans.ts",
+    "packages/billing/**",
+    "packages/api/src/__tests__/cross-tenant.attack.test.ts",
+    "packages/api/src/__tests__/rls.attack.test.ts",
+    "packages/api/src/approvals/engine.ts",
+    "packages/charts/src/leak-views.ts",
+    "packages/api/src/notifications/outbox.ts",
+    "apps/worker/src/cron.ts",
+    "packages/api/src/routers/leads.ts",
+    "apps/web/app/api/trpc/[trpc]/route.ts",
+    "apps/web/lib/rateLimit.ts",
+    ".github/workflows/**",
+    ".claude/agents/**",
+    "AGENTS.md",
+    "OPERATING.md"
+  ]
+}

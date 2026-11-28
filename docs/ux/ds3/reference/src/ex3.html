@@ -1,0 +1,54 @@
+<div class="phones">
+  <!-- phone 1 · live: the count is the first screen -->
+  <figure class="ph-fig">
+    <div class="rm phone" dir="rtl" lang="he" data-font="gsans" data-mock="count" id="ph-live">
+      <div class="ph-top">
+        <span class="ph-back" aria-hidden="true"><svg class="i"><use href="#i-prev"/></svg></span>
+        <div class="ph-title"><b role="heading" aria-level="4">ירקות השרון</b><span>בדיקת משלוח, 11 פריטים</span></div>
+        <span class="ph-lang"><span class="sr">שפת המסך: </span><svg class="i"><use href="#i-globe"/></svg>עברית</span>
+      </div>
+      <div class="ph-prog">
+        <div class="bar" aria-hidden="true"><i id="ph-bar"></i></div>
+        <div class="tx"><b id="ph-count"></b><span class="sp"></span><span class="ph-off"><svg class="i"><use href="#i-offline"/></svg>אין חיבור, נשמר בטלפון</span></div>
+      </div>
+      <div class="ph-list" id="ph-list"></div>
+      <div class="ph-barwrap">
+        <div class="ph-meta">
+          <span class="ph-status" id="ph-status" role="status"></span>
+          <button class="ph-undo" id="ph-undo" data-p="undo-bulk" hidden>ביטול</button>
+          <button class="ph-cam" id="ph-cam"></button>
+        </div>
+        <div class="ph-bar"><button class="ph-main" id="ph-main"></button></div>
+      </div>
+      <div id="ph-over"></div>
+    </div>
+    <figcaption>אפשר לנסות: לסמן שורות, לשנות כמות, לצלם ולסגור</figcaption>
+  </figure>
+
+  <!-- phone 2 · state at rest: typing a quantity (the sheet is drawn by the same function as the live phone) -->
+  <figure class="ph-fig">
+    <div class="rm phone" dir="rtl" lang="he" data-font="gsans" role="img" aria-label="מסך שינוי כמות לתפוחי אדמה: הוזמן 28.5 ק״ג, הוקלד 24. מקלדת ספרות גדולה, שלושה קיצורים (חסר, פגום, כמו בהזמנה), הערה שהכמות שונה ב־16% מההזמנה, וכפתור שכתוב עליו אישור: 24 ק״ג."><div class="ph-inert" inert>
+      <div class="ph-top">
+        <span class="ph-back" aria-hidden="true"><svg class="i"><use href="#i-prev"/></svg></span>
+        <div class="ph-title"><b>ירקות השרון</b><span>בדיקת משלוח, 11 פריטים</span></div>
+        <span class="ph-lang"><svg class="i"><use href="#i-globe"/></svg>עברית</span>
+      </div>
+      <div class="ph-prog"><div class="bar"><i style="width:27%"></i></div><div class="tx"><b>3 מתוך 11 סומנו</b></div></div>
+      <div class="ph-list">
+        <div class="ln is-ok"><span class="ln-ck"><svg class="i"><use href="#i-check"/></svg></span><div><div class="nm">עגבניות שרי</div></div><span class="ln-q"><b>6.5</b><small>ק״ג</small></span></div>
+        <div class="ln is-ok"><span class="ln-ck"><svg class="i"><use href="#i-check"/></svg></span><div><div class="nm">מלפפונים</div></div><span class="ln-q"><b>15</b><small>ק״ג</small></span></div>
+        <div class="ln is-ok"><span class="ln-ck"><svg class="i"><use href="#i-check"/></svg></span><div><div class="nm">לימונים</div></div><span class="ln-q"><b>8</b><small>ק״ג</small></span></div>
+      </div>
+      <div id="ph-static-sheet"></div>
+    </div></div>
+    <figcaption>כמות אחרת: מקלידים במקלדת גדולה, והכפתור אומר מה מאשרים</figcaption>
+  </figure>
+
+  <!-- phone 3 · state at rest: closed on the phone, the document is read later -->
+  <figure class="ph-fig">
+    <div class="rm phone" dir="rtl" lang="he" data-font="gsans" role="img" aria-label="מסך הסיום: קבלת הסחורה נסגרה, 11 פריטים ופער אחד (תפוחי אדמה, הגיע 24 מתוך 28.5 ק״ג). המסמך צולם ונקרא ברקע, הנתונים נשמרו במערכת, והמשלוח הבא הוא קצביית הכרם ב־12:30."><div class="ph-inert" inert>
+      <div class="ph-done" id="ph-static-done"></div>
+    </div></div>
+    <figcaption>סיום: בלי לחכות לקריאת המסמך, ישר למשלוח הבא</figcaption>
+  </figure>
+</div>

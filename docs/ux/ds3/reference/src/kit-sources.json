@@ -1,0 +1,170 @@
+{
+ "buttons-and-keys": [
+  {
+   "name": "IBM Carbon, כפתורים",
+   "url": "https://raw.githubusercontent.com/carbon-design-system/carbon-website/main/src/pages/components/button/usage.mdx",
+   "prov": "נקרא במקור"
+  },
+  {
+   "name": "GOV.UK, כפתורים",
+   "url": "https://raw.githubusercontent.com/alphagov/govuk-design-system/main/src/components/button/index.md",
+   "prov": "נקרא במקור"
+  }
+ ],
+ "money": [
+  {
+   "name": "Razorpay Blade, רכיב סכום",
+   "url": "https://raw.githubusercontent.com/razorpay/blade/master/packages/blade/src/components/Amount/Amount.tsx",
+   "prov": "נקרא במקור"
+  },
+  {
+   "name": "Unicode CLDR, עברית",
+   "url": "https://raw.githubusercontent.com/unicode-org/cldr-json/main/cldr-json/cldr-numbers-full/main/he/numbers.json",
+   "prov": "נקרא במקור"
+  }
+ ],
+ "delta": [
+  {
+   "name": "Shopify Polaris Viz, סימון מגמה",
+   "url": "https://raw.githubusercontent.com/Shopify/polaris-viz/main/packages/polaris-viz/src/components/TrendIndicator/TrendIndicator.tsx",
+   "prov": "נקרא במקור"
+  },
+  {
+   "name": "Metabase, גרף מגמה",
+   "url": "https://raw.githubusercontent.com/metabase/metabase/master/docs/questions/visualizations/trend.md",
+   "prov": "נקרא במקור"
+  }
+ ],
+ "status": [
+  {
+   "name": "IBM Carbon, סימוני סטטוס",
+   "url": "https://raw.githubusercontent.com/carbon-design-system/carbon-website/main/src/pages/patterns/status-indicator-pattern/index.mdx",
+   "prov": "נקרא במקור"
+  },
+  {
+   "name": "GOV.UK, תגית",
+   "url": "https://raw.githubusercontent.com/alphagov/govuk-design-system/main/src/components/tag/index.md",
+   "prov": "נקרא במקור"
+  }
+ ],
+ "match-strip": [
+  {
+   "name": "Microsoft Dynamics 365, התאמת חשבוניות",
+   "url": "https://raw.githubusercontent.com/MicrosoftDocs/dynamics-365-unified-operations-public/main/articles/finance/accounts-payable/accounts-payable-invoice-matching.md",
+   "prov": "נקרא במקור"
+  },
+  {
+   "name": "Microsoft Dynamics 365, התאמה משולשת",
+   "url": "https://raw.githubusercontent.com/MicrosoftDocs/dynamics-365-unified-operations-public/main/articles/finance/accounts-payable/three-way-matching-policies.md",
+   "prov": "נקרא במקור"
+  }
+ ],
+ "tabs-and-filters": [
+  {
+   "name": "Shopify Polaris, מסנני רשימה",
+   "url": "https://raw.githubusercontent.com/Shopify/polaris/main/polaris.shopify.com/content/components/selection-and-input/index-filters.mdx",
+   "prov": "נקרא במקור"
+  },
+  {
+   "name": "GitHub Projects, תצוגות",
+   "url": "https://raw.githubusercontent.com/github/docs/main/content/issues/planning-and-tracking-with-projects/customizing-views-in-your-project/managing-your-views.md",
+   "prov": "נקרא במקור"
+  }
+ ],
+ "register-table": [
+  {
+   "name": "IBM Carbon, טבלת נתונים",
+   "url": "https://raw.githubusercontent.com/carbon-design-system/carbon-website/main/src/pages/components/data-table/style.mdx",
+   "prov": "נקרא במקור"
+  },
+  {
+   "name": "Ant Design, טבלה",
+   "url": "https://raw.githubusercontent.com/ant-design/ant-design/master/components/table/index.en-US.md",
+   "prov": "נקרא במקור"
+  }
+ ],
+ "toast-undo": [
+  {
+   "name": "Radix, הודעה צפה",
+   "url": "https://raw.githubusercontent.com/radix-ui/website/main/data/primitives/docs/components/toast.mdx",
+   "prov": "נקרא במקור"
+  },
+  {
+   "name": "Apple, התראות",
+   "url": "https://developer.apple.com/design/human-interface-guidelines/alerts",
+   "prov": "נקרא במקור"
+  }
+ ],
+ "command-palette": [
+  {
+   "name": "GitHub, לוח פקודות",
+   "url": "https://raw.githubusercontent.com/github/docs/main/content/get-started/accessibility/github-command-palette.md",
+   "prov": "נקרא במקור"
+  },
+  {
+   "name": "cmdk",
+   "url": "https://raw.githubusercontent.com/pacocoursey/cmdk/main/README.md",
+   "prov": "נקרא במקור"
+  }
+ ],
+ "explain": [
+  {
+   "name": "Microsoft Dynamics 365, שדה מול המסמך",
+   "url": "https://raw.githubusercontent.com/MicrosoftDocs/dynamics-365-unified-operations-public/main/articles/finance/accounts-payable/invoice-capture-workspace.md",
+   "prov": "נקרא במקור"
+  },
+  {
+   "name": "IBM Carbon, הסבר לתוצאה",
+   "url": "https://raw.githubusercontent.com/carbon-design-system/carbon-website/main/src/pages/components/ai-label/usage.mdx",
+   "prov": "נקרא במקור"
+  }
+ ],
+ "states": [
+  {
+   "name": "GitHub Primer, טעינה",
+   "url": "https://raw.githubusercontent.com/primer/design/main/content/ui-patterns/loading.mdx",
+   "prov": "נקרא במקור"
+  },
+  {
+   "name": "IBM Carbon, מצבים ריקים",
+   "url": "https://raw.githubusercontent.com/carbon-design-system/carbon-website/main/src/pages/patterns/empty-states-pattern/index.mdx",
+   "prov": "נקרא במקור"
+  }
+ ],
+ "answer-from-data": [
+  {
+   "name": "Vercel AI Elements, ציטוט מקור",
+   "url": "https://raw.githubusercontent.com/vercel/ai-elements/main/packages/elements/src/inline-citation.tsx",
+   "prov": "נקרא במקור"
+  },
+  {
+   "name": "Apple, בינה יוצרת",
+   "url": "https://developer.apple.com/design/human-interface-guidelines/generative-ai",
+   "prov": "נקרא במקור"
+  }
+ ],
+ "charts": [
+  {
+   "name": "Tremor, רשימת פסים",
+   "url": "https://raw.githubusercontent.com/tremorlabs/tremor/main/src/components/BarList/BarList.tsx",
+   "prov": "נקרא במקור"
+  },
+  {
+   "name": "Financial Times, מילון חזותי",
+   "url": "https://raw.githubusercontent.com/Financial-Times/chart-doctor/main/visual-vocabulary/README.md",
+   "prov": "נקרא במקור"
+  }
+ ],
+ "status-rail": [
+  {
+   "name": "Razorpay Blade, רצף צעדים",
+   "url": "https://raw.githubusercontent.com/razorpay/blade/master/packages/blade/src/components/StepGroup/_decisions/decisions.md",
+   "prov": "נקרא במקור"
+  },
+  {
+   "name": "Salesforce Lightning, מסלול",
+   "url": "https://raw.githubusercontent.com/salesforce-ux/design-system/main/ui/components/path/docs.mdx",
+   "prov": "נקרא במקור"
+  }
+ ]
+}
