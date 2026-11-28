@@ -399,6 +399,15 @@ describe('caught before payment = detection or decision precedes paid_at [G-14]'
     const [sup] = (await db.execute(sql`SELECT supplier_id FROM invoices WHERE id = ${a.invoiceId}`)) as unknown as Array<{
       supplier_id: string;
     }>;
+    // Drop afterwards only the tables this test created: G-03 ships payment_deductions (and H-03
+    // the payment ledger); dropping a real table here breaks every later suite on this DB.
+    const hadTable = async (t: string) =>
+      ((await db.execute(sql`select to_regclass(${`public.${t}`}) is not null as e`)) as unknown as Array<{ e: boolean }>)[0]!.e;
+    const had = {
+      payments: await hadTable('payments'),
+      payment_invoices: await hadTable('payment_invoices'),
+      payment_deductions: await hadTable('payment_deductions'),
+    };
     await db.execute(sql`CREATE TABLE IF NOT EXISTS payments (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(), restaurant_id uuid NOT NULL, supplier_id uuid NOT NULL,
       paid_on date NOT NULL, amount_agorot bigint NOT NULL)`);
@@ -435,9 +444,13 @@ describe('caught before payment = detection or decision precedes paid_at [G-14]'
       expect(by[c.invoiceId]).toMatchObject({ invoicePaid: false, paidAt: null });
       expect(by[e.invoiceId]).toMatchObject({ invoicePaid: true, paidAt: '2026-10-13T21:00:00.000Z' });
     } finally {
-      await db.execute(sql`DROP TABLE IF EXISTS payment_deductions`);
-      await db.execute(sql`DROP TABLE IF EXISTS payment_invoices`);
-      await db.execute(sql`DROP TABLE IF EXISTS payments`);
+      // A real table keeps its schema; only this test's rows go (its invoice FKs are NO ACTION).
+      if (had.payment_deductions) await db.execute(sql`DELETE FROM payment_deductions WHERE restaurant_id = ${rid}`);
+      else await db.execute(sql`DROP TABLE IF EXISTS payment_deductions`);
+      if (had.payment_invoices) await db.execute(sql`DELETE FROM payment_invoices WHERE restaurant_id = ${rid}`);
+      else await db.execute(sql`DROP TABLE IF EXISTS payment_invoices`);
+      if (had.payments) await db.execute(sql`DELETE FROM payments WHERE restaurant_id = ${rid}`);
+      else await db.execute(sql`DROP TABLE IF EXISTS payments`);
     }
   });
 
@@ -458,6 +471,14 @@ describe('caught before payment = detection or decision precedes paid_at [G-14]'
   it('reads invoices.paid_at and discrepancies.basis once H-03 / G-03 add them (same SQL)', async () => {
     const { rid, invoice } = await setup();
     const { invoiceId, ids } = await invoice({ inclVat: '1000.00', d: [{ type: 'PRICE_HIGHER', delta: '10.00' }] });
+    // Drop afterwards only what this test added: once G-03 (basis) / H-03 (paid_at) ship the
+    // columns, dropping them here would break every later test that writes them.
+    const hasCol = async (table: string, column: string) =>
+      ((await db.execute(
+        sql`select 1 from information_schema.columns where table_schema = 'public' and table_name = ${table} and column_name = ${column}`,
+      )) as unknown as unknown[]).length > 0;
+    const hadPaidAt = await hasCol('invoices', 'paid_at');
+    const hadBasis = await hasCol('discrepancies', 'basis');
     await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS paid_at timestamptz`);
     await db.execute(sql`ALTER TABLE discrepancies ADD COLUMN IF NOT EXISTS basis jsonb`);
     try {
@@ -470,8 +491,8 @@ describe('caught before payment = detection or decision precedes paid_at [G-14]'
       expect(row).toMatchObject({ invoicePaid: true, paidAt: '2026-10-09T08:00:00.000Z', caughtBeforePayment: false, paidSource: 'paid_at' });
       expect(row!.basis).toEqual({ source: 'po', qtyUsed: 2, unitPriceUsed: 5 });
     } finally {
-      await db.execute(sql`ALTER TABLE invoices DROP COLUMN IF EXISTS paid_at`);
-      await db.execute(sql`ALTER TABLE discrepancies DROP COLUMN IF EXISTS basis`);
+      if (!hadPaidAt) await db.execute(sql`ALTER TABLE invoices DROP COLUMN IF EXISTS paid_at`);
+      if (!hadBasis) await db.execute(sql`ALTER TABLE discrepancies DROP COLUMN IF EXISTS basis`);
     }
   });
 

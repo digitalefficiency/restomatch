@@ -194,9 +194,14 @@ export async function runCutoverChecks(
 
     // 8. audit_log immutability trigger (rls/0003).
     const trg = (await sql`
-      select 1 from pg_trigger where tgname = 'audit_log_no_update_delete' and not tgisinternal
-    `) as unknown as unknown[];
-    push('audit_log_immutable', trg.length === 1, trg.length === 1 ? 'trigger present' : 'trigger missing (rls/0003)');
+      select tgenabled::text as st from pg_trigger where tgname = 'audit_log_no_update_delete' and not tgisinternal
+    `) as unknown as Array<{ st: string }>;
+    const trgOn = trg.length === 1 && trg[0]!.st === 'O';
+    push(
+      'audit_log_immutable',
+      trgOn,
+      trgOn ? 'trigger present and enabled' : trg.length === 1 ? `trigger not enabled (tgenabled=${trg[0]!.st}; must be O)` : 'trigger missing (rls/0003)',
+    );
 
     // 9/10. Supabase storage: bucket private + object policies (skipped on vanilla PG).
     const storage = (await sql`

@@ -1,4 +1,7 @@
 import {
+  claimLetters,
+  idempotencyKeys,
+  paymentDeductions,
   activityEvents,
   approvalRules,
   auditLog,
@@ -88,9 +91,14 @@ export async function resetDb(db: Database): Promise<void> {
   await db.delete(procurementConnections);
   await db.delete(emailInboxes);
   await db.delete(supplierIntegrations);
+  // 0071 (G-03): deductions block invoice deletes and letters block supplier deletes
+  // (NO ACTION) — clear them before claims, invoices and suppliers.
+  await db.delete(paymentDeductions);
+  await db.delete(idempotencyKeys);
   // Wave 1 (S12): claims block discrepancy deletes (0048, NO ACTION) — clear them first.
   await db.delete(recoveryEvents);
   await db.delete(recoveryClaims);
+  await db.delete(claimLetters);
   await db.delete(creditNotes);
   await db.delete(monthlyReports);
   await db.delete(discrepancies);

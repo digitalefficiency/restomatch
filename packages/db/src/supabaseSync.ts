@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { migrationHash, migrationsDir, readJournal, REQUIRED_EXTENSIONS } from './migrations';
 import { rlsAppRoleGrantsSql } from './rls';
+import { splitSqlStatements, stripSqlComments } from './sqlStatements';
 
 /**
  * Drizzle → Supabase migrations (`pnpm db:supabase-sync`).
@@ -108,14 +109,319 @@ where not exists (select 1 from drizzle.__drizzle_migrations where created_at = 
 
 const STORAGE_ALTER = 'alter table storage.objects enable row level security;';
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * Lock-safe RLS file (wave 2, G-03 review round 4).
+ *
+ * The RLS file re-applies rls/0002 + rls/0003 + rls/0001 on every schema change.
+ * Run verbatim, it takes ACCESS EXCLUSIVE table by table with blocking waits
+ * (ENABLE RLS, DROP/CREATE POLICY, DROP/CREATE TRIGGER), which deadlocks with a
+ * live startReceipt (goods_receipts, then purchase_orders FOR UPDATE) and queues
+ * every read behind it, even when production already holds exactly these policies.
+ * So the generator rewrites each lock-taking statement into a PLANNED item:
+ *   1. plan    every item is checked first, with no strong lock: RLS already on?
+ *              policy / trigger already identical? (identity = the same CREATE run
+ *              against a temp LIKE-clone of the table inside a rolled-back
+ *              subtransaction, deparsed definitions compared);
+ *   2. lock    the tables of the items still needed are locked all-or-nothing with
+ *              NOWAIT in a retry loop, bounded by statement_timeout = 6s (the
+ *              file never waits while holding a lock: no deadlock, no queue);
+ *   3. run     each planned item runs in its original place (pg_temp.rm_run).
+ * On a provisioned database nothing is planned, so no ACCESS EXCLUSIVE is taken.
+ * The source files (rls/*.sql, immutable) are not edited: a statement the rewrite
+ * does not recognise makes the generator throw instead of guessing.
+ * storage.objects (Supabase-owned; the migration role may lack LOCK rights) is
+ * guarded the same way but left out of the up-front lock set. When a storage item is
+ * planned, the storage block tries storage.objects with NOWAIT (a few short retries)
+ * BEFORE touching it; busy, not lockable, or any lock_not_available inside it → a
+ * WARNING and the storage part is skipped. So storage contention can neither make the
+ * file wait while it holds the tenant locks nor roll back the tenant repair.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+interface RlsPlanItem {
+  seq: number;
+  kind: 'rls' | 'policy' | 'drop_policy' | 'trigger' | 'superseded';
+  schema: string;
+  table: string;
+  name: string;
+  probe: string;
+  run: string;
+  lock: boolean;
+}
+
+const LOCK_TAKING = /^(alter\s+table|create\s+policy|drop\s+policy|alter\s+policy|create\s+trigger|drop\s+trigger|lock\s+table|create\s+index|drop\s+table|truncate)\b/i;
+const LOCK_TAKING_INSIDE = /\b(alter\s+table|create\s+policy|drop\s+policy|alter\s+policy|create\s+trigger|drop\s+trigger|lock\s+table)\b/i;
+const IDENT = /^[a-z_][a-z0-9_]*$/;
+const DQ = '$rm$';
+
+function lit(text: string): string {
+  if (text.includes(DQ)) throw new Error(`RLS rewrite: statement contains ${DQ}`);
+  return `${DQ}${text}${DQ}`;
+}
+const flat = (x: string) => stripSqlComments(x).replace(/\s+/g, ' ').trim();
+const ident = (x: string) => {
+  if (!IDENT.test(x)) throw new Error(`RLS rewrite: unexpected identifier ${x}`);
+  return x;
+};
+
+/** rls/0002's per-table tenant loop, exactly (whitespace- and comment-insensitive). */
+const TENANT_LOOP =
+  /^do \$\$ declare t text; begin foreach t in array array\[(.+?)\] loop if exists \( select 1 from information_schema\.columns where table_schema = 'public' and table_name = t and column_name = 'restaurant_id' \) then execute format\('alter table %I enable row level security;', t\); execute format\('drop policy if exists %I on %I;', t \|\| '_tenant', t\); execute format\( 'create policy %I on %I using \(restaurant_id = app\.current_restaurant_id\(\)\);', t \|\| '_tenant', t \); else raise exception 'RLS: table % is listed but has no restaurant_id column', t; end if; end loop; end \$\$;$/;
+
+class RlsRewriter {
+  items: RlsPlanItem[] = [];
+  private seq = 0;
+
+  private add(item: Omit<RlsPlanItem, 'seq'>): string {
+    const seq = ++this.seq;
+    this.items.push({ ...item, seq });
+    return `select pg_temp.rm_run(${seq});`;
+  }
+
+  private policy(schema: string, table: string, name: string, drop: string, create: string, lock: boolean): string {
+    const probe = create.replace(
+      /^(create\s+policy\s+\S+\s+on\s+)(\S+)/i,
+      (_m, head: string) => `${head}pg_temp.${table}`,
+    );
+    if (probe === create) throw new Error(`RLS rewrite: cannot retarget ${name}`);
+    return this.add({ kind: 'policy', schema, table, name, probe, run: `${drop}\n${create}`, lock });
+  }
+
+  /** Rewrite one SQL text (a sequence of top-level statements). */
+  rewrite(text: string, opts: { lock: boolean; label: string }): string[] {
+    const stmts = splitSqlStatements(text);
+    const out: string[] = [];
+    for (let i = 0; i < stmts.length; i++) {
+      const raw = stmts[i]!;
+      const code = stripSqlComments(raw).trim();
+      const f = flat(raw);
+      const next = i + 1 < stmts.length ? flat(stmts[i + 1]!) : '';
+      let m: RegExpMatchArray | null;
+      if ((m = f.match(/^alter table (?:(\w+)\.)?(\w+) enable row level security;$/i))) {
+        const schema = ident(m[1] ?? 'public');
+        const table = ident(m[2]!);
+        out.push(this.add({ kind: 'rls', schema, table, name: '', probe: '', run: code, lock: opts.lock }));
+      } else if ((m = f.match(/^drop policy if exists (\w+) on (?:(\w+)\.)?(\w+);$/i))) {
+        const [, name, sch, table] = m;
+        const schema = ident(sch ?? 'public');
+        const c = next.match(/^create policy (\w+) on (?:(\w+)\.)?(\w+)\b/i);
+        if (c && c[1] === name && (c[2] ?? 'public') === schema && c[3] === table) {
+          out.push(this.policy(schema, ident(table!), ident(name!), code, stripSqlComments(stmts[i + 1]!).trim(), opts.lock));
+          i++;
+        } else {
+          out.push(this.add({ kind: 'drop_policy', schema, table: ident(table!), name: ident(name!), probe: '', run: code, lock: opts.lock }));
+        }
+      } else if ((m = f.match(/^drop trigger if exists (\w+) on (?:(\w+)\.)?(\w+);$/i))) {
+        const [, name, sch, table] = m;
+        const schema = ident(sch ?? 'public');
+        const c = next.match(/^create trigger (\w+) .*? on (?:(\w+)\.)?(\w+) /i);
+        if (!c || c[1] !== name || c[3] !== table) throw new Error(`RLS rewrite (${opts.label}): drop trigger ${name} without its create`);
+        const create = stripSqlComments(stmts[i + 1]!).trim();
+        const probe = create.replace(new RegExp(`(\\son\\s+)(?:${schema}\\.)?${table}\\b`, 'i'), `$1pg_temp.${table}`);
+        if (probe === create) throw new Error(`RLS rewrite: cannot retarget trigger ${name}`);
+        out.push(this.add({ kind: 'trigger', schema, table: ident(table!), name: ident(name!), probe, run: `${code}\n${create}`, lock: opts.lock }));
+        i++;
+      } else if ((m = f.match(TENANT_LOOP))) {
+        const tables = [...m[1]!.matchAll(/'([^']+)'/g)].map((x) => ident(x[1]!));
+        if (!tables.length) throw new Error('RLS rewrite: empty tenant table list');
+        out.push(`-- rls/0002's tenant loop, one planned item per table (same check, same policy).
+do $$
+declare t text;
+begin
+  foreach t in array array[${tables.map((t) => `'${t}'`).join(', ')}] loop
+    if not exists (
+      select 1 from information_schema.columns
+      where table_schema = 'public' and table_name = t and column_name = 'restaurant_id'
+    ) then
+      raise exception 'RLS: table % is listed but has no restaurant_id column', t;
+    end if;
+  end loop;
+end $$;`);
+        for (const t of tables) {
+          out.push(this.add({ kind: 'rls', schema: 'public', table: t, name: '', probe: '', run: `alter table ${t} enable row level security;`, lock: opts.lock }));
+          out.push(
+            this.policy(
+              'public',
+              t,
+              `${t}_tenant`,
+              `drop policy if exists ${t}_tenant on ${t};`,
+              `create policy ${t}_tenant on ${t} using (restaurant_id = app.current_restaurant_id());`,
+              opts.lock,
+            ),
+          );
+        }
+      } else if (LOCK_TAKING.test(f)) {
+        throw new Error(`RLS rewrite (${opts.label}): unrecognised lock-taking statement: ${f.slice(0, 80)} — update supabaseSync.ts`);
+      } else if (/^do\b/i.test(f) && LOCK_TAKING_INSIDE.test(f)) {
+        throw new Error(`RLS rewrite (${opts.label}): a DO block takes table locks: ${f.slice(0, 80)} — update supabaseSync.ts`);
+      } else {
+        out.push(raw.trim());
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Net effect: a CREATE POLICY that a later item drops again (rls/0002's loop makes
+   * audit_log_tenant, rls/0003 drops it) is superseded: the end state is "absent",
+   * which the later drop item already plans. Otherwise it would be planned on every
+   * apply (the policy is never there) and lock audit_log for nothing.
+   */
+  private supersede(): void {
+    const key = (it: RlsPlanItem) => `${it.schema}.${it.table}.${it.name}`;
+    this.items.forEach((it, i) => {
+      if (it.kind !== 'policy') return;
+      for (const later of this.items.slice(i + 1)) {
+        if (key(later) !== key(it)) continue;
+        if (later.kind === 'drop_policy') it.kind = 'superseded';
+        break; // a later create of the same policy keeps this one meaningful
+      }
+    });
+  }
+
+  /** `select pg_temp.rm_plan(…);` for every item (storage items only when storage exists). */
+  planSql(): string {
+    this.supersede();
+    return this.items
+      .map((it) => {
+        const call = `select pg_temp.rm_plan(${it.seq}, '${it.kind}', '${it.schema}', '${it.table}', '${it.name}', ${it.probe ? lit(it.probe) : 'null'}, ${lit(it.run)}, ${it.lock})`;
+        return it.schema === 'storage' ? `${call} where to_regclass('storage.objects') is not null;` : `${call};`;
+      })
+      .join('\n');
+  }
+}
+
+/** pg_temp helpers (session-local; dropped at the end of the file). */
+const RLS_HELPERS = `create temp table if not exists rm_todo (seq int primary key, sch text not null, tbl text not null, run text not null, take_lock boolean not null);
+delete from pg_temp.rm_todo;
+
+-- Comparable signature of a policy: command, permissive, roles, deparsed USING / WITH CHECK.
+create or replace function pg_temp.rm_policy_sig(p_rel regclass, p_name text) returns text
+language sql stable as $f$
+  select concat_ws(' | ', polcmd::text, polpermissive::text,
+           (select string_agg(r::text, ',' order by r) from unnest(polroles) r),
+           coalesce(pg_get_expr(polqual, polrelid), ''), coalesce(pg_get_expr(polwithcheck, polrelid), ''))
+  from pg_policy where polrelid = p_rel and polname = p_name
+$f$;
+
+-- Comparable signature of a trigger: its enabled state ('O' after CREATE; D/R/A after
+-- ALTER TABLE … DISABLE / ENABLE REPLICA / ENABLE ALWAYS TRIGGER) plus its definition with
+-- the table name blanked. tgenabled is "char": the ::text cast is required.
+create or replace function pg_temp.rm_trigger_sig(p_rel regclass, p_name text) returns text
+language sql stable as $f$
+  select tgenabled::text || ' ' || regexp_replace(pg_get_triggerdef(oid), ' ON \\S+ ', ' ON _ ')
+  from pg_trigger where tgrelid = p_rel and tgname = p_name and not tgisinternal
+$f$;
+
+-- Is the item still needed? Never takes more than AccessShare on the real table:
+-- the probe CREATE runs against a temp LIKE-clone inside a rolled-back subtransaction.
+create or replace function pg_temp.rm_needed(p_kind text, p_sch text, p_tbl text, p_name text, p_probe text) returns boolean
+language plpgsql as $f$
+declare rel regclass := to_regclass(format('%I.%I', p_sch, p_tbl)); cur text; want text;
+begin
+  if p_kind = 'superseded' then return false; end if;
+  if rel is null then return true; end if;
+  if p_kind = 'rls' then
+    return not (select relrowsecurity from pg_class where oid = rel);
+  elsif p_kind = 'drop_policy' then
+    return exists (select 1 from pg_policy where polrelid = rel and polname = p_name);
+  end if;
+  cur := case p_kind when 'policy' then pg_temp.rm_policy_sig(rel, p_name) else pg_temp.rm_trigger_sig(rel, p_name) end;
+  if cur is null then return true; end if;
+  begin
+    execute format('create temp table %I (like %I.%I)', p_tbl, p_sch, p_tbl);
+    execute p_probe;
+    want := case p_kind when 'policy' then pg_temp.rm_policy_sig(format('pg_temp.%I', p_tbl)::regclass, p_name)
+                        else pg_temp.rm_trigger_sig(format('pg_temp.%I', p_tbl)::regclass, p_name) end;
+    raise exception using errcode = 'RMPRB';
+  exception
+    when sqlstate 'RMPRB' then null;   -- rolls the probe back (temp table + object)
+    when others then return true;      -- cannot prove identity: apply it
+  end;
+  return want is distinct from cur;
+end
+$f$;
+
+create or replace function pg_temp.rm_plan(p_seq int, p_kind text, p_sch text, p_tbl text, p_name text, p_probe text, p_run text, p_lock boolean) returns void
+language plpgsql as $f$
+begin
+  if pg_temp.rm_needed(p_kind, p_sch, p_tbl, p_name, p_probe) then
+    insert into pg_temp.rm_todo values (p_seq, p_sch, p_tbl, p_run, p_lock);
+  end if;
+end
+$f$;
+
+create or replace function pg_temp.rm_run(p_seq int) returns void
+language plpgsql as $f$
+declare q text;
+begin
+  select run into q from pg_temp.rm_todo where seq = p_seq;
+  if q is not null then execute q; end if;
+end
+$f$;`;
+
+const RLS_LOCK_PHASE = `-- Lock phase: all-or-nothing NOWAIT over the tables still to change, bounded at 6 s.
+select set_config('restomatch.saved_statement_timeout', current_setting('statement_timeout'), true);
+select set_config('statement_timeout', '6s', true);
+do $$
+declare r record;
+begin
+  if not exists (select 1 from pg_temp.rm_todo where take_lock) then
+    return; -- already provisioned: no ACCESS EXCLUSIVE at all
+  end if;
+  loop
+    begin
+      for r in select distinct sch, tbl from pg_temp.rm_todo where take_lock order by sch, tbl loop
+        execute format('lock table %I.%I in access exclusive mode nowait', r.sch, r.tbl);
+      end loop;
+      exit;
+    exception when lock_not_available then
+      perform pg_sleep(0.05); -- the failed attempt released every lock it took
+    end;
+  end loop;
+end $$;
+select set_config('statement_timeout', coalesce(nullif(current_setting('restomatch.saved_statement_timeout', true), ''), (select reset_val from pg_settings where name = 'statement_timeout')), true);`;
+
+const RLS_CLEANUP = `drop function if exists pg_temp.rm_run(int);
+drop function if exists pg_temp.rm_plan(int, text, text, text, text, text, text, boolean);
+drop function if exists pg_temp.rm_needed(text, text, text, text, text);
+drop function if exists pg_temp.rm_trigger_sig(regclass, text);
+drop function if exists pg_temp.rm_policy_sig(regclass, text);
+drop table if exists pg_temp.rm_todo;`;
+
 export function rlsSql(dir: string = migrationsDir()): string {
   const rls = (f: string) => readFileSync(join(dir, 'rls', f), 'utf8').trimEnd();
   const storage = rls('0001_invoice_scans_rls.sql');
   if (!storage.includes(STORAGE_ALTER)) throw new Error('rls/0001 changed shape: update supabaseSync.ts');
   const storagePolicies = storage.replace(STORAGE_ALTER, '-- (RLS on storage.objects is enabled separately above)');
   if (storagePolicies.includes('$restomatch_storage$')) throw new Error('rls/0001 contains the dollar-quote tag');
+
+  const rw = new RlsRewriter();
+  const core = rw.rewrite(rls('0002_core_tenant_rls.sql'), { lock: true, label: 'rls/0002' }).join('\n\n');
+  const audit = rw.rewrite(rls('0003_audit_immutable.sql'), { lock: true, label: 'rls/0003' }).join('\n\n');
+  const storageRls = rw.rewrite(STORAGE_ALTER, { lock: false, label: 'storage' });
+  const storageBody = rw
+    .rewrite(storagePolicies, { lock: false, label: 'rls/0001' })
+    .map((st) => (st.startsWith('select pg_temp.rm_run(') ? `    perform ${st.slice('select '.length)}` : `    execute ${lit(st)};`))
+    .join('\n');
+
   return `${GENERATED_MARK} — DO NOT EDIT. Idempotent; re-emitted after schema changes.
 -- = \`pnpm --filter @restomatch/db provision-rls\` (PROVISION_STORAGE_RLS=1) as a migration.
+--
+-- Lock-safe (packages/db/src/supabaseSync.ts, "Lock-safe RLS file"): every lock-taking
+-- statement is PLANNED first and applied only if the database differs; the tables
+-- still to change are locked all-or-nothing with NOWAIT (6 s bound) before anything
+-- runs. On an already provisioned database this file takes no ACCESS EXCLUSIVE lock.
+-- 40P01 / 55P03 / 57014 = nothing of this file applied; re-run when traffic is quiet.
+-- set_config(…, true), not SET LOCAL: the Supabase CLI runs the file as one pipeline
+-- with no BEGIN.
+select set_config('lock_timeout', '5s', true);
+
+${RLS_HELPERS}
+
+-- Plan (no strong locks).
+${rw.planSql()}
+
+${RLS_LOCK_PHASE}
 
 -- 1. The non-owner tenant role. NOLOGIN and NO password in git: after the first
 --    deploy the owner runs  ALTER ROLE restomatch_app WITH LOGIN PASSWORD '…';
@@ -126,11 +432,11 @@ do $$ begin
   end if;
 end $$;
 
--- 2. Core tenant RLS (packages/db/drizzle/rls/0002_core_tenant_rls.sql)
-${rls('0002_core_tenant_rls.sql')}
+-- 2. Core tenant RLS (packages/db/drizzle/rls/0002_core_tenant_rls.sql, lock-safe rewrite)
+${core}
 
--- 3. Append-only audit log (packages/db/drizzle/rls/0003_audit_immutable.sql)
-${rls('0003_audit_immutable.sql')}
+-- 3. Append-only audit log (packages/db/drizzle/rls/0003_audit_immutable.sql, lock-safe rewrite)
+${audit}
 
 -- 4. Grants / revokes (packages/db/src/rls.ts → rlsAppRoleGrantsSql, same as ensureRlsAppRole)
 ${rlsAppRoleGrantsSql().trim()}
@@ -143,6 +449,10 @@ ${rlsAppRoleGrantsSql().trim()}
 --    belongs to supabase_storage_admin; if the migration role may not alter it or
 --    create policies on it, this logs a WARNING instead of failing the deploy —
 --    apply rls/0001 from the SQL editor then (the doctor / verify-cutover report it).
+--    Each policy is applied only if it differs (planned above, not in the lock phase).
+--    With storage work planned, storage.objects is taken NOWAIT first (short retries);
+--    if it is busy or not lockable this WARNs and skips storage only: the tenant
+--    repair above is never held up or rolled back by storage contention.
 do $$ begin
   if to_regclass('storage.buckets') is not null then
     -- SB-3: private, ≤11 MiB, invoice formats only (enforced by the Storage API).
@@ -159,21 +469,39 @@ do $$ begin
   end if;
 end $$;
 
-do $restomatch_storage$ begin
+do $restomatch_storage$
+declare got_lock boolean := false;
+begin
   if to_regclass('storage.objects') is null then
     raise notice 'restomatch: no storage schema — skipping storage policies';
     return;
   end if;
+  -- Storage work planned? Take storage.objects with NOWAIT first (the tenant tables may
+  -- already be locked above: never wait behind a storage reader while holding them).
+  if exists (select 1 from pg_temp.rm_todo where sch = 'storage') then
+    for i in 1..40 loop
+      begin
+        lock table storage.objects in access exclusive mode nowait;
+        got_lock := true;
+        exit;
+      exception
+        when lock_not_available then perform pg_sleep(0.05);
+        when insufficient_privilege then exit;
+      end;
+    end loop;
+    if not got_lock then
+      raise warning 'restomatch: storage.objects policies NOT applied: storage.objects busy or not lockable as % — re-run in a quiet window or run packages/db/drizzle/rls/0001_invoice_scans_rls.sql in the SQL editor', current_user;
+      return;
+    end if;
+  end if;
   begin
-    alter table storage.objects enable row level security;
-  exception when insufficient_privilege then
+    perform ${storageRls[0]!.slice('select '.length)}
+  exception when insufficient_privilege or lock_not_available then
     raise notice 'restomatch: storage.objects RLS not altered (%), Supabase enables it by default', sqlerrm;
   end;
   begin
-    execute $policies$
-${storagePolicies}
-    $policies$;
-  exception when insufficient_privilege then
+${storageBody}
+  exception when insufficient_privilege or lock_not_available then
     raise warning 'restomatch: storage.objects policies NOT applied as % (%) — run packages/db/drizzle/rls/0001_invoice_scans_rls.sql in the SQL editor', current_user, sqlerrm;
   end;
 end $restomatch_storage$;
@@ -197,6 +525,9 @@ begin
     end if;
   end loop;
 end $$;
+
+-- Session-local helpers out.
+${RLS_CLEANUP}
 `;
 }
 

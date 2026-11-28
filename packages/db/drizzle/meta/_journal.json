@@ -365,6 +365,13 @@
       "when": 1782300000000,
       "tag": "0070_inventory_counts",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1782400000000,
+      "tag": "0071_schema_batch_0",
+      "breakpoints": true
     }
   ]
 }

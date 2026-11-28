@@ -52,7 +52,9 @@ begin
     'storage_namespaces',
     'match_runs','discrepancies','activity_events','price_history',
     'price_baselines','approval_rules','audit_log','procurement_connections',
-    'email_inboxes','supplier_integrations','notifications_outbox'
+    'email_inboxes','supplier_integrations','notifications_outbox',
+    -- 0071 (wave 2, G-03)
+    'idempotency_keys','claim_letters','payment_deductions'
   ] loop
     if exists (
       select 1 from information_schema.columns
