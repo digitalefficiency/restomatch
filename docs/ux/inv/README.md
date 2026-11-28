@@ -36,7 +36,7 @@ slice 1).
 | `OPEN-PRS.md` | The open pull requests whose files fall inside each package's boundary, as of 28.11.2026. |
 | `CHANGES.md` | Corrections to this folder made after the sessions started, newest first. It is created with the first correction. |
 | `packages.json` | The partition in a form a script reads: for each package what it owns, what it creates, its seams; the files given to nobody; the immutability list. Generated from `main@9dd26ef9`. |
-| `check-partition.cjs` | Checks `packages.json` against a checkout: no file owned twice, no immutable file inside a boundary or a seam. Writes nothing. |
+| `check-partition.cjs` | Checks `packages.json` against a checkout: no file owned twice, no immutable file inside a boundary or a seam, every base the first branch merged in. With `--changed INV-0N` it checks a session's own commits against its boundary and seams. Writes nothing. |
 | `reference/reference.html` | The proposal page, Version 6, with the four mock-ups live, in one standalone page. **The visual and behavioural source of truth.** |
 | `reference/src/` | The sources of that page: `body.html` (the page), `inv-core.js` (the words and the store all four share), `inv-register.js`, `inv-invoice.js`, `inv-doc.js`, `inv-desk.js`, `inv-payrun.js`, `inv-page.js`, `inv.css`, `inv-doc.css`, `inv-r15.css`, `product.css` (the clean finish), `base.js`, `sprite.html`, `data.json` (the demo restaurant on 25.10.2026). |
 | `reference/PAGE-TEXT.he.md` | The Hebrew text of the proposal page as the owner read it: what changes on each screen and why, what is needed to build it, and the seven decisions. Its "היום" statements describe `main` as it was when the proposal was drawn; see the note at its top. |
@@ -58,7 +58,7 @@ All seven were approved on 28.11.2026 with the page's recommendation.
 | 6 | Does a warning at the manager keep holding the whole invoice? | **As today:** any open gap holds the invoice out of the pay run. | No change on the server. `INV-03` says it in words. |
 | 7 | Mark the gap's line on the supplier's document? | **In two steps.** Step one is in this batch; step two is **not**. | `INV-01`: the document beside the data, and the line "חפשו במסמך: {item}, מק״ט {sku}". Stored positions and a drawn mark on real documents are step two and are built by nobody here; they **need a human** (the reading service, its keys). |
 | small | After how many days is a gap old? | **No colour for an old gap.** | The oldest is sorted first and its days are written. Nobody adds a colour. |
-| small | The base of the percentage in the rules | **Unchanged**, and stated on the settings screen. | `INV-04` states the base in the card "מי מחליט על מה". The sentence on the settings screen itself is a request to DS3-06 (pull request 353), whose folder it is. A change of the base **needs a human change** (the approvals engine). |
+| small | The base of the percentage in the rules | **Unchanged**, and stated on the settings screen. | `INV-04` states the base in the card "מי מחליט על מה". The sentence on the settings screen itself is in no package's boundary: the folder is DS3-06's (pull request 353), and the lead sends the request ("Needs a human change", below). A change of the base **needs a human change** (the approvals engine). |
 | kept | Three things two reviewers questioned | **Kept.** | The button "בקשת זיכוי · ₪amount"; the solid pill "חוסם תשלום"; the tinted row of the gap's line. |
 
 Where the owner has not spoken and a screen needs an answer, `SPEC.md` §8 gives the default each package
@@ -84,12 +84,19 @@ need into its pull request and leaves that slice.
 - For the optional `INV-06`: reading the licence of the PDF library, and checking that it loads a file from the
   real storage.
 - Taking current `main` into `claude/ds3-01-components` and into `claude/ds3-04-approvals-desk`: their own
-  sessions or the lead (`WORKPLAN.md`).
+  sessions or the lead (`WORKPLAN.md`, S10). For the desk's branch exactly one of the DS3-04 session and
+  `INV-04` does it, and the lead says which.
+- The sentence about the percentage's base on the settings screen (decided 28.11.2026). The folder is
+  DS3-06's (pull request 353). The lead posts the request on 353 when wave 2 opens, with the card's own
+  sentence, "הסכומים לפני מע״מ, והאחוז מסכום החשבונית כולל מע״מ."; if 353 merges without it, one follow-up pull
+  request adds the sentence.
 
 **Never decided by the owner, so not built:** passing a gap on with one press and no note (the product's sheet
 stays); moving the invoice page under "חשבוניות" in the menu; removing from the list the month links, the
-export, the column menus, "להשלמת שורות" or "נכנסות"; removing from the pay run the month filter, the due
-sections, the selection or the branch strip; removing the bulk actions from the desk; "אתמול" and "השבוע" beside
+export, the column menus, "להשלמת שורות" or "נכנסות"; removing from the pay run the month filter, the due-date
+notices, the selection or the branch strip (its five due sections do go as headings, because the approved
+screen groups held invoices by who holds them: `SPEC.md` §6.1); removing the bulk actions from the desk;
+"אתמול" and "השבוע" beside
 "הוחלט היום"; a filter of the queue by routing; a bulk or one-tap decision on the invoice screen; the owner's
 approval of a payment above an amount; a colour for an old gap; a stored divider width; a new feature flag for
 the list, the pay run or approvals by role.
@@ -179,7 +186,8 @@ The owner's rules that the proposal was reviewed against, stated once:
    the seams your section names, each one small and named in your pull request. A router has one writer in
    this batch, `INV-00`: a screen that needs one more field asks for it under "Requests to other packages".
    Something missing from the shared components is built inside your boundary and listed under "Promote to
-   shared". Never push to a branch that is not yours.
+   shared". Never push to a branch that is not yours. Before you open the pull request, run the check of your
+   own commits ("To check that the partition still holds", at the end of this file).
 4. **Check the open pull requests** that touch your boundary before you start and before you finish
    (`OPEN-PRS.md` is the state of 28.11.2026). Where one overlaps, say so in your pull request and keep your
    change easy to rebase.
@@ -188,12 +196,22 @@ The owner's rules that the proposal was reviewed against, stated once:
    390 px, and at 1280 and 1024 where `SPEC.md` gives a rule for them, in Hebrew and in one more language.
    Compare with the reference side by side.
    - `bash docs/ux/wave2/lab.sh INV-0N` (from the repository root; its head lists the flags, and it takes any
-     id of letters, digits and hyphens) reseeds the demo restaurant "כפר הזיתים" at the demo day 25.10.2026
-     with every feature on and serves a production build. It is local only. The demo accounts are `owner@`,
-     `manager@`, `bookkeeper@`, `chef@` and `receiver@kfar-hazeitim.test`.
-   - **A number of days needs both clocks pinned.** The seed dates everything from the day of the run, so "10
-     ימים" exists only at the demo day with the server's clock and the browser's clock pinned too. Every
-     function that words a wait takes "now" as an argument and has a unit test.
+     id of letters, digits and hyphens) seeds the demo restaurant "כפר הזיתים" as of 25.10.2026 with every
+     feature on and serves a production build. It is local only. The demo accounts are `owner@`, `manager@`,
+     `bookkeeper@`, `chef@` and `receiver@kfar-hazeitim.test`.
+   - **The lab's server runs on the real clock.** `lab.sh` pins the seed to 25.10.2026 and nothing in the
+     product reads `DEMO_TODAY` (`docs/ux/wave2/lab.sh:35`, `:100`, `:249-250`). So in the lab a wait reads 10
+     plus the days since 25.10.2026, and `/dashboard/invoices` opens on the current month, which is empty:
+     open `/dashboard/invoices?month=-1` in November 2026 and `?month=-2` in December (the list falls back to
+     the previous month only in a month's first five days,
+     `apps/web/app/dashboard/invoices/(register)/month.ts:11`, `:29`). The reference's day counts ("10 ימים")
+     are reproduced only in a unit test that passes "now" (precedent:
+     `packages/api/src/__tests__/invoice-state.test.ts:126-129`): every function that words a wait takes
+     "now" as an argument and has one. In e2e the seed is dated from the day of the run: assert relations.
+   - The lab runs no worker unless you pass `--stub`, so the shell shows the banner "העיבוד מתעכב."
+     (`apps/web/lib/i18n/messages/nav/he.ts:133`); it is the lab's, not your screen's.
+   - The demo seed attaches no file to any invoice and the lab's main server serves none: `WORKPLAN.md`,
+     `INV-01`, "Seeing a document locally", says how a document is attached and where it can be looked at.
    - No real reading service, e-mail, WhatsApp or storage provider, no production database, no secret.
 6. **Keep the gates green** (`AGENTS.md`, "Test / CI facts"; the workflow `.github/workflows/ci.yml` is the
    truth: it blocks on the test job, the worker tests, the web lint, build and type check, the worker image
@@ -203,22 +221,32 @@ The owner's rules that the proposal was reviewed against, stated once:
    - Web: `pnpm --filter @restomatch/web lint`, `typecheck`, `test`, `guards` and `build`. The copy guard and
      the he/en parity test run in the web unit suite; meet them, never loosen them.
    - e2e: one spec per package, `apps/web/e2e/INV-0N.spec.ts`, with its own axe run (no serious or critical
-     finding). In a spec that is not yours, change only the assertions that read your screen, and name each in
-     the pull request with why it keeps its meaning. Shared helpers, seeds, configs, `a11y.spec.ts` and
+     finding). All specs run against one database, one after another in file-name order, and
+     `INV-0N.spec.ts` sorts before every `W1-*` and `W2-*` spec (`apps/web/playwright.config.ts:44-47`). A
+     spec that decides, passes on, re-matches or counts creates its own tagged invoices with `e2eSql()` and
+     removes them in `afterAll`, as `DS3-04.spec.ts` does on the desk's branch; it never decides a gap of the
+     seeded demo. All sign-ins of the run share one budget of 30 per 15 minutes
+     (`apps/web/e2e/helpers.ts:103-109`): sign in once per role and keep the state. `WORKPLAN.md`, "e2e
+     specs", has the rule in full.
+   - A spec that is not yours is edited only where your section of `WORKPLAN.md` lists it as a seam, and
+     there only the assertions that read your screen, each named in the pull request with why it keeps its
+     meaning. Every other spec stays as it is: keep what it reads, or write the assertion and the proposed
+     change under "Requests to other packages". Shared helpers, seeds, configs, `a11y.spec.ts` and
      `smoke.spec.ts` are read-only.
    - The gates on a pull request: `test-sentinel` always; `tenant-security-warden` on `INV-00`, `INV-05` and
-     `INV-06`; `money-format-marshal` wherever ₪ is rendered; `rtl-design-steward` for the look; `icp-keeper`
-     for scope.
+     `INV-06`; `money-format-marshal` wherever ₪ is rendered (`INV-00` too: its words module prints ₪ inside a
+     phrase); `rtl-design-steward` for the look; `icp-keeper` for scope.
    - If a gate fails after your pull request is open you get at most two fix attempts; on the third failure
      stop and write what failed. A red run that matches a known flaky gate is re-run, not "fixed".
 7. **Open one draft pull request and stop.** Title `ux(INV-NN): …`. Commits prefixed `ux(INV-NN):`,
    `test(INV-NN):`, `fix(INV-NN):`, `docs(INV-NN):`. When the pull request is stacked, its first line states
    the merge order. Body sections: What · Why · Write boundary (the boundary, then every seam, one file and
    one reason each) · Evidence (before and after screenshots at both widths, per role, from a production build
-   at the demo day; files under `apps/web/e2e/__screenshots__/INV-0N/`) · Tests (gate, result and the commit
-   it ran on) · Owner decisions touched · Requests to other packages · Promote to shared · Not done. The body
-   says in words: "no file of the immutability list changed". Then a short report to the owner in plain,
-   gender-neutral Hebrew: what was built, the link, what is still open, what needs his decision.
+   of the lab, with the date of the run stated; the viewer's evidence from where a local file can be served,
+   as `WORKPLAN.md`, `INV-01`, says; files under `apps/web/e2e/__screenshots__/INV-0N/`) · Tests (gate, result
+   and the commit it ran on) · Owner decisions touched · Requests to other packages · Promote to shared · Not
+   done. The body says in words: "no file of the immutability list changed". Then a short report to the owner
+   in plain, gender-neutral Hebrew: what was built, the link, what is still open, what needs his decision.
 
 ### Upstream and bases
 
@@ -238,9 +266,15 @@ DS3-04 (the approvals desk, 347, finished at `be22850e`). A screen package needs
 - Every session starts from current `main` with its own branch, then `git fetch origin <branch>` and merges
   its upstream branches itself. The pull request's base is the upstream branch it merged in (a stacked pull
   request, as the DS3 batch did). No `INV` session pushes to a DS3 branch.
-- `INV-00` pushes its contract first (the types and shapes of the new reads, and the empty message sub-files),
-  so that the screens compile against its branch within hours. Merge it again before you finish and look at
-  your screen with the real values.
+- `INV-00` pushes its contract first (the types and shapes of the new reads, the empty message sub-files and
+  the role words), and the lead opens `INV-01` once that commit is on `claude/inv-00-server-reads`, so that
+  the screens compile against its branch from their first hour. The three message sub-files
+  (`messages/invoices/screen.ts`, `list.ts`, `decide.ts`) are created by `INV-00` and by nobody else: if your
+  base does not hold yours yet, fetch and merge `claude/inv-00-server-reads` before your first string, and
+  never create the file or edit `messages/invoices/index.ts`. Merge `INV-00` again before you finish and look
+  at your screen with the real values.
+- `INV-05` changes one file of the invoice screen, `gap-actions.tsx`, so `INV-01` builds that component's
+  whole interface in wave 1 (`WORKPLAN.md`, S7).
 - `INV-05` opens when slice 1 of `INV-04` is pushed and `INV-01`'s branch has the gap card and
   `gap-actions.tsx`.
 - The order in which a person merges: 346, 345, `INV-00` (at any time; it depends on nothing in DS3), then
@@ -294,3 +328,16 @@ To check that the partition still holds on your checkout:
 ```bash
 node ../inv-handoff/docs/ux/inv/check-partition.cjs "$PWD"
 ```
+
+That checks the plan against a tree, whatever you changed. Before you open the pull request, check your own
+commits as well (fetch `origin/main` and your upstream branches first):
+
+```bash
+node ../inv-handoff/docs/ux/inv/check-partition.cjs "$PWD" --changed INV-0N
+```
+
+It lists the files of the commits that are on your branch and on none of `origin/main` and your upstream
+branches, and fails on a file that is neither yours nor one of your seams, and on an immutable file. A stacked
+pull request's diff also holds its upstreams' files, so the list cannot be read off the pull request. Merge
+commits are left out: a conflict you resolved inside a merge is not listed, so name it by hand. A seam file
+that passes is still only the edit its text names.

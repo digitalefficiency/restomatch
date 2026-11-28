@@ -8,18 +8,20 @@ server field. **Where this file and the reference disagree, this file wins. Wher
 screen as you map it, and add what you find to your pull request.
 
 File and line citations are from `main@9dd26ef9`; "DS3-04:" means the finished desk branch at `be22850e`.
-Nothing was run to write this folder except the partition check: behaviour is read from the code.
+Three things were run to write this folder: the partition check, a type check of the two merged bases and a
+trial of the empty message groups ("Not determined", at the end). Behaviour is read from the code.
 
 ## `main` moved after the proposal was drawn
 
 The proposal's "היום" pictures and sentences describe `main` at `9dc0b934`. The code maps were read at
 `83bda7d7`, and `main` was at `9dd26ef9` (135 commits later) when the folder was written. Inside this area
-`main` gained, among others: an allocation-number field on the invoice screen
-(`apps/web/app/dashboard/invoices/[invoiceId]/allocation-field.tsx`), "לא נספר" on a line whose receipt was
-closed without a count (`packages/api/src/routers/invoices.ts:469`), a helper for the desk's summary refresh
-(`apps/web/app/dashboard/approvals/summaryRefresh.ts`), and more payment methods in the pay run's selection.
-The approvals desk was rebuilt by DS3-04 on its own branch and is not on `main`. Start from current `main`,
-map your screen first, and build the difference only.
+`main` gained, among others: an allocation-number field for the invoice screen, a file that nothing mounted
+at `9dd26ef9` (`apps/web/app/dashboard/invoices/[invoiceId]/allocation-field.tsx`; pull request 341, merged
+after that commit, mounts it),
+"לא נספר" on a line whose receipt was closed without a count (`packages/api/src/routers/invoices.ts:469`), a
+helper for the desk's summary refresh (`apps/web/app/dashboard/approvals/summaryRefresh.ts`), and more payment
+methods in the pay run's selection. The approvals desk was rebuilt by DS3-04 on its own branch and is not on
+`main`. Start from current `main`, map your screen first, and build the difference only.
 
 ## Every mock-up: demo shortcuts
 
@@ -35,18 +37,26 @@ map your screen first, and build the difference only.
    "נפתחה היום", and the stamp is the browser's clock. In the product a decision is read back from the server
    with its own time, and a decision of an earlier day must not say "היום". The words for an earlier day are
    not written anywhere: print the date in its place and name it in your pull request.
-4. **"10 ימים" exists only on the demo day.** The seed dates everything from the day of the run. The count is
-   also not what the mock-ups imply: a re-match replaces the gap rows, so "since when" restarts
-   (`packages/api/src/routers/match.ts:184-193`). State it; do not hide it.
+4. **"10 ימים" exists only on the demo day, and no running server shows it.** The e2e seed dates everything
+   from the day of the run. The lab's seed is pinned to 25.10.2026, but its server runs on the real clock
+   (`README.md`, step 5), so a wait there reads 10 plus the days since. The reference's day counts are
+   reproduced only in a unit test that passes "now". The count is also not what the mock-ups imply: a
+   re-match replaces the gap rows, so "since when" restarts (`packages/api/src/routers/match.ts:184-193`).
+   State it; do not hide it.
 5. **The reason has only three phrases.** `INV.because` returns the quantity phrase for every blocking gap
    that is not a price gap, the ₪ band for `cumulative-medium`, and nothing for every other rule. The engine
    has eight rule ids and a fallback (`packages/api/src/approvals/engine.ts:152-217`). Do not print "חיוב על
    יותר ממה שהתקבל חוסם תשלום" on an item that was not ordered, and do not print the ₪ band on a gap the
    percentage routed. The rule's stored name is not a substitute: it holds the retired word "הפרש"
-   (`engine.ts:195`, `:204`).
+   (`engine.ts:195`, `:204`). And the price phrase's "10%" is not a constant: it is the restaurant's own
+   `tolerances.blockPricePercent` (default 0.1, `packages/matching/src/tolerances.ts:9`), editable on the
+   settings screen. Print the setting, and only when the gap's own percent is at or above it.
 6. **Only the manager passes a gap on.** "הניהול העביר אחרי N ימים" is fixed text, and the earlier routing in
-   the history is hard-coded. The product also lets the bookkeeper pass a gap to the owner
-   (`apps/web/app/dashboard/approvals/vocab.ts:103-105`). Use the word of the role that passed it.
+   the history is hard-coded. The product offers the pass-on to any role but the owner, on a gap it may
+   decide that is not the owner's (`apps/web/app/dashboard/approvals/vocab.ts:103-105`): also the bookkeeper
+   on a duplicate, and the manager on an unrouted gap. Keep that, and use the word of the role that passed
+   it; the bookkeeper's phrase is not approved yet (`SPEC.md` §8, point 18). The mock-up also shows only the
+   day of the pass-on ("מהיום"): `SPEC.md` §2.2 says what the wait reads on later days.
 7. **Passing on is one press.** The product opens a sheet with an optional note, and the owner reads that
    note. The sheet stays.
 8. **People.** The top bar says "דנה כהן · בעלים". Those names are invented; the demo seed has other people,
@@ -73,14 +83,21 @@ map your screen first, and build the difference only.
   could be in no place. `SPEC.md` §8, point 2.
 - **"ממתינות לשיוך" holds more than its name.** The mock-up puts invoices being read and invoices waiting for
   the count there too, and its third line "חשבוניות מרכזות" is true only because both demo invoices are
-  consolidated. The card's name and third line when it holds other kinds are not written. Today an invoice
-  waiting for the count sits in the tab "בהשהיה" (`packages/api/src/routers/invoices.ts:65-75`).
+  consolidated. Today an invoice waiting for the count sits in the tab "בהשהיה"
+  (`packages/api/src/routers/invoices.ts:65-75`). The default is `SPEC.md` §8, point 17: both kinds are in
+  that place, the third line is printed only when every invoice in it is consolidated, and the card's name
+  when it holds other kinds needs the owner's word.
 - **"שולמו" is the demo's.** Its third line "בנתוני ההדגמה" and the summary's "מסומנת כשולמה בנתוני ההדגמה."
   are true for the seed only. Nothing records a payment for a real restaurant, so the card is hidden there.
 - **"חסר מספר הקצאה" is not drawn with data.** October has none. The product's rule is the pay run's
   (`packages/api/src/vat/vatAtRisk.ts`): above the threshold of the invoice's date, a malformed number counts
   as missing, an invoice being read and a credit are left out. That read looks at the 2,000 newest invoices
   (`vatAtRisk.ts:137`). The line "צריך לבקש מהספק" must not contradict a number that was already asked for.
+  It is not the row's existing `allocationRequired`, which looks at the date and the amount only
+  (`packages/api/src/routers/invoices.ts:114-118`).
+- **The summary's calculation needs a unit price** ("3 ק״ג × ₪12.90 = ₪38.70"). On `INV-02`'s base the queue
+  row has quantities and no unit price (DS3-04 adds it, on its own branch): read `invoices.detail` for the
+  picked row, and never derive a price by division.
 - **The sentence is the month's; the desk's queue is not.** A gap on last month's invoice is on the desk and
   missing from "אין פערים פתוחים החודש." Say what the sentence counts; do not present it as everything open.
 - **Today's gap figure is not "the open gap".** `gapAgorot` on a row is every leak finding whatever its
@@ -120,10 +137,30 @@ map your screen first, and build the difference only.
   cannot be learned from the code. That is all of `INV-06`, optional, with three checks that each stop it.
 - **The file's address expires.** A signed address lives 30 minutes (`apps/web/lib/supabase/server.ts:41`). A
   document left open can fail to load again: one calm line and "פתחו את המקור", never a broken frame.
-- **The e2e lab stores no scans** (`apps/web/e2e/W2-02.spec.ts:176`), so today no spec exercises the viewer.
-  `INV-01` brings a stored image and a stored PDF for its own spec.
+- **No demo invoice has a file.** The e2e lab stores no scans (`apps/web/e2e/W2-02.spec.ts:176`), so today
+  no spec exercises the viewer, the demo seed attaches none, and the lab's production server cannot serve a
+  local file (`packages/api/src/lib/localScanStorage.ts:29-33`). `INV-01` brings a stored image and a stored
+  PDF for its own spec; `WORKPLAN.md`, `INV-01`, "Seeing a document locally", says how a file is attached
+  and where it can be looked at.
 - **The card decides in the mock-up.** In `INV-01` it does not: one button opens the desk. The two buttons,
-  the reasons, the message and the undo arrive with `INV-05`, mounted from the desk and never copied.
+  the reasons, the message and the undo arrive with `INV-05`, mounted from the desk and never copied. Until
+  then the pinned bar's button reads "לפרטי הפער" for every role: the mock-up's "להחלטה" there returns the
+  pane to the card's two buttons, which `INV-01` does not have.
+- **"לפער הבא, אצל הנהלת החשבונות" is five words** (the reference builds it the same way,
+  `reference/src/inv-invoice.js:61`), and the owner can meet it, since the owner may decide a duplicate. A
+  button holds four: `INV-05` proposes a shorter label for that case under "Owner decisions touched" and
+  does not ship the five-word one.
+- **Stepping exists only from the list.** The mock-up always shows "חשבונית 1 מתוך 4 שנמצא בהן פער" and its
+  two buttons. In the product the place line, the buttons and `[` / `]` exist only when the person came from
+  the list (`from=register`), as today (`[invoiceId]/cockpit.tsx:125`, `:361`).
+- **The mock-up has no switch between two panes and one column**: it scales one 1240 px frame. In the
+  product the switch is the window's width, 1024 px, as today (`cockpit.tsx:100`); at a 1024 px window the
+  content box is 712 px with the side menu open, so the document's pane sits at its narrowest stop.
+- **Two retired words on this screen today.** `invoices:correction.linesLocked.consolidated` says "חשבונית
+  ריכוז" (`apps/web/lib/i18n/messages/invoices/he.ts:45`): `INV-01` rewords it with "חשבונית מרכזת", both
+  languages. `invoices:needsLines.heldTitleReadOnly` says "הבעלים או המנהל" (`he.ts:113`): it stays in this
+  batch, because `apps/web/e2e/pilot-unread-invoices.spec.ts:117`, which nobody may edit, pins it; name it in
+  the pull request under "Requests to other packages".
 - **The payment block has two drawn states.** "בהשהיה" because of the gap, and "ניתן לשלם". The allocation
   line is fixed text ("מספר הקצאה לא נדרש בסכום הזה.") and the check line is always ticked. The product has
   eight reasons for a hold (`packages/api/src/routers/payRun.ts:451-475`), three forms of the allocation line
@@ -138,9 +175,11 @@ map your screen first, and build the difference only.
   (`apps/web/lib/components/documents/DocumentFlow.tsx`); the mock-up shows it on a phone only. Keep both
   links reachable at a desk and say where.
 - **Kept and not drawn:** the reading correction ("ערכו נתוני סריקה") and its automatic re-match, "לבדיקה",
-  "לא נספר", "פתחו את המקור", the consolidated panel, the dock-price notes, the allocation field, the
-  partial-load banner, the duplicate notice, the findings that sit on no line, the five origins of the back
-  link. Where each sits in the new screen is the first slice of `INV-01`.
+  "לא נספר", "פתחו את המקור", the consolidated panel, the dock-price notes, the partial-load banner, the
+  duplicate notice, the findings that sit on no line, the five origins of the back link. Where each sits in
+  the new screen is the first slice of `INV-01`. The allocation field is a case of its own: nothing mounted
+  it at `9dd26ef9`, pull request 341 mounts it and merged after that commit, and `INV-01` keeps that one
+  mount inside the payment block, adds none and never edits the file.
 - **Two things were left as they are in the reference, on purpose.** For about 60 px of scrolling the pinned
   amount lies over the card's buttons. And the whole-screen document covers the message with "ביטול" when it
   is opened inside its ten seconds: in the product the message must stay reachable for its whole window.
@@ -177,6 +216,17 @@ map your screen first, and build the difference only.
 - **The document in the evidence** is three retyped lines in the mock-up. DS3-04 has its own.
 - **"הכול מטופל".** DS3-04 says it whenever the viewer's own queue is empty and draws the green mark of an
   empty inbox. Under this spec it shows only when nothing is open for anyone, with a grey mark.
+- **The jump narrows the desk; the mock-up's does not.** `/dashboard/approvals?invoice=<id>&sel=<gapId>`
+  narrows the queue and the summary to that invoice (DS3-04: `approvals/page.tsx:50-52`, `:68-70`), while the
+  mock-up only picks the gap on the full queue (`reference/src/inv-core.js:199-201`). After "להחלטה" from
+  the list, the invoice screen or the pay run, the head's counts, "1 מתוך 4" and the hint "אחריו נשארים עוד N
+  פערים" are that invoice's. `INV-04` (slice 2) makes the filter visible and cleared in one press, and after
+  the invoice's last gap the desk shows the filtered note (DS3-04: `approvals/page.tsx:156-157`), never
+  "הכול מטופל" while gaps are open elsewhere.
+- **The retired word "הפרש" is also in labels the desk shows** (DS3-04: `messages/approvals/he.ts:28`, `:310`,
+  `:314`; on `main`: `:26`, `:124`, `:128`): `summary.vat`, `amountLabel.vat`, `amountLabel.other`. Reword
+  them with "פער", both languages, keys unchanged, and name it in the pull request;
+  `approvals/__tests__/vocab.test.ts:308` pins one of them and changes with it.
 - **Not answered by the mock-up:** whether the other roles' rows and the decided rows show while a filter or
   `?invoice=` is set, and whether the CSV holds them; what the single-invoice landing
   (`/dashboard/approvals/[invoiceId]`) says to a role with nothing to decide there while gaps are open for
@@ -185,8 +235,11 @@ map your screen first, and build the difference only.
 
 ## The pay run (`INV-03`)
 
-- **The pay run is off for the pilot restaurant.** The mock-up shows the demo, with a notice that is the
-  mock-up's own. The product's disabled state stays as it is.
+- **The pay run is off for the pilot restaurant.** That is the owner's statement on the proposal page; no
+  file in the repository holds the pilot's flags, and `PILOT_FEATURE_KEYS` in
+  `packages/db/scripts/pilot-setup.ts:61-95` is only the list of keys that exist (`payRun` is in it, as every
+  key is). The mock-up shows the demo, with a notice that is the mock-up's own. The product's disabled state
+  stays as it is.
 - **Four groups are drawn; the server has eight reasons** (`packages/api/src/routers/payRun.ts:451-475`: a
   duplicate copy, waiting to be linked, waiting for the count, an open question, a held reading, a note
   billed twice, a decision, a missing allocation number), and one invoice can carry several. One group per
@@ -201,17 +254,29 @@ map your screen first, and build the difference only.
   itself). Print what the server returns with its basis; a hold whose open ₪ is zero prints no ₪0.
 - **The figure can move.** Two open pull requests (369, 374) change how an invoice's claimable ₪ is computed.
   Print what the server returns and pin no figure outside the demo day.
-- **"להחלטה" needs the gap's id**, which `payRun.list` does not return: it comes from `invoices.holding`.
-- **Not drawn, and kept:** the month filter, the due sections, the notices on a due date ("אין תנאי תשלום ·
-  הגדירו", "מעבר לתקרת החוק", "תנאים קצרים מהמוסכם"), the credit sentence, the selection and its export, the
-  branch strip, the link from a row to the invoice screen.
+- **"להחלטה" needs the gap's id**, which `payRun.list` does not return: it is `decideGapId` of
+  `invoices.holding`, the first gap of the invoice the viewer may decide, not its leading gap.
+- **`payRun.list` names a role and days of its own, and they are not the batch's.** Its role is that of the
+  oldest open finding (`packages/api/src/routers/payRun.ts:273-281`), and its days count from the gap's
+  creation (`:283-288`, `:733`), so a gap passed on today reads N days there. The group, the days and
+  `canAct` of a row come from `invoices.holding`; from `payRun.list` come the hold reasons, the dates and the
+  sums.
+- **One invoice can be held for a decision and for a missing number** (`routers/payRun.ts:461-473`). It sits
+  in its decision group and says the missing number as its second reason.
+- **The five due sections go as headings**: the approved screen groups held invoices by who holds them and
+  lists payable invoices in one table by due date.
+- **Not drawn, and kept:** the month filter, the notices on a due date ("אין תנאי תשלום · הגדירו", "מעבר
+  לתקרת החוק", "תנאים קצרים מהמוסכם"), the credit sentence, the selection and its export, the branch strip,
+  the link from a row to the invoice screen.
 - **A row decided before today** has no words ("הוחלט היום" only): see point 3 of the first list.
 - **The export in the mock-up answers "בהדמיה לא נוצר קובץ".** The product's export stays, and nothing shows
   a history of exports.
 - **The home's "to pay" figure and this screen disagree** for an invoice that is held only for a missing
   allocation number: the month's total behind the home never reads that hold
   (`routers/payRun.ts:863-959`), and this screen's list does (`:707-709`). The fix is in a file no package of
-  this batch writes. Do not "fix" it on the screen, and do not compare the two figures in a spec.
+  this batch writes. Do not "fix" it on the screen, and do not compare the two figures in a spec. An
+  existing spec does compare them (`apps/web/e2e/W1-05.spec.ts:344-352`): it is not `INV-03`'s to change;
+  keep the payable total printed on the screen.
 - **No route-level loading file.** It was removed on purpose (`apps/web/scripts/check-soft-nav.mjs:193-196`).
 
 ## Limits of the data, to state and not to hide
@@ -228,9 +293,14 @@ map your screen first, and build the difference only.
 
 ## Not determined
 
-- Whether the components branch merged with current `main` type-checks and passes the suites: the merge was
-  simulated as text only.
+- Whether the two merged bases pass the lint, the build and the suites. What was run, on 28.11.2026:
+  `main@9dd26ef9` merged with the components branch (`daec849e`) type-checks, and so does `main` merged with
+  the desk's branch (`be22850e`) with DS3-04's `approvals/list.tsx` kept (all 17 packages, and
+  `tsc --noEmit` of `apps/web`). Nothing else was run on either tree.
 - The licence of any PDF library, and whether the real storage lets a script read a file.
-- Whether an empty message group passes every guard.
+- Settled: empty message groups composed as `WORKPLAN.md`, S3, says pass the type check, the parity test, the
+  copy budget and the copy gate (tried on `main@9dd26ef9`).
+- The name of the switch-off key for deciding from the invoice screen (`decideOnInvoice` in `WORKPLAN.md`)
+  and whether the lead keeps the key; `INV-01` does not depend on either.
 - Whether the home's pay-run figure makes an e2e spec red at month end: the cause is in the code; the spec was
   not run.

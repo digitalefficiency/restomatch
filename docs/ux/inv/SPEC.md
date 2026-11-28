@@ -525,12 +525,13 @@ the count equals the desk's), and a decided gap stays as a calm card.
   next stop after it is "ביטול". Tab from "ביטול" returns to the screen only when the decision sent the focus
   there. The message with "ביטול" survives a move with `[`, `]` or the "next gap" button.
 - **The pinned amount (a desk).** Once the card's numbers have left the pane, a bar stays at the pane's head:
-  "הפער · ₪38.70 לפני מע״מ · עגבניות שרי" and a quiet button "להחלטה" (named "להחלטה על הפער") that returns the
-  pane to its top; "לפרטי הפער" for a role that may not decide and for a decided gap, whose bar reads "{result}
-  · ₪38.70 לפני מע״מ" with no item (the amount is never cut). **In `INV-01` the bar's button reads "לפרטי הפער"
-  for every role**: the card it returns to holds a button to the desk, not a decision, and two buttons named
-  "להחלטה" with two effects would mislead. "להחלטה" in the bar arrives with `INV-05`. The bar's text is hidden from a screen reader,
-  the button takes the focus with no jump, and the bar is not removed while it holds the focus.
+  "הפער · ₪38.70 לפני מע״מ · עגבניות שרי" and a quiet button "להחלטה" (named "להחלטה על הפער") that returns
+  the pane to its top; "לפרטי הפער" for a role that may not decide and for a decided gap, whose bar reads
+  "{result} · ₪38.70 לפני מע״מ" with no item (the amount is never cut). **In `INV-01` the bar's button reads
+  "לפרטי הפער" for every role**: the card it returns to holds a button to the desk, not a decision, and two
+  buttons named "להחלטה" with two effects would mislead. "להחלטה" in the bar arrives with `INV-05`. The bar's
+  text is hidden from a screen reader, the button takes the focus with no jump, and the bar is not removed
+  while it holds the focus.
 - **The phone's dock.** Fixed at the foot, named "ההחלטה על הפער": the caption "הפער ₪38.70 לפני מע״מ · עגבניות
   שרי" (it may take two lines) over the action. It is absent for a decided gap, for a role that may not decide
   and while the reasons question is open. The message with "ביטול" sits above it.
@@ -548,9 +549,10 @@ Heading "התשלום", in the pay run's own words, from `invoices.detail.paymen
 - The check: "השורות מסתכמות בסכום שלפני מע״מ, והמע״מ תואם." with **no percentage** (today's string prints the
   rate, also on an invoice with no VAT: `messages/invoices/he.ts:211`).
 - The allocation line, one of three: "מספר הקצאה לא נדרש בסכום הזה."; the number itself; or that it is missing.
-  The block ends with one empty, named wrapper for the allocation field
-  (`[invoiceId]/allocation-field.tsx`). That field is a file on `main` that nothing mounts; pull request 341
-  mounts it. `INV-01` neither mounts nor edits it.
+  The block ends with one named wrapper for the allocation field (`[invoiceId]/allocation-field.tsx`). On
+  `main@9dd26ef9` nothing mounts that file; pull request 341, merged after it, mounts it in
+  `[invoiceId]/page.tsx`. `INV-01` keeps that one mount, inside the wrapper, adds none of its own and never
+  edits the file.
 
 ### 4.7 The lines
 

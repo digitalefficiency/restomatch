@@ -22,9 +22,16 @@ at 07:16 UTC, 24 at 07:49), #190 (72 at 07:17, 79 at 07:37), #359 (4, then 5) an
 #190 are the two that meet this batch most. Read both again before you start.
 
 **Merged on the morning of 28.11 and therefore part of current `main` (`9dd26ef9`), not collisions:** #371
-("לא נספר" in the invoice lines), #306 (the allocation field), #264 (the `vat.*` procedures), #360 (the
-desk's summary refresh), #355 (payment methods on the pay run), #367 (the pay-approval gate, unwired), #368,
-#375, #354 (e2e shards), #327. A session that starts from current `main` already has them.
+("לא נספר" in the invoice lines), #306 (the allocation field's file, which nothing mounts yet), #264 (the
+`vat.*` procedures), #360 (the desk's summary refresh), #355 (payment methods on the pay run), #367 (the
+pay-approval gate, unwired), #368, #375, #354 (e2e shards), #327. A session that starts from current `main`
+already has them.
+
+**Merged after the lists were read and after `9dd26ef9`** (they are on `main@de5cfcf7`, 28.11.2026 10:18
+UTC): #341 (the allocation field's mount in `[invoiceId]/page.tsx`, and its spec
+`apps/web/e2e/AU-08-cockpit.spec.ts`), #364 (the re-match when a draft order is sent), #376, #329, #338, #381
+(one number of the `settings` row in `apps/web/lib/copy/screens.ts`) and #382. Where a section below still
+calls #341 or #364 open, read "merged".
 
 **The bases of this batch** are pull requests themselves: #346 DS3-00 (base `main`), #345 DS3-01 (base
 `claude/ds3-00-foundation`), #347 DS3-04 (base `claude/ds3-01-components`, finished at `be22850e`). None has
@@ -106,9 +113,12 @@ No file in common, and it changes what you build:
 ## INV-01
 
 In the boundary:
-- **#341**: `apps/web/app/dashboard/invoices/[invoiceId]/page.tsx` (+7: the allocation field mounted in the
-  side block). What you do: the payment block keeps a place for the field; whoever lands second moves seven
-  lines. Its other file, `[invoiceId]/allocation-field.tsx` (+4 −1), is reserved: mount it, never edit it.
+- **#341** (merged after `9dd26ef9`): `apps/web/app/dashboard/invoices/[invoiceId]/page.tsx` (+7: the
+  allocation field mounted in the side block). At `9dd26ef9` the field is a file that nothing mounts; this
+  pull request is its mount. What you do: add no mount of your own. The payment block ends with one named
+  wrapper for it, and #341's one mount moves into that wrapper, unchanged. Its other file,
+  `[invoiceId]/allocation-field.tsx` (+4 −1), is reserved: never edit it. Its third file is a spec of its own
+  on this page (`apps/web/e2e/AU-08-cockpit.spec.ts`): keep it green, do not change it.
 - **#190**: `apps/web/app/dashboard/invoices/[invoiceId]/page.tsx` (+18 −1: a page-question note above the
   screen), `apps/web/lib/i18n/messages/invoices/he.ts` and `en.ts` (+5 each, just before `needsLines`). What
   you do: keep your change to `page.tsx` easy to rebase; do not move the block before `needsLines`. It also
@@ -120,11 +130,11 @@ In the boundary:
   `messages/invoices/he.ts` and `en.ts`. Old stacks.
 
 On a seam file:
-- **#204**: `apps/web/lib/copy/screens.ts`, `apps/web/lib/copy/budget.allow.ts` (listed as added; both are on
-  `main`). An old draft. Nothing to do.
+- **#204**: `apps/web/lib/copy/budget.allow.ts` (listed as added; it is on `main`). An old draft. Nothing to
+  do. (You have no seam in `apps/web/lib/copy/screens.ts`: the invoice screen gets no row there.)
 - **#241, #252, #362**: `apps/web/e2e/ia/screens.ts`, `apps/web/lib/copy/budget.allow.ts` (listed as added).
 
-Reserved files inside your folders, changed by others (mount them, never edit them):
+Reserved files inside your folders, changed by others (never edit them):
 - `[invoiceId]/consolidated-panel.tsx` and its test: **#373** (+19 −3; +42 −7), **#374** (+15 −3; +42),
   **#120** (+7 −1).
 - `[invoiceId]/review-button.tsx`: **#373** adds it (+57).
@@ -149,8 +159,9 @@ In the boundary:
 
 On a seam file:
 - **#190**: `apps/web/lib/i18n/messages/invoices/he.ts` and `en.ts` (+5 each, a new block just before
-  `needsLines`). What you do: your seam is the groups `register` and `needsLines` only; keep the first lines
-  of `needsLines` where they are, so that the two changes stay textual neighbours and not a conflict.
+  `needsLines`). What you do: your seam is the group `register` and the keys of `needsLines` that are not
+  frozen (`WORKPLAN.md`, S3); keep the first lines of `needsLines` where they are, so that the two changes
+  stay textual neighbours and not a conflict.
 - **#194, #263, #241, #252, #362**: the same two message files; and in #241, #252 and #362
   `apps/web/e2e/W2-02.spec.ts`, `apps/web/e2e/ia/screens.ts`, `apps/web/lib/copy/budget.allow.ts` (listed as
   added). Old stacks.
@@ -197,6 +208,9 @@ No file in common, and it changes what you build:
 - **#353**: the personal density setting meets "dense rows for the bookkeeper". Read the default through the
   store.
 - **#345** (the base): the tile, the dot, the pill, the money figure. **#349**: the shell's crumb.
+- **#348**, **#251**, **#347**: `apps/web/e2e/W1-05.spec.ts`, which reads your screen at `:344-352` (the
+  home's "to pay" figure must appear in the page's text). The file is `INV-04`'s seam, for the desk's
+  assertions only, and not yours to change: keep the payable total printed.
 
 ## INV-04
 
@@ -235,20 +249,21 @@ No file in common, and it changes what you build:
 - **#212**: `approvals/__tests__/vocab.test.ts:136` pins the decision words to the server's copy. Do not
   rename `decision.*`.
 - **#359** (a person's): the rules card follows whatever `approvals/engine.ts` holds on `main` when you ship.
-- **#353** (DS3-06): the settings folder, where the sentence about the percentage's base belongs. A request.
+- **#353** (DS3-06): the settings folder, where the sentence about the percentage's base belongs. A request
+  the lead sends (`README.md`, "Needs a human change"); your card states the base inside this area.
 
 ## INV-05
 
 In the boundary: nothing. Its folder and its message file are new.
 
 On a seam file:
-- `packages/api/src/lib/features.ts` and `packages/db/scripts/pilot-setup.ts` (the switch-off key, if the
-  lead keeps it): **#190** (+2 and +2: its own key), **#350** (+4 and +2: DS3-05's key), and the old stacks
-  #194 (+17 −1; `pilot-setup.ts` +630 −385) and #263 (+17 −1; +2). What you do: one key in each list, on its
-  own line; whoever lands second re-adds its line.
+- `packages/api/src/lib/features.ts` and `packages/db/scripts/pilot-setup.ts` (the switch-off key
+  `decideOnInvoice`, if the lead keeps it): **#190** (+2 and +2: its own key), **#350** (+4 and +2: DS3-05's
+  key), and the old stacks #194 (+17 −1; `pilot-setup.ts` +630 −385) and #263 (+17 −1; +2). What you do: one
+  key in each list, on its own line; whoever lands second re-adds its line.
 - `apps/web/e2e/W2-02.spec.ts`, `apps/web/e2e/ia/screens.ts`: #241, #252, #362 (listed as added).
-  `apps/web/lib/copy/screens.ts`: #204.
-- `apps/web/app/dashboard/invoices/[invoiceId]/gap-actions.tsx`: new, created by `INV-01`; in no pull request.
+- `apps/web/app/dashboard/invoices/[invoiceId]/gap-actions.tsx`: new, created by `INV-01` with the interface
+  of `WORKPLAN.md`, S7; in no pull request.
 
 No file in common, and it changes what you build:
 - **#190**: the server refuses every decision except a pass-on while a page question is open. Show the

@@ -112,7 +112,7 @@ function trackedFiles(dir) {
 }
 function headOf(dir) {
   try {
-    return execFileSync('git', ['-C', dir, 'rev-parse', '--short=8', 'HEAD']).toString('utf8').trim();
+    return execFileSync('git', ['-C', dir, 'rev-parse', '--short=8', 'HEAD'], { stdio: ['ignore', 'pipe', 'ignore'] }).toString('utf8').trim();
   } catch {
     return 'unknown';
   }
