@@ -185,7 +185,7 @@ export const en: Shape<typeof he> = {
     title: 'By branch',
     active: 'Active branch',
     approvals: '{count} to decide · {amount}',
-    payRun: 'To pay {pay} · on hold {hold}',
+    payRun: 'Can pay {pay} · on hold {hold}',
     off: 'The pay run is off in this branch',
     error: 'Not loaded right now',
     partial: 'Some branches did not load right now.',

@@ -5,6 +5,8 @@ import type { AppContext } from '../context';
 import { invoiceStatesOf } from '../invoices';
 import { jerusalemDayKey } from '../lib/dueDate';
 import { payRunTasks } from '../tasks/sources';
+import { payRunMonth } from '../agent/tools/bookkeeper';
+import { money } from '../agent/render';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
 
 /**
@@ -143,5 +145,46 @@ describe('home "ריצת התשלומים של החודש" == the pay-run page i
     expect(month.totals.payableIls).toBe(7363.2);
     expect(month.totals.payableIls).toBe(page.totals.payableIls);
     expect(task?.ilsAgorot).toBe(736320);
+  });
+});
+
+describe('other readers of the pay-run totals show the page they open (review of #384)', () => {
+  it("bookkeeper agent pay_run_month: 'ניתן לשלם' / credit / link = payRun.list({ monthOffset }) for this and last month", async () => {
+    await invoice({ exVat: '1000.00', vat: '180.00', number: 'CL-1', acceptedDelta: '50.00' }); // payable, Δ₪50 credit
+    await invoice({ exVat: '6240.00', vat: '1123.20', alloc: null, number: 'MF-1' }); // VAT at risk → held
+    await invoice({ exVat: '2000.00', vat: '360.00', number: 'LM-1', day: LAST_MONTH });
+    const c = caller();
+    for (const previous of [false, true]) {
+      const offset = previous ? -1 : 0;
+      const data = await c.payRun.month({ monthOffset: offset });
+      const facts = payRunMonth.facts(data, { previous });
+      const page = await c.payRun.list({ monthOffset: offset });
+      expect(facts).toContain(`ניתן לשלם: ${money(page.totals.payableIls)}`);
+      expect(facts).toContain(`זיכוי לבקש: ${money(page.totals.creditIls)}`);
+      expect(facts[0]).toContain(previous ? 'בחודש שעבר' : 'החודש');
+      expect(payRunMonth.links!({ previous }, data)).toEqual([`/dashboard/approvals/pay-run?m=${offset}`]);
+    }
+    // This month: the credit is the Δ₪50 asked for, not the claim invoice's ₪1,180 total.
+    const facts0 = payRunMonth.facts(await c.payRun.month(), {});
+    expect(facts0).toContain(`זיכוי לבקש: ${money(50)}`);
+    expect(facts0).toContain(`ניתן לשלם: ${money(1180)}`);
+  });
+
+  it('nav "ריצת תשלומים" badge = what the desk it opens (bare, all unpaid) lets you pay', async () => {
+    await invoice({ exVat: '2000.00', vat: '360.00', number: 'LM-1', day: LAST_MONTH });
+    await invoice({ exVat: '1000.00', vat: '180.00', number: 'TM-1' });
+    const c = caller();
+    const desk = await c.payRun.list();
+    const { badges } = await c.nav.badges();
+    expect(desk.totals.payableIls).toBe(3540);
+    expect(badges.payRun?.ilsAgorot).toBe(354000);
+    expect(badges.payRun?.count).toBe(desk.totals.payableCount);
+  });
+
+  it('nav badge appears for last month alone (the home row does not — it is this month only)', async () => {
+    await invoice({ exVat: '2000.00', vat: '360.00', number: 'LM-1', day: LAST_MONTH });
+    const c = caller();
+    expect(payRunTasks(await c.payRun.month())).toEqual([]);
+    expect((await c.nav.badges()).badges.payRun?.ilsAgorot).toBe(236000);
   });
 });

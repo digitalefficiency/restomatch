@@ -56,7 +56,7 @@ export async function BranchStrip({ kind, then }: { kind: Kind; then: string }) 
               ) : kind === 'payRun' && r.payRun ? (
                 r.payRun.enabled ? (
                   <span className="font-mono text-sm tabular-nums text-ink">
-                    {t('strip.payRun', { pay: ils(r.payRun.payIls), hold: ils(r.payRun.holdIls) })}
+                    {t('strip.payRun', { pay: ils(r.payRun.payableIls), hold: ils(r.payRun.holdIls) })}
                   </span>
                 ) : (
                   <span className="text-sm text-muted">{t('strip.off')}</span>

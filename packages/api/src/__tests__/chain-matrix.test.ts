@@ -183,8 +183,8 @@ describe('byBranchTotals (W3-01b)', () => {
     approvals: { count: 1, blockers: 0, toDecideCount: 1, toDecideIls: a },
     payRun:
       pay === null
-        ? { enabled: false, invoices: 0, payIls: 0, holdIls: 0, claimIls: 0, creditIls: 0, linkIls: 0 }
-        : { enabled: true, invoices: 1, payIls: pay, holdIls: 0, claimIls: 0, creditIls: 0, linkIls: 0 },
+        ? { enabled: false, invoices: 0, payIls: 0, payableIls: 0, holdIls: 0, claimIls: 0, creditIls: 0, linkIls: 0 }
+        : { enabled: true, invoices: 1, payIls: pay, payableIls: pay, holdIls: 0, claimIls: 0, creditIls: 0, linkIls: 0 },
   });
   it('sums approvals ₪ in agorot and flags partial on an error row', () => {
     const t = byBranchTotals([ok(U1, 0.1, null), ok(U2, 0.2, null), { status: 'error', restaurantId: G, name: 'g', isActive: false }], 'approvals');
@@ -193,6 +193,6 @@ describe('byBranchTotals (W3-01b)', () => {
   });
   it('pay run: only branches with the pay run on; none on ⇒ null', () => {
     expect(byBranchTotals([ok(U1, 0, null)], 'payRun').payRun).toBeNull();
-    expect(byBranchTotals([ok(U1, 0, 0.1), ok(U2, 0, 0.2), ok(G, 0, null)], 'payRun').payRun).toMatchObject({ invoices: 2, payIls: 0.3 });
+    expect(byBranchTotals([ok(U1, 0, 0.1), ok(U2, 0, 0.2), ok(G, 0, null)], 'payRun').payRun).toMatchObject({ invoices: 2, payIls: 0.3, payableIls: 0.3 });
   });
 });

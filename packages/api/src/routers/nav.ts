@@ -8,6 +8,7 @@ import { loadLinkQueueCandidates } from '../catalog/linkQueueLoad';
 import { collectTasks } from '../tasks/collect';
 import { WHERE_IS_KINDS, whereIs } from '../tasks/whereIs';
 import { priceAlertsRouter } from './priceAlerts';
+import { payRunRouter } from './payRun';
 import { recoveryRouter } from './recovery';
 
 /**
@@ -41,6 +42,19 @@ export const navRouter = router({
         badges.claims = { ...badges.claims, ilsAgorot: owed > 0 ? owed : null, money: 'owed' };
       } catch {
         failed.push('claimsOwed');
+      }
+    }
+    // The pay-run badge shows the ₪ of the page the nav item opens: the full unpaid desk
+    // (payRun.list(), unwindowed) — not the home row's month figure (review of #384).
+    if (finance && (await isFeatureOn(ctx.db, rid, 'payRun'))) {
+      try {
+        const desk = await payRunRouter.createCaller(sub).list();
+        const agorot = Math.round(desk.totals.payableIls * 100);
+        if (desk.enabled && agorot > 0) {
+          badges.payRun = { ...(badges.payRun ?? { block: false, tone: 'neutral' as const }), count: desk.totals.payableCount, ilsAgorot: agorot };
+        } else delete badges.payRun;
+      } catch {
+        failed.push('payRun');
       }
     }
     // W3-07a · "חיבורים": a dot only while a connection needs action (owner + manager,
