@@ -326,6 +326,52 @@ describe('payRun.month', () => {
     }
   });
 
+  it('past the window: a tolerance row the engine auto-approved is waived, never a credit (G-14 Q3, owner M7)', async () => {
+    await ownerDb.execute(sql`
+      WITH inv AS (
+        INSERT INTO invoices (restaurant_id, supplier_id, invoice_number, invoice_date, total_excl_vat, vat_amount, total_incl_vat, status, source)
+        SELECT ${A.restaurantId}, ${A.supplierId}, 'PAID-WIN4-' || g, now(), 5000, 850, 5850, 'paid', 'photo'
+        FROM generate_series(1, 205) g
+        RETURNING id
+      ), mr AS (
+        INSERT INTO match_runs (restaurant_id, po_id, gr_id, invoice_id, overall_status, total_discrepancy_amount)
+        SELECT ${A.restaurantId}, ${A.poId}, ${A.grId}, inv.id, 'major', 1000 FROM inv
+        RETURNING id
+      )
+      INSERT INTO discrepancies (match_run_id, restaurant_id, type, severity, delta_amount, requires_role, resolution_status)
+      SELECT mr.id, ${A.restaurantId}, 'PRICE_HIGHER', 'warn', 1000, 'manager', 'resolved' FROM mr
+    `);
+    // EDGE-TOL: accepted by an engine rule with no person (the system decision `tolerate`).
+    await ownerDb.execute(sql`
+      WITH inv AS (
+        INSERT INTO invoices (restaurant_id, supplier_id, invoice_number, invoice_date, total_excl_vat, vat_amount, total_incl_vat, status, source)
+        VALUES (${A.restaurantId}, ${A.supplierId}, 'EDGE-TOL', now(), 256.41, 43.59, 300, 'matched', 'photo')
+        RETURNING id
+      ), mr AS (
+        INSERT INTO match_runs (restaurant_id, po_id, gr_id, invoice_id, overall_status, total_discrepancy_amount)
+        SELECT ${A.restaurantId}, ${A.poId}, ${A.grId}, inv.id, 'major', 40 FROM inv
+        RETURNING id
+      )
+      INSERT INTO discrepancies (match_run_id, restaurant_id, type, severity, delta_amount, requires_role, resolution_status, rule_id)
+      SELECT mr.id, ${A.restaurantId}, 'PRICE_HIGHER', 'warn', 40, 'manager', 'accepted', 'minor-info' FROM mr
+    `);
+    try {
+      const r = await asA().payRun.month();
+      const tol = r.suppliers.flatMap((x) => x.invoices).find((i) => i.invoiceNumber === 'EDGE-TOL')!;
+      expect(tol).toMatchObject({ status: 'pay', creditIls: 0 });
+      const list = await asA().payRun.list({});
+      const row = list.rows.find((x) => x.invoiceNumber === 'EDGE-TOL')!;
+      expect(row.creditIls).toBe(0);
+    } finally {
+      await ownerDb.execute(sql`
+        DELETE FROM discrepancies WHERE match_run_id IN (
+          SELECT mr.id FROM match_runs mr JOIN invoices i ON i.id = mr.invoice_id
+          WHERE i.invoice_number LIKE 'PAID-WIN4-%' OR i.invoice_number = 'EDGE-TOL')`);
+      await ownerDb.execute(sql`DELETE FROM match_runs WHERE invoice_id IN (SELECT id FROM invoices WHERE invoice_number LIKE 'PAID-WIN4-%' OR invoice_number = 'EDGE-TOL')`);
+      await ownerDb.execute(sql`DELETE FROM invoices WHERE invoice_number LIKE 'PAID-WIN4-%' OR invoice_number = 'EDGE-TOL'`);
+    }
+  });
+
   it('past the window: an accepted duplicate copy holds, an open unordered arrival waits for its link — never "can pay"', async () => {
     await ownerDb.execute(sql`
       WITH inv AS (

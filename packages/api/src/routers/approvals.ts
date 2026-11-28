@@ -25,7 +25,7 @@ import {
   users,
   type UserRole,
 } from '@restomatch/db';
-import { LEAK_FILTER, notZeroShortTwin, type LeakBreakdownInvoice } from '@restomatch/charts';
+import { computeInvoicesLeak, notZeroShortTwin } from '@restomatch/charts';
 import { authedProcedure, financeProcedure, memberProcedure, router } from '../trpc';
 import { canActOn, expandVisibleRoles } from '../lib/roles';
 import { seesNoMoney } from '../lib/staffMoney';
@@ -337,10 +337,19 @@ export const approvalsRouter = router({
       // The claimable ₪ per row (lib/claims rule, per-invoice cap): the group
       // header, the BatchBar Σ and `seenClaimAgorot` on approve all read it.
       const claims = await claimsByRow(ctx.db, rid, rows.filter(isClaimableRow));
+      // A reopened row that still holds a live claim is already claimed (G-14 Q3 R5-5): not
+      // "claimable" here either, exactly as queueSummary's count (awaiting.ts) — one allocation.
+      const claimable = (r: (typeof rows)[number]) => isClaimableRow(r) && !claims.claimed.has(r.id);
       return rows.map((r) => ({
         ...(r.poId ? r : { ...r, qtyOrdered: null, orderedUnit: null, poRef: null, poDate: null }),
-        claimable: isClaimableRow(r),
-        claimAgorot: isClaimableRow(r) ? Math.round((claims.get(r.id)?.amount ?? 0) * 100) : 0,
+        claimable: claimable(r),
+        claimAgorot: claimable(r) ? Math.round((claims.amounts.get(r.id)?.amount ?? 0) * 100) : 0,
+        /**
+         * The row already holds a live claim (reopened): no ₪ to decide, but it keeps its type's
+         * real verbs (a duplicate stays "don't pay this copy") — never mapped onto "mark as reviewed",
+         * which would waive it (a rejected duplicate leaves the hold and the leak). Round 7, item 4.
+         */
+        claimed: claims.claimed.has(r.id),
         canAct: canActOn(ctx.session.role, r.requiredRole),
         /** Who decides it: its routed role, or 'unrouted' (owner / manager). */
         waitingOn: (r.requiredRole ?? 'unrouted') as AwaitingRouting,
@@ -733,7 +742,7 @@ async function loadDecisionRows(tx: Database, ctx: Ctx, ids: readonly string[]):
   if (found.length !== new Set(ids).size) throw new TRPCError({ code: 'NOT_FOUND', message: 'discrepancy not found' });
   const tctx = { ...ctx, db: tx };
   for (const r of found) await assertCanAct(tctx, r);
-  const amounts = await claimsByRow(tx, rid, found);
+  const { amounts } = await claimsByRow(tx, rid, found);
   return new Map(
     found.map((r) => {
       const a = amounts.get(r.id);
@@ -1157,85 +1166,32 @@ async function decidedConflict(ctx: Ctx, discrepancyId: string): Promise<TRPCErr
 
 /**
  * The claimable ₪ of each given queue row, by the lib/claims rule (the same
- * per-invoice cap as the credit letters and the pay run). ONE query loads every
- * discrepancy line of the rows' invoices with the charts LEAK_FILTER flag —
- * the same inputs computeInvoiceLeak reads per invoice (cap = LEAST(Σ leak
- * lines, invoice total); a paid invoice or one still waiting for its PO link
- * claims nothing) — and claimableLines applies the cap. Rows without an invoice
- * have nothing to claim yet.
+ * per-invoice cap as the credit letters and the pay run), over the invoices'
+ * leaks from charts computeInvoicesLeak. Rows without an invoice have nothing
+ * to claim yet.
  */
 async function claimsByRow(
   db: import('@restomatch/db').Database,
   restaurantId: string,
   rows: ReadonlyArray<{ id: string; invoiceId: string | null }>,
-): Promise<Map<string, { amount: number; basis: VatBasis }>> {
+): Promise<{ amounts: Map<string, { amount: number; basis: VatBasis }>; claimed: Set<string> }> {
   const out = new Map<string, { amount: number; basis: VatBasis }>();
+  const claimed = new Set<string>();
   const invoiceIds = [...new Set(rows.map((r) => r.invoiceId).filter((v): v is string => !!v))];
-  if (invoiceIds.length === 0) return out;
-  const res = await db.execute(sql`
-    SELECT mr.invoice_id, i.status, COALESCE(i.total_incl_vat, 0) AS total,
-      d.id, d.type, d.severity, d.resolution_status, d.delta_amount, (${LEAK_FILTER}) AS counts
-    FROM discrepancies d
-    JOIN match_runs mr ON mr.id = d.match_run_id AND mr.restaurant_id = ${restaurantId}
-    JOIN invoices i ON i.id = mr.invoice_id AND i.restaurant_id = ${restaurantId}
-    WHERE d.restaurant_id = ${restaurantId}
-      AND mr.invoice_id IN (${sql.join(invoiceIds.map((id) => sql`${id}::uuid`), sql`, `)})
-    ORDER BY ABS(d.delta_amount) DESC, d.id
-  `);
-  type Row = Record<string, unknown>;
-  const list: Row[] = Array.isArray(res) ? (res as Row[]) : ((res as { rows?: Row[] }).rows ?? []);
-  const byInvoice = new Map<string, LeakBreakdownInvoice>();
-  const rawLeak = new Map<string, number>();
-  for (const r of list) {
-    const key = String(r.invoice_id);
-    let inv = byInvoice.get(key);
-    if (!inv) {
-      inv = {
-        invoiceId: key,
-        invoiceNumber: null,
-        invoiceDate: null,
-        status: String(r.status),
-        supplierName: null,
-        supplierNameEn: null,
-        totalInclVat: Number(r.total),
-        leakIls: 0,
-        pendingLink: false,
-        lines: [],
-      };
-      byInvoice.set(key, inv);
-    }
-    const delta = Number(r.delta_amount ?? 0);
-    const counts = Boolean(r.counts);
-    if (counts) rawLeak.set(key, (rawLeak.get(key) ?? 0) + Math.abs(Math.round(delta * 100)));
-    if (r.type === 'UNORDERED_ARRIVAL' && (r.resolution_status === 'open' || r.resolution_status === 'escalated')) {
-      inv.pendingLink = true;
-    }
-    inv.lines.push({
-      discrepancyId: String(r.id),
-      type: String(r.type),
-      severity: String(r.severity),
-      resolutionStatus: String(r.resolution_status),
-      deltaAmount: delta,
-      expected: null,
-      actual: null,
-      countsAsLeak: counts,
-      productName: null,
-      productNameEn: null,
-      lineDescription: null,
-      lineDescriptionEn: null,
-      poLineId: null,
-      invoiceLineId: null,
-      productId: null,
-    });
-  }
+  if (invoiceIds.length === 0) return { amounts: out, claimed };
+  // G-14 Q3: the invoices' leaks from the charts batch (the same lines, cap, pending-link
+  // rule and `tolerated` flag as the tile, the letters and the pay run) — so a tolerance row
+  // the engine auto-approved (owner M7: waived) never takes cap from the open rows.
+  const byInvoice = await computeInvoicesLeak(db, restaurantId, invoiceIds);
   const wanted = new Set(rows.map((r) => r.id));
   for (const inv of byInvoice.values()) {
-    inv.leakIls = Math.min((rawLeak.get(inv.invoiceId) ?? 0) / 100, inv.totalInclVat);
+    for (const l of inv.lines) if (l.ledger?.liveClaim && wanted.has(l.discrepancyId)) claimed.add(l.discrepancyId);
     for (const c of claimableLines(inv)) {
-      if (wanted.has(c.line.discrepancyId)) out.set(c.line.discrepancyId, { amount: c.amount, basis: c.basis });
+      // "To decide" is the undecided ₪ only — a row holding a live claim is already claimed (G-14 Q3).
+      if (c.undecided && wanted.has(c.line.discrepancyId)) out.set(c.line.discrepancyId, { amount: c.amount, basis: c.basis });
     }
   }
-  return out;
+  return { amounts: out, claimed };
 }
 
 /**

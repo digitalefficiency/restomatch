@@ -392,6 +392,7 @@ export { RECOVERY_TRANSITIONS, canTransition, allocateCredit, ageingBucket } fro
 export { DESK_CREDIT_SUGGESTIONS_PATH, DESK_REMINDERS_PATH, enqueueRecoveryReminders, recoveryReminderEmail } from './recovery/reminders';
 // AU-03 (A12): the one chase predicate, the pre-addressed reminder draft, credit suggestions.
 export { isAwaitingChase, awaitingChaseSql, CHASE_STATUSES, CHASE_DEFAULTS, type ChaseClaim } from './recovery/overdue';
+export { CAPPED_AWAY_CASES, isCappedAway as isCappedAwayApi, type CappedAwayInput } from './recovery/cappedAway';
 export { supplierReminderDraft, waPhoneE164, type SupplierReminderDraftText } from './recovery/chase';
 export { creditSuggestions, confirmCreditSuggestion, proposeCreditAllocations, type CreditSuggestion } from './recovery/creditSuggest';
 export {

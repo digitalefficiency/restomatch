@@ -11,6 +11,8 @@ import {
   type RecoveryStatus,
 } from '@restomatch/db';
 import { TOLERATED_SQL } from '@restomatch/charts';
+import { claimBasis } from './owed';
+import { isCappedAway } from './cappedAway';
 import { assertSupplierOwned } from '../tenant';
 import { appError } from '../errors';
 import { HELD_FOR_RECEIPTS_KEY } from '@restomatch/charts';
@@ -458,6 +460,14 @@ export interface RecoveryClaimRow {
   amountAgorot: number;
   creditedAgorot: number;
   outstandingAgorot: number;
+  /**
+   * What the claim stands for on the one basis (G-14 Q3 R5-3): max(its capped share of the invoice
+   * from the leak ledger's allocator, what was already credited) — credit received is never capped
+   * away — or the stored amount for a claim outside the ledger.
+   * The desk's "claimed", write-offs and recovery rate read it, so its funnel adds up with outstanding.
+   * Optional for hand-built rows (absent = amountAgorot); listClaims always sets it.
+   */
+  cappedAgorot?: number;
   supplierId: string | null;
   supplierName: string | null;
   supplierNameEn: string | null;
@@ -513,7 +523,7 @@ export async function listClaims(
     SELECT
       c.id, c.discrepancy_id, c.status, c.amount_agorot, c.credited_agorot, c.supplier_id, c.invoice_id,
       c.claimed_at, c.letter_sent_at, c.acknowledged_at, c.credited_at, c.recovered_at, c.closed_at,
-      c.last_reminder_at, c.note,
+      c.last_reminder_at, c.note, GREATEST(0, c.amount_agorot - c.credited_agorot) AS outstanding,
       s.name AS supplier_name, s.name_en AS supplier_name_en,
       round(COALESCE(s.vat_rate, tz.vat_rate) * 10000)::int AS vat_rate_bp,
       i.invoice_number,
@@ -521,6 +531,7 @@ export async function listClaims(
       p.canonical_name AS product_name, p.name_en AS product_name_en,
       il.raw_description AS line_description, il.raw_description_en AS line_description_en,
       cn.number AS credit_note_number,
+      mr.invoice_id AS finding_invoice_id,
       -- Ageing in the restaurant's calendar days (Asia/Jerusalem by default).
       ((${now.toISOString()}::timestamptz AT TIME ZONE tz.tz)::date - (c.claimed_at AT TIME ZONE tz.tz)::date) AS age_days,
       -- Overdue: exactly the reminder job's rule (findOverdue), so the badge and the email agree;
@@ -532,6 +543,7 @@ export async function listClaims(
     FROM recovery_claims c
     CROSS JOIN (SELECT COALESCE(timezone, 'Asia/Jerusalem') AS tz, vat_rate FROM restaurants WHERE id = ${restaurantId}) tz
     JOIN discrepancies d ON d.id = c.discrepancy_id AND d.restaurant_id = ${restaurantId}
+    LEFT JOIN match_runs mr ON mr.id = d.match_run_id AND mr.restaurant_id = ${restaurantId}
     LEFT JOIN suppliers s ON s.id = c.supplier_id AND s.restaurant_id = ${restaurantId}
     LEFT JOIN invoices i ON i.id = c.invoice_id AND i.restaurant_id = ${restaurantId}
     LEFT JOIN products p ON p.id = d.product_id AND p.restaurant_id = ${restaurantId}
@@ -545,7 +557,14 @@ export async function listClaims(
       c.claimed_at ASC, c.id
     ${limit === null ? sql`` : sql`LIMIT ${limit}`}
   `);
-  return rowsOf(res).map((r) => {
+  const rows = rowsOf(res);
+  // G-14 Q3 R4-2: what is still owed on a claim is its share of the invoice cap from the one
+  // allocator (live claims first, at LEAST(claim, |Δ|)), less what was credited — the same ₪ the
+  // hero, report, pay run and dock slip use. When an invoice's total drops below its claims, the
+  // tracker and the letters ask for the cap, never Σ of the stored claim amounts.
+  const basis = await claimBasis(db, restaurantId, rows as never);
+  const owedOf = basis.map((b) => b.owedAgorot);
+  return rows.map((r, k) => {
     const status = String(r.status) as RecoveryStatus;
     const amount = int(r.amount_agorot);
     const credited = int(r.credited_agorot);
@@ -556,7 +575,8 @@ export async function listClaims(
       status,
       amountAgorot: amount,
       creditedAgorot: credited,
-      outstandingAgorot: open ? Math.max(0, amount - credited) : 0,
+      outstandingAgorot: open ? owedOf[k]! : 0,
+      cappedAgorot: basis[k]!.cappedAgorot,
       supplierId: (r.supplier_id as string | null) ?? null,
       supplierName: (r.supplier_name as string | null) ?? null,
       supplierNameEn: (r.supplier_name_en as string | null) ?? null,
@@ -576,12 +596,16 @@ export async function listClaims(
       lastReminderAt: isoOrNull(r.last_reminder_at),
       ageDays: int(r.age_days),
       // A chase figure: only a claim whose letter went out (train-C gate 11.11 — never an unsent request).
-      overdue: (CHASE_STATUSES as readonly string[]).includes(status) && r.waiting_overdue === true,
+      // isAwaitingChase's `outstandingAgorot > 0`, on the capped owed ₪ (G-14 Q3 R5-1).
+      overdue: (CHASE_STATUSES as readonly string[]).includes(status) && r.waiting_overdue === true && open && owedOf[k]! > 0,
       creditNoteNumber: (r.credit_note_number as string | null) ?? null,
       note: (r.note as string | null) ?? null,
       next: nextEdges(status, { amountAgorot: amount, creditedAgorot: credited }),
       vatRateBp: int(r.vat_rate_bp),
-      daysOverdue: (CHASE_STATUSES as readonly string[]).includes(status) && r.waiting_overdue === true ? int(r.days_past) : 0,
+      daysOverdue:
+        (CHASE_STATUSES as readonly string[]).includes(status) && r.waiting_overdue === true && open && owedOf[k]! > 0
+          ? int(r.days_past)
+          : 0,
     };
   });
 }
@@ -628,6 +652,8 @@ const ALL_STATUSES: RecoveryStatus[] = [
   'written_off',
 ];
 
+export { isCappedAway, CAPPED_AWAY_CASES } from './cappedAway';
+
 /** Totals, ageing and per-supplier recovery rate — all integer agorot, summed from listClaims. */
 export function summarize(claims: ReadonlyArray<RecoveryClaimRow>): RecoverySummary {
   const ageing: Record<AgeingBucket, number> = { d0_30: 0, d31_60: 0, d61_90: 0, d90p: 0 };
@@ -644,19 +670,21 @@ export function summarize(claims: ReadonlyArray<RecoveryClaimRow>): RecoverySumm
     overdue: 0,
   };
   for (const c of claims) {
-    sum.claimed += c.amountAgorot;
+    // One basis (R5-3): what a claim stands for is its capped share (cappedAgorot), like outstanding.
+    const basisAg = c.cappedAgorot ?? c.amountAgorot;
+    sum.claimed += basisAg;
     sum.credited += c.creditedAgorot;
     sum.outstanding += c.outstandingAgorot;
     if (c.status === 'recovered') sum.recovered += c.creditedAgorot;
     // Written off: the whole remainder; recovered short of the claim: the shortfall the team let go.
-    if (c.status === 'written_off' || c.status === 'recovered') sum.writtenOff += Math.max(0, c.amountAgorot - c.creditedAgorot);
+    if (c.status === 'written_off' || c.status === 'recovered') sum.writtenOff += Math.max(0, basisAg - c.creditedAgorot);
     if (c.status === 'disputed') sum.disputed += c.outstandingAgorot;
     if (c.overdue) {
       sum.overdueCount += 1;
       sum.overdue += c.outstandingAgorot;
     }
     if (c.outstandingAgorot > 0) ageing[ageingBucket(c.ageDays)] += c.outstandingAgorot;
-    byStatus[c.status].count += 1;
+    if (!isCappedAway(c)) byStatus[c.status].count += 1;
     byStatus[c.status].agorot += c.status === 'recovered' || c.status === 'credited' ? c.creditedAgorot : c.outstandingAgorot;
 
     const key = c.supplierId ?? '—';
@@ -672,7 +700,7 @@ export function summarize(claims: ReadonlyArray<RecoveryClaimRow>): RecoverySumm
       recoveryRate: null,
     };
     s.claimCount += 1;
-    s.claimedAgorot += c.amountAgorot;
+    s.claimedAgorot += basisAg;
     s.creditedAgorot += c.creditedAgorot;
     if (c.status === 'recovered') s.recoveredAgorot += c.creditedAgorot;
     s.outstandingAgorot += c.outstandingAgorot;

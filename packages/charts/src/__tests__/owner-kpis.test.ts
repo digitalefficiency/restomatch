@@ -15,10 +15,12 @@ import {
   productAliases,
   products,
   purchaseOrders,
+  recoveryClaims,
   restaurants,
   suppliers,
   users,
 } from '@restomatch/db';
+import { computeLeakHero } from '../leak-hero';
 import { computeOwnerKpis, emptyKpis } from '../owner-kpis';
 
 const TEST_DB_URL =
@@ -26,6 +28,7 @@ const TEST_DB_URL =
 const db = createDb(TEST_DB_URL);
 
 async function resetDb() {
+  await db.delete(recoveryClaims);
   await db.delete(discrepancies);
   await db.delete(matchRuns);
   await db.delete(invoiceLines);
@@ -47,6 +50,16 @@ async function resetDb() {
 async function seedRestaurant() {
   const [r] = await db.insert(restaurants).values({ name: 'KPI Bistro' }).returning();
   return r!.id;
+}
+
+/** A match run on an invoice of this month (savings is the hero's figure: leak lines of real invoices). */
+async function invoiceRun(restaurantId: string, total = '100000.00') {
+  const [i] = await db.insert(invoices).values({ restaurantId, source: 'manual', status: 'matched', totalInclVat: total }).returning();
+  const [mr] = await db
+    .insert(matchRuns)
+    .values({ restaurantId, invoiceId: i!.id, overallStatus: 'major', totalDiscrepancyAmount: '0' })
+    .returning();
+  return mr!;
 }
 
 beforeEach(resetDb);
@@ -117,10 +130,7 @@ describe('computeOwnerKpis', () => {
 
   it('sums resolved discrepancies into savingsCaptured', async () => {
     const restaurantId = await seedRestaurant();
-    const [mr] = await db
-      .insert(matchRuns)
-      .values({ restaurantId, overallStatus: 'major', totalDiscrepancyAmount: '0' })
-      .returning();
+    const mr = await invoiceRun(restaurantId);
 
     await db.insert(discrepancies).values([
       {
@@ -149,10 +159,7 @@ describe('computeOwnerKpis', () => {
 
   it('G-15 Q8: a SYSTEM auto-accept (accepted, no resolved_at) is never counted as savings', async () => {
     const restaurantId = await seedRestaurant();
-    const [mr] = await db
-      .insert(matchRuns)
-      .values({ restaurantId, overallStatus: 'major', totalDiscrepancyAmount: '0' })
-      .returning();
+    const mr = await invoiceRun(restaurantId);
     await db.insert(discrepancies).values([
       // person's accept → savings
       { matchRunId: mr!.id, restaurantId, type: 'PRICE_HIGHER', severity: 'warn', resolutionStatus: 'accepted', resolvedAt: new Date(), deltaAmount: '300' },
@@ -162,6 +169,31 @@ describe('computeOwnerKpis', () => {
     ]);
     const kpis = await computeOwnerKpis(db, restaurantId);
     expect(kpis.monthSavingsCapturedIls).toBe(300);
+  });
+
+  it('G-14 Q3: savings is the hero\'s "claimed" — capped, a live claim at its amount, a write-off at what came back', async () => {
+    const restaurantId = await seedRestaurant();
+    const person = { resolvedAt: new Date() };
+    const d = (mr: { id: string }, v: Partial<typeof discrepancies.$inferInsert>) =>
+      db.insert(discrepancies).values({ matchRunId: mr.id, restaurantId, type: 'PRICE_HIGHER', severity: 'warn', resolutionStatus: 'open', deltaAmount: '0', ...v }).returning();
+    const claim = (discrepancyId: string, v: Partial<typeof recoveryClaims.$inferInsert>) =>
+      db.insert(recoveryClaims).values({ restaurantId, discrepancyId, amountAgorot: 0, ...v });
+    // S4: a ₪10 accept on an ₪8 invoice → ₪8 (capped).
+    await d(await invoiceRun(restaurantId, '8.00'), { resolutionStatus: 'accepted', deltaAmount: '10', ...person });
+    // S5: an acknowledged ₪6 claim on a rejected row (₪6 claimed) + a ₪3 accept → ₪9.
+    const s5 = await invoiceRun(restaurantId);
+    const [rej] = await d(s5, { resolutionStatus: 'rejected', deltaAmount: '6', ...person });
+    await claim(rej!.id, { status: 'acknowledged', amountAgorot: 600 });
+    await d(s5, { type: 'QTY_SHORT', resolutionStatus: 'accepted', deltaAmount: '3', ...person });
+    // S6: a ₪10 claim written off with ₪4 credited → ₪4 (the rest is waived).
+    const [wo] = await d(await invoiceRun(restaurantId), { resolutionStatus: 'accepted', deltaAmount: '10', ...person });
+    await claim(wo!.id, { status: 'written_off', amountAgorot: 1000, creditedAgorot: 400 });
+    // A bare accept (no person, no rule; legacy) → ₪7, as the decision table says.
+    await d(await invoiceRun(restaurantId), { resolutionStatus: 'accepted', deltaAmount: '7' });
+    const kpis = await computeOwnerKpis(db, restaurantId);
+    const hero = await computeLeakHero(db, restaurantId);
+    expect(kpis.monthSavingsCapturedIls).toBe(28);
+    expect(kpis.monthSavingsCapturedIls).toBe(hero.recoveredIls);
   });
 
   it('weekCleanMatchPct computed correctly', async () => {

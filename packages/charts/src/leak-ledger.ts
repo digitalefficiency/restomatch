@@ -23,7 +23,7 @@ type SQL = ReturnType<typeof sql>;
  * ONE ALLOCATOR. Per invoice the cap is round(total_incl_vat × 100) (the hero's
  * per-invoice cap and syncClaims' cap). Rows draw from it greedily in the order
  *   tier 1 — rows holding a live claim: their persisted `amount_agorot` (≤ |Δ|);
- *   tier 2 — other decided rows (claim / waive effect, no live claim): |Δ|;
+ *   tier 2 — other decided rows (claim / waive effect, no live claim): |Δ|, claims before waivers;
  *   tier 3 — undecided rows: only what is left;
  * and inside a tier (created_at, id) — the order of syncClaims and the monthly
  * report's cappedIssues. capped = LEAST(want, GREATEST(0, cap − Σ wants before)).
@@ -81,8 +81,9 @@ export interface LeakLedgerRow {
   /** Where paidAt came from; 'interim' = the updated_at estimate until H-03/H-04 (label it). */
   paidSource: PaidSource;
   /**
-   * Part of cappedAgorot that a written-off claim never got back: the row's state is
-   * `credited` for its credited agorot only; this remainder is reported as `waived`.
+   * Part of cappedAgorot that a closed claim never got back (written off with part credited, or
+   * recovered short — shortfallAgorot): the row's state covers what came back only; this
+   * remainder is reported as `waived`.
    */
   writtenOffAgorot: number;
   claimId: string | null;
@@ -177,6 +178,51 @@ export async function paymentTables(db: Database): Promise<{ ledger: boolean; de
 
 /** The tier rule of decisions.allocationTier, in SQL over the ledger's `x` columns. */
 const TIER_SQL: SQL = sql`(CASE WHEN x.live_claim THEN 1 WHEN x.effect = 'undecided' THEN 3 ELSE 2 END)`;
+/** A live claim on recovery_claims alias `rc` (decisions.isLiveClaim): any claim but a written-off one with ₪0 back. */
+const LIVE_CLAIM_SQL: SQL = sql`(rc.id IS NOT NULL AND NOT (rc.status = 'written_off' AND COALESCE(rc.credited_agorot, 0) = 0))`;
+/** What a row asks of the cap: a live claim its persisted amount (≤ |Δ|), any other row |Δ|. */
+const WANT_SQL: SQL = sql`(CASE WHEN x.live_claim THEN LEAST(COALESCE(x.claim_amount, 0), x.raw_agorot) ELSE x.raw_agorot END)`;
+/**
+ * THE allocator: a row's capped agorot over `w` (tier, want, cap_agorot per invoice). Greedy in
+ * (tier, claims before waivers, created_at, id). The ledger and every per-line ₪ use this one
+ * expression (leakLedgerSql, invoiceAllocationSql), so no screen splits a cap its own way.
+ */
+const CAPPED_SQL: SQL = sql`LEAST(w.want, GREATEST(0, w.cap_agorot - (SUM(w.want) OVER (
+  PARTITION BY w.invoice_id ORDER BY w.tier, (w.effect = 'waive'), w.created_at, w.discrepancy_id
+  ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+) - w.want)))`;
+
+/**
+ * The ledger allocation of every counting row of the given invoices, whatever their dates
+ * (the per-invoice twin of leakLedgerSql, no period window): a SELECT of discrepancy_id, tier,
+ * effect, claim_status, claim_amount, credited_agorot, live_claim, capped_agorot. `counts` is
+ * the line filter (LEAK_FILTER, or a view's lineFilter — the same rows the ledger of that view
+ * allocates). Rows outside the ledger (not counting, or effect `excluded`) are absent.
+ * `invoiceIds` must be non-empty.
+ */
+export function invoiceAllocationSql(restaurantId: string, invoiceIds: readonly string[], counts: SQL): SQL {
+  if (invoiceIds.length === 0) throw new Error('invoiceAllocationSql: invoiceIds is empty');
+  return sql`SELECT w.discrepancy_id, w.tier, w.effect, w.claim_status, w.claim_amount, w.credited_agorot,
+      w.live_claim, ${CAPPED_SQL} AS capped_agorot
+    FROM (
+      SELECT x.*, ${TIER_SQL} AS tier, ${WANT_SQL} AS want
+      FROM (
+        SELECT d.id AS discrepancy_id, mr.invoice_id, ${effectSql()} AS effect, d.created_at,
+          round(abs(COALESCE(d.delta_amount, 0)) * 100)::bigint AS raw_agorot,
+          round(COALESCE(i.total_incl_vat, 0) * 100)::bigint AS cap_agorot,
+          rc.status AS claim_status, rc.amount_agorot AS claim_amount,
+          COALESCE(rc.credited_agorot, 0) AS credited_agorot,
+          ${LIVE_CLAIM_SQL} AS live_claim
+        FROM invoices i
+        JOIN match_runs mr ON mr.invoice_id = i.id AND mr.restaurant_id = ${restaurantId}
+        JOIN discrepancies d ON d.match_run_id = mr.id AND d.restaurant_id = ${restaurantId}
+        LEFT JOIN recovery_claims rc ON rc.discrepancy_id = d.id AND rc.restaurant_id = ${restaurantId}
+        WHERE i.restaurant_id = ${restaurantId}
+          AND i.id IN (${sql.join(invoiceIds.map((id) => sql`${id}::uuid`), sql`, `)})
+          AND ${counts} AND ${effectSql()} <> 'excluded'
+      ) x
+    ) w`;
+}
 
 /** The ledger CTEs (`b`, `inv`, `per`, `x`, `led`) for a view. */
 export function leakLedgerSql(
@@ -201,7 +247,7 @@ export function leakLedgerSql(
         to_jsonb(d) -> 'basis' AS basis,
         rc.id AS claim_id, rc.status AS claim_status, rc.amount_agorot AS claim_amount,
         COALESCE(rc.credited_agorot, 0) AS credited_agorot,
-        (rc.id IS NOT NULL AND NOT (rc.status = 'written_off' AND COALESCE(rc.credited_agorot, 0) = 0)) AS live_claim
+        ${LIVE_CLAIM_SQL} AS live_claim
       FROM inv
       CROSS JOIN (SELECT tz FROM b) bt
       JOIN invoices i ON i.id = inv.id AND i.restaurant_id = ${restaurantId}
@@ -213,16 +259,11 @@ export function leakLedgerSql(
       WHERE ${LF} AND ${effectSql()} <> 'excluded'
     ),
     w AS (
-      SELECT x.*, ${TIER_SQL} AS tier,
-        CASE WHEN x.live_claim THEN LEAST(COALESCE(x.claim_amount, 0), x.raw_agorot) ELSE x.raw_agorot END AS want
+      SELECT x.*, ${TIER_SQL} AS tier, ${WANT_SQL} AS want
       FROM x
     ),
     led AS (
-      SELECT w.*,
-        LEAST(w.want, GREATEST(0, w.cap_agorot - (SUM(w.want) OVER (
-          PARTITION BY w.invoice_id ORDER BY w.tier, w.created_at, w.discrepancy_id
-          ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-        ) - w.want))) AS capped_agorot
+      SELECT w.*, ${CAPPED_SQL} AS capped_agorot
       FROM w
     )`;
 }
@@ -264,8 +305,7 @@ function toLedgerRow(r: Row): LeakLedgerRow {
     paidAt,
     caughtBeforePayment: caughtBefore(createdAt, resolvedAt, paidAt, String(r.tz ?? ISRAEL_TZ)),
     paidSource: (r.paid_source as PaidSource) ?? null,
-    writtenOffAgorot:
-      claimStatus === 'written_off' && creditedAgorot > 0 ? Math.max(0, int(r.capped_agorot) - creditedAgorot) : 0,
+    writtenOffAgorot: shortfallAgorot(claimStatus, creditedAgorot, int(r.capped_agorot)),
     claimId: r.claim_id == null ? null : String(r.claim_id),
     claimStatus,
     claimAmountAgorot: r.claim_amount == null ? null : int(r.claim_amount),
@@ -275,6 +315,19 @@ function toLedgerRow(r: Row): LeakLedgerRow {
     createdAt,
     resolvedAt,
   };
+}
+
+/**
+ * The part of a closed claim's capped ₪ that never came back, reported as waived (G-14 line 16):
+ * a written-off claim with part credited, and — its twin — a claim closed as `recovered` short of
+ * its amount (recovery books that shortfall as written off; G-14 Q3 R4-1). Main counted a short
+ * recovery as fully recovered. An open claim, or a written-off one with ₪0 back (not live), has none.
+ */
+export function shortfallAgorot(status: ClaimStatus | null, creditedAgorot: number, cappedAgorot: number): number {
+  if (status === 'recovered' || (status === 'written_off' && creditedAgorot > 0)) {
+    return Math.max(0, cappedAgorot - creditedAgorot);
+  }
+  return 0;
 }
 
 export const ISRAEL_TZ = 'Asia/Jerusalem';
@@ -416,4 +469,15 @@ export async function computeLeakPartition(db: Database, restaurantId: string, s
     heroLeakByInvoice(db, restaurantId, spec),
   ]);
   return partitionOf(rows, hero);
+}
+
+/** The money states that are "claimed" (accepted for a claim, in any stage): to_offset … recovered. */
+export const CLAIM_STATES = ['to_offset', 'to_send', 'requested', 'disputed', 'credited', 'recovered'] as const;
+
+/**
+ * G-14 Q3: "claimed" in agorot = Σ of the claim money states. THE one basis for every
+ * "claimed / accepted for a claim" figure (hero.recoveredIls, chain, leak report, monthly).
+ */
+export function claimedAgorotOf(p: Pick<LeakPartition, 'states'>): number {
+  return CLAIM_STATES.reduce((a, s) => a + p.states[s], 0);
 }

@@ -154,6 +154,10 @@ export function effectOf(type: string, statusOrDecision: string): Effect {
  * resolved_at — routers/approvals.ts). An accept with neither a person nor a rule (legacy
  * or seeded rows) stays a plain `accepted`. With the default rules the engine auto-approves
  * only `info` rows (approvals/engine.ts `minor-info`), which are outside the leak anyway.
+ * G-14 Q3 audit (21.11): no current writer produces that bare shape — persist.ts and the demo
+ * seeds always write rule_id (evaluateApproval never returns without one), approvals.decide
+ * stamps resolved_by/resolved_at, undo only ever writes open/escalated — so it is legacy-only
+ * and is treated as 'claim'. A new writer must stamp a person or a rule, never neither.
  */
 export const TOLERATED_SQL: SQL = sql`(d.resolution_status = 'accepted' AND d.resolved_at IS NULL
   AND d.resolved_by IS NULL AND d.rule_id IS NOT NULL)`;

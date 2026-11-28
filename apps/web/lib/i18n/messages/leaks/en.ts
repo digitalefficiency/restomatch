@@ -233,6 +233,8 @@ export const en: Shape<typeof he> = {
     waived: 'Waived',
     partition: 'Awaiting a decision + approved to claim + waived = found, to the agora.',
     capNoteShort: 'Found is {amount} above the leak: each invoice’s leak is capped at the invoice total.',
+    driftNote: 'Found is {amount} below the leak: some credit claims are for less than the gap.',
+    driftNoteAbove: 'Found is {amount} above the leak: a credit invoice (negative total) offsets no gap.',
     lines: '{count} lines',
     byTypeTitle: 'By discrepancy type',
     bySupplierTitle: 'By supplier',

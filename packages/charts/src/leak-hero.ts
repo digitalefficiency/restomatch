@@ -1,8 +1,9 @@
 import { AWAITING_QUESTION_SQL } from './awaiting-question';
-import { DECISION_KEY_SQL } from './decisions';
+import { DECISION_KEY_SQL, effectSql, type ClaimStatus, type Effect } from './decisions';
 import { sql, type Database } from '@restomatch/db';
 import { scanAwaitingCountSql } from './awaiting-count';
 import { LEAK_FILTER, LIVE_DUPLICATE, lineFilter, originalChecked, viewInvoicesSql, type ViewSpec } from './leak-views';
+import { claimedAgorotOf, computeLeakPartition, invoiceAllocationSql } from './leak-ledger';
 
 /**
  * The owner's 10-second story: "₪X leaked this month, Y% of spend, Z caught
@@ -62,6 +63,11 @@ export interface LeakHeroOptions {
   now?: Date;
   /** 0 = this month, -1 = last month, … */
   monthOffset?: number;
+  /**
+   * The month's claimed agorot when the caller already has its partition (the leak report):
+   * skips a second ledger pass. Must be claimedAgorotOf(computeLeakPartition(this month)).
+   */
+  claimedAgorot?: number;
 }
 
 /**
@@ -102,8 +108,10 @@ export function monthInvoicesCte(restaurantId: string, now: Date, offset: number
         COALESCE(inv.total_excl_vat, 0) AS total_excl,
         bool_or(mr.id IS NOT NULL) AS matched,
         COALESCE(SUM(ABS(d.delta_amount)) FILTER (WHERE ${LEAK_FILTER}), 0) AS raw_leak,
+        -- G-14 Q3: "accepted for a claim" = the decision table's 'claim' effect, so a tolerance
+        -- row the engine auto-approved (owner M7: waived) is never counted as recovered.
         COALESCE(SUM(ABS(d.delta_amount)) FILTER (
-          WHERE ${LEAK_FILTER} AND d.resolution_status IN ('accepted','resolved')
+          WHERE ${LEAK_FILTER} AND ${effectSql()} = 'claim'
         ), 0) AS raw_recovered,
         -- Pending = no PO link yet: an UNORDERED_ARRIVAL still open, or not matched
         -- at all (e.g. a parsed consolidated invoice waiting to be linked).
@@ -160,6 +168,11 @@ export async function computeLeakHero(
   const r = rowsOf(res)[0] ?? {};
   const spend = ils(r.spend);
   const leak = ils(r.leak);
+  // G-14 Q3: "recovered" (accepted for a claim) = the leak ledger's claim states for this month —
+  // the one basis every "claimed" figure shares (a live claim's persisted amount, claims first).
+  const mid = new Date((Date.parse(iso(r.lo)) + Date.parse(iso(r.hi))) / 2);
+  const claimed =
+    options.claimedAgorot ?? claimedAgorotOf(await computeLeakPartition(db, restaurantId, { period: 'this_month', now: mid }));
   return {
     monthStart: iso(r.lo),
     monthEnd: iso(r.hi),
@@ -167,7 +180,7 @@ export async function computeLeakHero(
     spendIls: spend,
     leakPct: spend > 0 ? leak / spend : null,
     caughtBeforePaymentIls: ils(r.caught),
-    recoveredIls: ils(r.recovered),
+    recoveredIls: claimed / 100,
     invoiceCount: n(r.invoice_count),
     matchedInvoiceCount: n(r.matched_count),
     invoicesWithLeak: n(r.with_leak),
@@ -195,7 +208,18 @@ export interface LeakBreakdownLine {
    * `tolerate`: accepted with no resolved_at — decisions.ts DECISION_KEY_SQL). Waived: never a
    * credit request. Optional so hand-built lines stay valid; absent = false.
    */
+  /** When the engine found it (ISO). The order key inside a tier (created_at, id) — the leak ledger's. Optional for hand-built lines. */
+  createdAt?: string;
   tolerated?: boolean;
+  /**
+   * G-14 Q3 · this line's share of its invoice's cap from THE allocator (leak-ledger
+   * invoiceAllocationSql: live claims first at their claim amount, then decided — claims before
+   * waivers —, then undecided; (created_at, id) inside a tier). Every per-line ₪ (lib/claims
+   * claimableLines: letters, approvals, pay run, Ask, dock slip) reads it, so no screen splits a
+   * cap its own way. null = a persisted line outside the ledger (not counting, or `excluded`);
+   * absent (undefined) = a hand-built line (a ריכוז proposal, a test).
+   */
+  ledger?: LineLedger | null;
   productName: string | null;
   productNameEn: string | null;
   lineDescription: string | null;
@@ -227,6 +251,20 @@ export interface LeakBreakdownLine {
   expectedSource?: LeakExpectedSource | null;
   /** When that basis was set: the PO's date for 'po', the receipt's for 'receipt' (ISO), else null. */
   expectedAsOf?: string | null;
+}
+
+/** The leak ledger's allocation of one line (see LeakBreakdownLine.ledger). Integer agorot. */
+export interface LineLedger {
+  /** 1 holds a live claim · 2 decided · 3 undecided (decisions.allocationTier). */
+  tier: 1 | 2 | 3;
+  effect: Effect;
+  /** The line's share of the invoice cap. */
+  cappedAgorot: number;
+  /** The claim on the line, when there is one (live or not). */
+  claimStatus: ClaimStatus | null;
+  claimAmountAgorot: number | null;
+  creditedAgorot: number;
+  liveClaim: boolean;
 }
 
 export type LeakExpectedSource = 'po' | 'contract' | 'p90' | 'receipt' | 'invoiceTotal' | 'vat';
@@ -340,7 +378,7 @@ async function breakdownLines(
 ): Promise<Map<string, LeakBreakdownLine[]>> {
   const lineRes = await db.execute(sql`
     SELECT
-      mr.invoice_id, d.id, d.type, d.severity, d.resolution_status, d.delta_amount,
+      mr.invoice_id, d.id, d.type, d.severity, d.resolution_status, d.delta_amount, d.created_at,
       d.expected_value, d.actual_value, d.po_line_id, d.invoice_line_id, d.product_id,
       (${counts}) AS counts,
       (${DECISION_KEY_SQL}) = 'tolerated' AS tolerated,
@@ -359,8 +397,11 @@ async function breakdownLines(
     LEFT JOIN goods_receipts gr ON gr.id = COALESCE(grl.gr_id, mr.gr_id) AND gr.restaurant_id = ${restaurantId}
     WHERE d.restaurant_id = ${restaurantId}
       AND mr.invoice_id IN (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})
-    ORDER BY ABS(d.delta_amount) DESC
+    ORDER BY ABS(d.delta_amount) DESC, d.id
   `);
+  // The allocator as its own query (never joined inline: a windowed subquery on the inner side of
+  // a nested loop re-runs per line — R4-3), attached by discrepancy id.
+  const allocation = await computeLineAllocation(db, restaurantId, ids, counts);
   const linesByInvoice = new Map<string, LeakBreakdownLine[]>();
   for (const l of rowsOf(lineRes)) {
     const key = String(l.invoice_id);
@@ -375,6 +416,8 @@ async function breakdownLines(
       actual: l.actual_value == null ? null : Number(l.actual_value),
       countsAsLeak: Boolean(l.counts),
       tolerated: Boolean(l.tolerated),
+      createdAt: l.created_at == null ? undefined : iso(l.created_at),
+      ledger: allocation.get(String(l.id)) ?? null,
       productName: (l.product_name as string | null) ?? null,
       productNameEn: (l.product_name_en as string | null) ?? null,
       lineDescription: (l.line_desc as string | null) ?? null,
@@ -413,11 +456,11 @@ export function invoiceLeakStateCte(restaurantId: string, invoiceIds: readonly s
         COALESCE(SUM(ABS(d.delta_amount)) FILTER (WHERE ${LEAK_FILTER}), 0) AS raw_leak,
         LEAST(COALESCE(SUM(ABS(d.delta_amount)) FILTER (WHERE ${LEAK_FILTER}), 0), COALESCE(i.total_incl_vat, 0)) AS leak,
         COALESCE(SUM(ABS(d.delta_amount)) FILTER (
-          WHERE ${LEAK_FILTER} AND d.resolution_status IN ('accepted','resolved')
+          WHERE ${LEAK_FILTER} AND ${effectSql()} = 'claim'
         ), 0) AS raw_recovered,
         LEAST(
           COALESCE(SUM(ABS(d.delta_amount)) FILTER (
-            WHERE ${LEAK_FILTER} AND d.resolution_status IN ('accepted','resolved')
+            WHERE ${LEAK_FILTER} AND ${effectSql()} = 'claim'
           ), 0),
           LEAST(COALESCE(SUM(ABS(d.delta_amount)) FILTER (WHERE ${LEAK_FILTER}), 0), COALESCE(i.total_incl_vat, 0))
         ) AS recovered,
@@ -492,6 +535,37 @@ function invoiceOf(r: Row, lines: Map<string, LeakBreakdownLine[]>): LeakBreakdo
 
 const numOrNull = (v: unknown): number | null => (v == null ? null : Number(v));
 
+/**
+ * G-14 Q3 · THE allocator's result for every counting line of the given invoices (whatever their
+ * dates), keyed by discrepancy id: leak-ledger invoiceAllocationSql, one linear query per batch.
+ * `counts` defaults to LEAK_FILTER (the unfiltered ledger). Lines outside the ledger are absent.
+ * The claims tracker / letters read it too, so a claim's outstanding ₪ is its capped share.
+ */
+export async function computeLineAllocation(
+  db: Database,
+  restaurantId: string,
+  invoiceIds: readonly string[],
+  counts: ReturnType<typeof sql> = LEAK_FILTER,
+): Promise<Map<string, LineLedger>> {
+  const out = new Map<string, LineLedger>();
+  const ids = [...new Set(invoiceIds)];
+  for (let at = 0; at < ids.length; at += INVOICE_BATCH) {
+    const res = await db.execute(invoiceAllocationSql(restaurantId, ids.slice(at, at + INVOICE_BATCH), counts));
+    for (const r of rowsOf(res)) {
+      out.set(String(r.discrepancy_id), {
+        tier: Number(r.tier) as 1 | 2 | 3,
+        effect: String(r.effect) as Effect,
+        cappedAgorot: Number(r.capped_agorot ?? 0),
+        claimStatus: (r.claim_status as ClaimStatus | null) ?? null,
+        claimAmountAgorot: r.claim_amount == null ? null : Number(r.claim_amount),
+        creditedAgorot: Number(r.credited_agorot ?? 0),
+        liveClaim: Boolean(r.live_claim),
+      });
+    }
+  }
+  return out;
+}
+
 /** The W2-09c evidence fields of one breakdown row (raw facts; packages/api verifies the math). */
 function evidenceOf(l: Row) {
   const type = String(l.type);
@@ -525,4 +599,15 @@ export async function computeInvoiceLeak(
   invoiceId: string,
 ): Promise<LeakBreakdownInvoice | null> {
   return (await computeInvoicesLeak(db, restaurantId, [invoiceId])).get(invoiceId) ?? null;
+}
+
+/**
+ * G-14 Q3: "claimed" (accepted for a claim) for any view — the leak ledger's claim money states
+ * (to_offset … recovered), the one basis every "claimed" figure shares, so a tolerance row the
+ * engine auto-approved (owner M7: waived) is never counted and a live claim counts at its own
+ * amount. Replaces computeLeakSummary().recoveredIls (leak-views, immutable, which still reads a
+ * status list) wherever a screen shows "claimed".
+ */
+export async function computeClaimedIls(db: Database, restaurantId: string, spec: ViewSpec): Promise<number> {
+  return claimedAgorotOf(await computeLeakPartition(db, restaurantId, spec)) / 100;
 }

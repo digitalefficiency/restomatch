@@ -32,6 +32,31 @@ export const ALL_CLAIMS = 5000;
 /** Waiting on the supplier (the countdown runs) — packages/api AWAITING_SUPPLIER. */
 export const AWAITING: readonly RecoveryStatus[] = ['claimed', 'letter_sent', 'acknowledged'];
 export const CLOSED: readonly RecoveryStatus[] = ['recovered', 'written_off'];
+/** Claims still asking the supplier for money (no credit note yet) — packages/api ASKING_STATUSES. */
+export const ASKING: readonly RecoveryStatus[] = ['claimed', 'letter_sent', 'acknowledged', 'disputed'];
+
+/**
+ * G-14 Q3 R5-4 · a claim the invoice cap leaves at ₪0 before anything came back (still asking,
+ * nothing credited, capped share below its stored amount, nothing owed). It shows "₪0 · of ₪X
+ * (cap reached)", is not "to send" (not listed for sending, never batch-sent), gets no step button
+ * and is never auto-written off. A claim credited its full capped share is not capped away.
+ * Twin of packages/api recovery/cappedAway isCappedAway; both run CAPPED_AWAY_CASES.
+ */
+export function isCappedAway(c: {
+  status: RecoveryStatus;
+  outstandingAgorot: number;
+  amountAgorot: number;
+  creditedAgorot: number;
+  cappedAgorot?: number;
+}): boolean {
+  return (
+    ASKING.includes(c.status) &&
+    c.creditedAgorot === 0 &&
+    c.outstandingAgorot <= 0 &&
+    (c.cappedAgorot ?? c.amountAgorot) < c.amountAgorot
+  );
+}
+
 /** Moves that need a deliberate confirm (they end the claim): never a deferred one-tap. */
 export const CONFIRMED_MOVES: readonly RecoveryStatus[] = ['written_off', 'recovered'];
 
@@ -249,10 +274,18 @@ export function followUps(
  * (Σ credited), a write-off names what is given up (Σ still owed).
  */
 export function confirmAgorot(
-  claims: ReadonlyArray<{ creditedAgorot: number; outstandingAgorot: number }>,
+  claims: ReadonlyArray<{ creditedAgorot: number; outstandingAgorot: number; amountAgorot?: number }>,
   to: 'recovered' | 'written_off',
 ): number {
-  return claims.reduce((s, c) => s + (to === 'recovered' ? c.creditedAgorot : c.outstandingAgorot), 0);
+  // A write-off names what the desk will book (round 7): what is still owed — or, for a claim with
+  // nothing credited (it stops being a live claim), its whole stored amount, which the desk then
+  // counts as written off (a capped-away claim shows ₪0 owed but books its stored ₪; owner question
+  // with N1). "The money came back" names Σ credited.
+  return claims.reduce(
+    (s, c) =>
+      s + (to === 'recovered' ? c.creditedAgorot : c.creditedAgorot === 0 && c.amountAgorot != null ? c.amountAgorot : c.outstandingAgorot),
+    0,
+  );
 }
 
 /** Claims grouped by supplier (phone cards), largest outstanding first. */

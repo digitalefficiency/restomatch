@@ -49,8 +49,8 @@
  * also lists superseded runs.
  *
  * Interims (one line each to swap):
- *  • INTERIM(W2-09a): `invoicesLeak` loops `computeInvoiceLeak`; swap to the batch
- *    `computeInvoicesLeak(db, rid, ids)` (same Map shape, same values).
+ *  • W2-09a (done, G-14 Q3 R5-6): `invoicesLeak` is the batch `computeInvoicesLeak(db, rid, ids)`
+ *    (same Map shape, same values as the old per-invoice loop).
  *  • INTERIM(G-07): `canRead` / `canViewMoney` mirror G-07's `VISIBLE_TO` and
  *    `CAP['money.view']`; swap to `canSee(role, rr)` / `hasCap(role, 'money.view')`.
  */
@@ -67,7 +67,7 @@ import {
   type UserRole,
 } from '@restomatch/db';
 import {
-  computeInvoiceLeak,
+  computeInvoicesLeak,
   notZeroShortTwin,
   type LeakBreakdownInvoice,
   type LeakBreakdownLine,
@@ -144,18 +144,13 @@ function canViewMoney(role: UserRole): boolean {
   return READS_ALL.includes(role);
 }
 
-/** INTERIM(W2-09a): = `computeInvoicesLeak(db, restaurantId, ids)`. */
+/** W2-09a: the batch (one pass for every invoice in scope — G-14 Q3 R5-6, was a per-invoice loop). */
 async function invoicesLeak(
   db: Database,
   restaurantId: string,
   ids: readonly string[],
 ): Promise<Map<string, LeakBreakdownInvoice>> {
-  const out = new Map<string, LeakBreakdownInvoice>();
-  for (const id of new Set(ids)) {
-    const inv = await computeInvoiceLeak(db, restaurantId, id);
-    if (inv) out.set(id, inv);
-  }
-  return out;
+  return computeInvoicesLeak(db, restaurantId, ids);
 }
 
 type Agorot = Record<VatBasis, number>;
@@ -232,16 +227,25 @@ export async function awaitingDecisionDetail(
       : all.filter((r) => canRead(role, r.requiredRole));
 
   const money = canViewMoney(role);
-  const decide = rows.filter(isClaimableRow);
 
   // Per-invoice leak once for every invoice in scope, then the letters' rule.
   const invoiceIds = [...new Set(rows.map((r) => r.invoiceId).filter((v): v is string => !!v))];
   const leaks = invoiceIds.length
     ? await invoicesLeak(db, rid, invoiceIds)
     : new Map<string, LeakBreakdownInvoice>();
+  // A reopened row that still holds a live claim is already claimed (G-14 Q3 R4-4): it has no ₪ to
+  // decide, so it is not counted "to decide" either (it shows under review, count only) — the
+  // count matches the ₪ and the leak report's open lines.
+  const claimedRows = new Set<string>();
+  for (const inv of leaks.values()) for (const l of inv.lines) if (l.ledger?.liveClaim) claimedRows.add(l.discrepancyId);
+  const toDecide = (r: (typeof rows)[number]) => isClaimableRow(r) && !claimedRows.has(r.id);
+  const decide = rows.filter(toDecide);
   const claimAgorot = new Map<string, { agorot: number; basis: VatBasis }>();
   for (const inv of leaks.values()) {
+    // Only the undecided ₪ (the ledger's tier 3) is "to decide": a row holding a live claim is
+    // already claimed (G-14 Q3), even when it was reopened.
     for (const c of claimableLines(inv)) {
+      if (!c.undecided) continue;
       claimAgorot.set(c.line.discrepancyId, { agorot: Math.round(c.amount * 100), basis: c.basis });
     }
   }

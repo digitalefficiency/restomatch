@@ -90,6 +90,28 @@ describe('claimSplit counts each finding once', () => {
     expect(claimSplit([f, { ...f }], 1000).totalIls).toBe(12);
     expect(claimSplit([f, { ...f, key: 'PRICE_HIGHER|7702|p||' }], 1000).totalIls).toBe(24);
   });
+
+  it('G-14 Q3: a binding cap goes to the biggest finding first, whatever the keys sort to', () => {
+    const base = { severity: 'warn' as const, countsAsLeak: true, expected: null, actual: null, productId: null };
+    // Keyed: the VAT key sorts first by id, but the ₪100 price finding is bigger.
+    const keyed = claimSplit(
+      [
+        { ...base, type: 'PRICE_HIGHER' as const, deltaAmount: 100, key: 'zz|price' },
+        { ...base, type: 'VAT_MISMATCH' as const, deltaAmount: 50, key: 'aa|vat' },
+      ],
+      100,
+    );
+    expect(keyed).toEqual({ totalIls: 100, exclIls: 100, inclIls: 0 });
+    // Unkeyed: 11 findings — 'proposal-10' must not jump ahead of 'proposal-2'.
+    const unkeyed = claimSplit(
+      [
+        ...Array.from({ length: 10 }, () => ({ ...base, type: 'PRICE_HIGHER' as const, deltaAmount: 10 })),
+        { ...base, type: 'VAT_MISMATCH' as const, deltaAmount: 1 },
+      ],
+      100,
+    );
+    expect(unkeyed).toEqual({ totalIls: 100, exclIls: 100, inclIls: 0 });
+  });
 });
 
 // ── DB: the cross-match over closed / pending / missing receipts ──────────────

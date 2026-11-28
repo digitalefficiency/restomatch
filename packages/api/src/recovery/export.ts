@@ -42,6 +42,7 @@ const CLAIM_COLUMNS = [
   'item',
   'status',
   'claimed_ils',
+  'requested_ils',
   'credited_ils',
   'outstanding_ils',
   'claimed_at',
@@ -76,6 +77,9 @@ export async function recoveryExportRows(db: Database, restaurantId: string, fil
     c.discrepancyType,
     c.productName ?? c.lineDescription ?? '',
     c.status,
+    // claimed_ils = the desk's basis (capped share, never below what came back), so Σ = the desk;
+    // requested_ils = the stored amount the claim asked for (G-14 Q3 round 7, item 5).
+    ils(c.cappedAgorot ?? c.amountAgorot),
     ils(c.amountAgorot),
     ils(c.creditedAgorot),
     ils(c.outstandingAgorot),

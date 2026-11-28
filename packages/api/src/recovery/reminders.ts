@@ -18,6 +18,7 @@ import { renderEmail, ilsSpan, type RenderedEmail } from '../notifications/templ
 import type { ReportLocale } from '../reports/money';
 import { chaseMoney, ddMM, validEmail, waPhoneE164 } from './chase';
 import { creditSuggestions } from './creditSuggest';
+import { owedAgorot } from './owed';
 import { CHASE_DEFAULTS, awaitingChaseSql, chaseKindOf, rechaseDueSql, type ChaseKind, type ChaseOptions } from './overdue';
 import { OVERDUE_DAYS, syncClaims } from './service';
 
@@ -73,6 +74,7 @@ export async function findOverdue(
   const res = await db.execute(sql`
     SELECT c.id, c.status, c.supplier_id, COALESCE(s.name, '—') AS supplier_name, s.name_en AS supplier_name_en,
            GREATEST(0, c.amount_agorot - c.credited_agorot) AS outstanding,
+           c.discrepancy_id, c.credited_agorot, mr.invoice_id AS finding_invoice_id,
            c.letter_sent_at,
            ((${now.toISOString()}::timestamptz AT TIME ZONE tz.tz)::date
              - (COALESCE(c.letter_sent_at, c.claimed_at) AT TIME ZONE tz.tz)::date) AS waiting,
@@ -80,14 +82,21 @@ export async function findOverdue(
     FROM recovery_claims c
     CROSS JOIN (SELECT COALESCE(timezone, 'Asia/Jerusalem') AS tz FROM restaurants WHERE id = ${restaurantId}) tz
     JOIN discrepancies d ON d.id = c.discrepancy_id AND d.restaurant_id = ${restaurantId}
+    LEFT JOIN match_runs mr ON mr.id = d.match_run_id AND mr.restaurant_id = ${restaurantId}
     LEFT JOIN suppliers s ON s.id = c.supplier_id AND s.restaurant_id = ${restaurantId}
     WHERE c.restaurant_id = ${restaurantId}
       AND ${awaitingChaseSql(now, sql`tz.tz`, opts)}
     ORDER BY waiting DESC, c.id
   `);
-  const rows = (Array.isArray(res) ? res : ((res as { rows?: unknown[] }).rows ?? [])) as Array<Record<string, unknown>>;
+  const stored = (Array.isArray(res) ? res : ((res as { rows?: unknown[] }).rows ?? [])) as Array<Record<string, unknown>>;
+  // The SQL picks claims with a stored balance; a claim is chased only while it OWES something on
+  // the one basis (its capped share less credited, G-14 Q3 R5-1) — the TS twin isAwaitingChase's
+  // `outstandingAgorot > 0` over the same owed ₪, so the digest = the desk banner.
+  const owedAll = await owedAgorot(db, restaurantId, stored as never);
+  const rows = stored.filter((_, k) => owedAll[k]! > 0);
+  const owedOf = owedAll.filter((x) => x > 0);
   const groups = new Map<string, OverdueSupplier>();
-  for (const r of rows) {
+  for (const [k, r] of rows.entries()) {
     const kind = chaseKindOf(String(r.status));
     const key = `${String(r.supplier_id ?? r.supplier_name)}:${kind}`;
     const g = groups.get(key) ?? {
@@ -101,7 +110,7 @@ export async function findOverdue(
       latestLetterAt: null,
     };
     g.count += 1;
-    g.outstandingAgorot += Number(r.outstanding);
+    g.outstandingAgorot += owedOf[k]!;
     g.oldestDays = Math.max(g.oldestDays, Number(r.waiting));
     const sent = r.letter_sent_at ? new Date(r.letter_sent_at as string).toISOString() : null;
     if (sent && (!g.latestLetterAt || sent > g.latestLetterAt)) g.latestLetterAt = sent;
@@ -348,17 +357,22 @@ export async function supplierReminderDraft(
   const options = chaseOptionsFor(r?.settings);
   const res = await db.execute(sql`
     SELECT c.id, GREATEST(0, c.amount_agorot - c.credited_agorot) AS outstanding,
+           c.discrepancy_id, c.credited_agorot, mr.invoice_id AS finding_invoice_id,
            COALESCE(c.letter_sent_at, c.claimed_at) AS sent_at,
            ((${now.toISOString()}::timestamptz AT TIME ZONE tz.tz)::date
              - (COALESCE(c.letter_sent_at, c.claimed_at) AT TIME ZONE tz.tz)::date)::int AS waiting
     FROM recovery_claims c
     CROSS JOIN (SELECT COALESCE(timezone, 'Asia/Jerusalem') AS tz FROM restaurants WHERE id = ${restaurantId}) tz
     JOIN discrepancies d ON d.id = c.discrepancy_id AND d.restaurant_id = ${restaurantId}
+    LEFT JOIN match_runs mr ON mr.id = d.match_run_id AND mr.restaurant_id = ${restaurantId}
     WHERE c.restaurant_id = ${restaurantId} AND c.supplier_id = ${supplierId}
       AND ${awaitingChaseSql(now, sql`tz.tz`, { chaseAcknowledged: options.chaseAcknowledged })}
     ORDER BY waiting DESC, c.id
   `);
-  const rows = (Array.isArray(res) ? res : ((res as { rows?: unknown[] }).rows ?? [])) as Array<Record<string, unknown>>;
+  const stored = (Array.isArray(res) ? res : ((res as { rows?: unknown[] }).rows ?? [])) as Array<Record<string, unknown>>;
+  // Only claims that still owe on the one basis (capped share less credited; R5-1), in order.
+  const owedAll = await owedAgorot(db, restaurantId, stored as never);
+  const rows = stored.filter((_, k) => owedAll[k]! > 0);
   return {
     supplierId: s.id,
     supplierName: s.name,
@@ -366,7 +380,7 @@ export async function supplierReminderDraft(
     whatsapp: waPhoneE164(s.whatsapp),
     email: validEmail(s.email),
     count: rows.length,
-    outstandingAgorot: rows.reduce((a, r) => a + Number(r.outstanding), 0),
+    outstandingAgorot: owedAll.reduce((a, x) => a + (x > 0 ? x : 0), 0),
     oldestDays: rows.length ? Number(rows[0]!.waiting) : 0,
     oldestSentAt: rows.length ? new Date(rows[0]!.sent_at as string | Date).toISOString() : null,
     claimIds: rows.map((r) => String(r.id)),

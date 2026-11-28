@@ -45,6 +45,7 @@ export const he = {
     colStatus: 'מצב ומועד תשובה',
     colActions: 'הצעד הבא',
     ofClaimed: 'מתוך {amount}',
+    cappedAway: 'מתוך {amount} (הגיע לתקרה)',
     creditedAmount: 'זוכה {amount}',
     groupOpen: '{amount} פתוח',
     tab: {

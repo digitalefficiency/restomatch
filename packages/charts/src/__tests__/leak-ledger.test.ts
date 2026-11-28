@@ -18,6 +18,10 @@ import { computeLeakSummary } from '../leak-views';
 import { caughtBefore, computeLeakLedger, computeLeakPartition, dayIn, parseBasis, partitionOf, type LeakLedgerRow } from '../leak-ledger';
 import { computeLeakBreakdown } from '../leak-hero';
 import { MONEY_STATES, type ClaimStatus } from '../decisions';
+import { computeLeakReport } from '../leak-report';
+import { computeBranchSnapshot } from '../chain';
+import { computeClaimedIls } from '../leak-hero';
+import { computeOwnerKpis } from '../owner-kpis';
 
 const db = createDb(testDbUrl());
 
@@ -509,5 +513,120 @@ describe('caught before payment = detection or decision precedes paid_at [G-14]'
     expect(parseBasis('[1]')).toBeNull();
     expect(parseBasis('{"source":"gr"}')).toEqual({ source: 'gr' });
     expect(parseBasis(3)).toBeNull();
+  });
+});
+
+describe('G-14 Q3 · every screen counts the same shekel the same way', () => {
+  it('hero recovered, leak report open/claimed/waived, owner savings and the partition agree; tolerated = waived', async () => {
+    const { rid, invoice } = await setup();
+    await invoice({
+      inclVat: '1000.00',
+      d: [
+        // The engine auto-approved it within tolerance (owner M7): waived, never claimed.
+        { type: 'PRICE_HIGHER', delta: '5.00', status: 'accepted', tolerated: true },
+        { type: 'QTY_SHORT', delta: '6.00', status: 'accepted' },
+        { type: 'QTY_OVER', delta: '7.00', status: 'open' },
+        { type: 'UNORDERED_ITEM', delta: '8.00', status: 'rejected' },
+      ],
+    });
+
+    const hero = await computeLeakHero(db, rid, { now: NOW });
+    expect(hero.leakIls).toBe(26);
+    expect(hero.recoveredIls).toBe(6);
+
+    const report = await computeLeakReport(db, rid, '2026-10');
+    expect(report.status).toMatchObject({
+      stillOpenIls: 7,
+      stillOpenCount: 1,
+      claimedIls: 6,
+      claimedCount: 1,
+      waivedIls: 13,
+      waivedCount: 2,
+      creditRequestSuppliers: 1,
+    });
+
+    const kpis = await computeOwnerKpis(db, rid, { now: NOW });
+    expect(kpis.monthSavingsCapturedIls).toBe(6);
+
+    const p = await computeLeakPartition(db, rid, SPEC);
+    expect(p.driftAgorot).toBe(0);
+    expect(p.states.undecided).toBe(Math.round(report.status.stillOpenIls * 100));
+    expect(p.states.waived).toBe(Math.round(report.status.waivedIls * 100));
+    const claimStates = p.states.to_offset + p.states.to_send + p.states.requested + p.states.disputed + p.states.credited + p.states.recovered;
+    expect(claimStates).toBe(Math.round(hero.recoveredIls * 100));
+    expect(claimStates).toBe(Math.round(report.status.claimedIls * 100));
+
+    // The chain page's "התבקש מהספקים" reads the same rule (not leak-views' status list).
+    expect(await computeClaimedIls(db, rid, SPEC)).toBe(6);
+    const snap = await computeBranchSnapshot(db, rid, 'Ledger Bistro', { spec: SPEC, trendMonths: 1 });
+    expect(snap.claimedIls).toBe(6);
+  });
+
+  it('the report tiles are the capped money states: open + claimed + waived = hero leak, even when a cap binds', async () => {
+    const { rid, invoice } = await setup();
+    // Cap binds below the raw leak: ₪8 total, ₪10 claim + ₪5 open + ₪4 waived raw.
+    await invoice({
+      inclVat: '8.00',
+      d: [
+        { type: 'QTY_SHORT', delta: '10.00', status: 'accepted' },
+        { type: 'QTY_OVER', delta: '5.00', status: 'open' },
+        { type: 'UNORDERED_ITEM', delta: '4.00', status: 'rejected' },
+      ],
+    });
+    // A zero total and a NULL total cap everything at ₪0 (the hero's rule).
+    await invoice({ inclVat: '0.00', d: [{ type: 'QTY_SHORT', delta: '10.00', status: 'accepted' }, { type: 'QTY_OVER', delta: '5.00' }] });
+    const { invoiceId: nullTotal } = await invoice({ inclVat: '1.00', d: [{ type: 'QTY_SHORT', delta: '7.00', status: 'accepted' }] });
+    await db.execute(sql`UPDATE invoices SET total_incl_vat = NULL, total_excl_vat = NULL WHERE id = ${nullTotal}`);
+
+    const hero = await computeLeakHero(db, rid, { now: NOW });
+    expect(hero.leakIls).toBe(8);
+    const { status } = await computeLeakReport(db, rid, '2026-10');
+    // Claims take the cap first: ₪8 claimed, nothing left for the open or waived lines.
+    expect([status.claimedIls, status.stillOpenIls, status.waivedIls]).toEqual([8, 0, 0]);
+    expect(Math.round((status.claimedIls + status.stillOpenIls + status.waivedIls) * 100)).toBe(Math.round(hero.leakIls * 100));
+    expect(status.claimedIls).toBe(hero.recoveredIls);
+  });
+
+  it('S4–S7: "claimed" has one basis (the ledger claim states) on every screen; found = hero leak', async () => {
+    const { rid, invoice } = await setup();
+    // S4: a live claim held at a binding cap (₪8 invoice, ₪10 accepted, claim ₪8).
+    await invoice({ inclVat: '8.00', d: [{ type: 'QTY_SHORT', delta: '10.00', status: 'accepted', claim: { status: 'claimed', amountAgorot: 800 } }] });
+    // S5: a live claim on a row a person later rejected (letter already sent) + an accepted ₪3.
+    await invoice({
+      inclVat: '1000.00',
+      d: [
+        { type: 'PRICE_HIGHER', delta: '6.00', status: 'rejected', claim: { status: 'letter_sent', amountAgorot: 600 } },
+        { type: 'QTY_OVER', delta: '3.00', status: 'accepted' },
+      ],
+    });
+    // S6: written off after ₪4 of ₪10 came back → ₪4 claimed (credited), ₪6 waived.
+    await invoice({
+      inclVat: '1000.00',
+      d: [{ type: 'UNIT_MISMATCH', delta: '10.00', status: 'accepted', claim: { status: 'written_off', amountAgorot: 1000, creditedAgorot: 400 } }],
+    });
+    // S7: a binding cap over a claim, a waiver and an open gap (₪12: 8 + 3 + 5 raw).
+    await invoice({
+      inclVat: '12.00',
+      d: [
+        { type: 'QTY_SHORT', delta: '8.00', status: 'accepted' },
+        { type: 'UNORDERED_ITEM', delta: '3.00', status: 'rejected' },
+        { type: 'PRICE_HIGHER', delta: '5.00', status: 'open' },
+      ],
+    });
+
+    const hero = await computeLeakHero(db, rid, { now: NOW });
+    expect(hero.leakIls).toBe(39);
+    const report = await computeLeakReport(db, rid, '2026-10');
+    const snap = await computeBranchSnapshot(db, rid, 'Ledger Bistro', { spec: SPEC, trendMonths: 1 });
+    expect(report.status.claimedIls).toBe(29); // 8 + 6 + 3 + 4 + 8
+    expect(hero.recoveredIls).toBe(report.status.claimedIls);
+    expect(snap.claimedIls).toBe(report.status.claimedIls);
+    expect(await computeClaimedIls(db, rid, SPEC)).toBe(report.status.claimedIls);
+    expect([report.status.waivedIls, report.status.stillOpenIls]).toEqual([9, 1]); // 6 + 3 ; 1
+    const found = Math.round((report.status.claimedIls + report.status.waivedIls + report.status.stillOpenIls) * 100);
+    expect(found).toBe(Math.round(hero.leakIls * 100));
+    expect(report.ledgerDriftAgorot).toBe(0);
+    // Counts follow the same rows (₪ > 0 per state group).
+    expect([report.status.claimedCount, report.status.waivedCount, report.status.stillOpenCount]).toEqual([5, 2, 1]);
   });
 });

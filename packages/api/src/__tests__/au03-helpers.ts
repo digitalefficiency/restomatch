@@ -8,6 +8,7 @@ import {
   suppliers,
   users,
   eq,
+  sql,
   type Database,
 } from '@restomatch/db';
 import type { Tenant } from './fixtures';
@@ -26,7 +27,9 @@ export async function addClaim(
       restaurantId: T.restaurantId,
       type: (type ?? 'PRICE_HIGHER') as never,
       severity: 'block',
-      deltaAmount: '10.00',
+      // The finding is what the claim asks back (syncClaims never claims more than |Δ|): the claims
+      // tracker reads a claim's capped share of its finding (G-14 Q3 R4-2).
+      deltaAmount: ((claim.amountAgorot ?? 1000) / 100).toFixed(2),
       resolutionStatus: 'accepted',
     })
     .returning({ id: discrepancies.id });
@@ -42,7 +45,20 @@ export async function addClaim(
       ...claim,
     })
     .returning({ id: recoveryClaims.id });
+  await coverClaim(db, T.invoiceId, claim.amountAgorot ?? 1000);
   return c!.id;
+}
+
+/**
+ * The claim's invoice carries its finding: grow the seeded invoice's total by the claimed ₪, so
+ * Σ claims never exceeds the invoice cap (syncClaims guarantees that in production; the tracker
+ * reads each claim's capped share — G-14 Q3 R4-2).
+ */
+export async function coverClaim(db: Database, invoiceId: string, agorot: number) {
+  await db
+    .update(invoices)
+    .set({ totalInclVat: sql`${invoices.totalInclVat} + ${(agorot / 100).toFixed(2)}::numeric` })
+    .where(eq(invoices.id, invoiceId));
 }
 
 /** A later invoice of `supplierId` carrying one credit (negative) line. */

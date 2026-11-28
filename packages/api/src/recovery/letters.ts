@@ -1,5 +1,6 @@
 import { TRPCError } from '@trpc/server';
 import { sql, type Database } from '@restomatch/db';
+import { owedAgorot } from './owed';
 import { vatBasisOf, type VatBasis } from '../lib/claims';
 import { assertSupplierOwned } from '../tenant';
 import { lockClaims, transitionClaims } from './service';
@@ -68,7 +69,8 @@ export interface ClaimLetter {
 export async function buildClaimLetters(db: Database, restaurantId: string, opts: { supplierId?: string } = {}): Promise<ClaimLetter[]> {
   const res = await db.execute(sql`
     SELECT c.id, c.discrepancy_id, c.invoice_id, c.supplier_id, c.claimed_at,
-           GREATEST(0, c.amount_agorot - c.credited_agorot) AS owed_agorot,
+           GREATEST(0, c.amount_agorot - c.credited_agorot) AS outstanding, c.credited_agorot,
+           mr.invoice_id AS finding_invoice_id,
            s.name AS supplier_name, s.name_en AS supplier_name_en,
            i.invoice_number, COALESCE(i.invoice_date, i.created_at) AS invoice_date, (i.status = 'paid') AS paid,
            d.type, d.severity, d.expected_value, d.actual_value, d.delta_amount,
@@ -91,8 +93,15 @@ export async function buildClaimLetters(db: Database, restaurantId: string, opts
       ${opts.supplierId ? sql`AND c.supplier_id = ${opts.supplierId}` : sql``}
     ORDER BY c.claimed_at, c.id
   `);
+  const rows = rowsOf(res);
+  // G-14 Q3 R4-2: a letter asks for a claim's share of its invoice's cap (the one allocator: live
+  // claims first, at LEAST(claim, |Δ|)) less what was credited — never Σ stored amounts above the
+  // cap (an invoice total lowered after the claims were made). A claim the cap leaves ₪0 is not asked.
+  const owedOf = await owedAgorot(db, restaurantId, rows as never);
   const groups = new Map<string, ClaimLetter>();
-  for (const r of rowsOf(res)) {
+  for (const [k, r] of rows.entries()) {
+    const owed = owedOf[k]!;
+    if (owed <= 0) continue;
     const key = r.supplier_id == null ? `name:${String(r.supplier_name ?? '').trim()}` : String(r.supplier_id);
     let g = groups.get(key);
     if (!g) {
@@ -123,7 +132,7 @@ export async function buildClaimLetters(db: Database, restaurantId: string, opts
       productNameEn: (r.product_name_en as string | null) ?? null,
       lineDescription: (r.line_description as string | null) ?? null,
       lineDescriptionEn: (r.line_description_en as string | null) ?? null,
-      amountAgorot: Number(r.owed_agorot),
+      amountAgorot: owed,
       basis: vatBasisOf(String(r.type)),
       expected: num(r.expected_value),
       actual: num(r.actual_value),

@@ -21,6 +21,7 @@ import { ClaimPeek } from './claim-peek';
 import { ExportButtons } from './export-buttons';
 import {
   CLOSED,
+  isCappedAway,
   CONFIRMED_MOVES,
   batchMoves,
   bySupplier,
@@ -135,8 +136,10 @@ export function TrackerClient({
   const inView = (c: Claim) => {
     const s = statusOf(c);
     if (view === 'closed') return CLOSED.includes(s);
-    if (view === 'send') return s === 'claimed';
-    return !CLOSED.includes(s) && s !== 'claimed';
+    // A claim the invoice cap left at ₪0 has nothing to send (R5-4): it is listed under tracking,
+    // never under "to send" — the same predicate as the page's tab counts.
+    if (view === 'send') return s === 'claimed' && !isCappedAway(c);
+    return !CLOSED.includes(s) && (s !== 'claimed' || isCappedAway(c));
   };
   const shown = claims.filter(inView);
 
@@ -255,7 +258,8 @@ export function TrackerClient({
       else next.add(id);
       return next;
     });
-  const selectedIds = [...selected].filter((id) => byId.has(id) && !isPending(id));
+  // A capped-away claim is never batch-moved (e.g. to letter_sent with no letter carrying it).
+  const selectedIds = [...selected].filter((id) => byId.has(id) && !isPending(id) && !isCappedAway(byId.get(id)!));
   // The server's next[] per claim (no client mirror of the transition table).
   const selectedMoves = batchMoves(selectedIds.map((id) => byId.get(id)!.next)) as Move[];
 
@@ -297,7 +301,7 @@ export function TrackerClient({
     }
     return (
       <div className={cn('flex items-center gap-2', wide ? 'w-full' : 'justify-end')}>
-        {step ? (
+        {step && !isCappedAway(c) ? (
           <Button
             size="sm"
             variant={status === 'claimed' ? 'primary' : 'secondary'}
@@ -334,8 +338,13 @@ export function TrackerClient({
 
   const amountCell = (c: Claim) => (
     <>
-      <span className="font-semibold tabular-nums text-ink">{ils(c.outstandingAgorot > 0 ? c.outstandingAgorot : c.amountAgorot)}</span>
-      {c.outstandingAgorot > 0 && c.outstandingAgorot !== c.amountAgorot ? (
+      {/* R5-4: an open claim the invoice cap left at ₪0 shows ₪0 "of ₪X (cap reached)", never its stored ₪. */}
+      <span className="font-semibold tabular-nums text-ink" data-testid={isCappedAway(c) ? 'claim-capped-away' : undefined}>
+        {ils(c.outstandingAgorot > 0 || isCappedAway(c) ? c.outstandingAgorot : c.amountAgorot)}
+      </span>
+      {isCappedAway(c) ? (
+        <span className="block text-xs text-muted">{t('tracker.cappedAway', { amount: ils(c.amountAgorot) })}</span>
+      ) : c.outstandingAgorot > 0 && c.outstandingAgorot !== c.amountAgorot ? (
         <span className="block text-xs text-muted">{t('tracker.ofClaimed', { amount: ils(c.amountAgorot) })}</span>
       ) : null}
       {c.creditedAgorot > 0 ? (
@@ -464,8 +473,8 @@ export function TrackerClient({
                         <input
                           type="checkbox"
                           className="mt-1 h-4 w-4 accent-primary"
-                          checked={selected.has(c.id) && !isPending(c.id)}
-                          disabled={isPending(c.id)}
+                          checked={selected.has(c.id) && !isPending(c.id) && !isCappedAway(c)}
+                          disabled={isPending(c.id) || isCappedAway(c)}
                           onChange={() => toggle(c.id)}
                           aria-label={t('batch.select', { invoice: c.invoiceNumber ?? '—', item: itemOf(c) })}
                         />
@@ -525,8 +534,8 @@ export function TrackerClient({
                               <input
                                 type="checkbox"
                                 className="h-5 w-5 accent-primary"
-                                checked={selected.has(c.id) && !isPending(c.id)}
-                                disabled={isPending(c.id)}
+                                checked={selected.has(c.id) && !isPending(c.id) && !isCappedAway(c)}
+                                disabled={isPending(c.id) || isCappedAway(c)}
                                 onChange={() => toggle(c.id)}
                                 aria-label={t('batch.select', { invoice: c.invoiceNumber ?? '—', item: itemOf(c) })}
                               />

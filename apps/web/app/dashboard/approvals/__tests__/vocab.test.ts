@@ -339,3 +339,15 @@ describe('ageLabel (#418: one string on the server and in every browser)', () =>
     }
   });
 });
+
+describe('G-14 Q3 round 7: a row holding a live claim keeps its real verbs at ₪0', () => {
+  it('an open duplicate with a live claim still offers "don\'t pay the copy" — never only "mark as reviewed" (a waive)', () => {
+    const kinds = decisionActions('DUPLICATE_INVOICE', false, true).map((a) => a.kind);
+    expect(kinds).toEqual(['approve', 'reject']);
+    expect(decisionActions('DUPLICATE_INVOICE', false, false).map((a) => a.kind)).toEqual(['review']);
+  });
+  it('a claimed price row approves without a ₪ (nothing new to claim)', () => {
+    const [approve] = decisionActions('PRICE_HIGHER', false, true);
+    expect(approve).toMatchObject({ kind: 'approve', withAmount: false });
+  });
+});

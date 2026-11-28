@@ -1,22 +1,25 @@
 import type { LeakBreakdownInvoice, LeakBreakdownLine } from '@restomatch/charts';
 import { DISCREPANCY_CLAIMABLE, DISCREPANCY_CLAIMED, DISCREPANCY_DECIDABLE } from '../lifecycle/predicates';
+import { OPEN_STATUSES } from '../recovery/lifecycle';
 
 /**
  * The claimable-line rule (₪) shared by the supplier credit letters
- * (/dashboard/leaks/claims) and the pay run (/dashboard/approvals/pay-run).
- * One rule, so the two pages can never disagree on a shekel.
+ * (/dashboard/leaks/claims), the pay run, the approvals queue, Ask and the dock slip.
+ * One rule, so no two pages can disagree on a shekel.
  *
  *  • an invoice still waiting for a PO link has nothing to claim. A PAID invoice KEEPS its
  *    claims (owner decision, W2-03 §5.5): marking an invoice paid never erases a shekel —
  *    after payment the channel is a בקשת זיכוי letter (decision 19);
- *  • a discrepancy that already holds a non-written-off claim (`claimedIds`) is skipped, so
- *    the same ₪ is never asked twice;
- *  • a line is claimable when it counts as leak and is open, escalated, accepted or resolved
- *    (waived lines drop); open / escalated ones are flagged `undecided`;
- *  • never a line the engine auto-approved within tolerance (`tolerated`, the system decision
- *    `tolerate` → waive in charts DECISION_RULES; owner M7, 7.11): no credit request for it;
- *  • lines are taken in the breakdown's order (biggest |Δ| first) and never claim more on an
- *    invoice than its capped leak (`leakIls`, the hero's per-invoice cap).
+ *  • a line is claimable when it counts as leak and its type is ever asked back; waived lines
+ *    (rejected, or tolerated — the engine's `tolerate`, owner M7) are never emitted;
+ *  • G-14 Q3 · ONE ALLOCATOR. Each line's ₪ is its share of the invoice cap from the leak
+ *    ledger (charts invoiceAllocationSql, carried on `line.ledger`): rows holding a live claim
+ *    first (at the claim's amount), then decided rows (claims before waivers), then undecided
+ *    rows get what is left; (created_at, id) inside a tier. The owner-signed rule (G-14, 11.11
+ *    line 17): "קודם דרישות זיכוי קיימות…, אחר כך פערים שהוחלטו, ולפערים שלא הוחלטו נשאר מה שנשאר".
+ *    A line holding a live claim is emitted `claimed` at what is still outstanding on it
+ *    (its capped ₪ less what was credited, while the claim is open; ₪0 once it is recovered or
+ *    written off) — never `undecided`, whatever its resolution status.
  */
 /**
  * Decided "ask the supplier" statuses. Owner decision 7.11 (M5): 'resolved' counts as decided,
@@ -99,41 +102,83 @@ export function isDecidedClaim(d: ClaimRuleInput): boolean {
 
 export interface ClaimLine {
   line: LeakBreakdownLine;
-  /** ₪ claimable on this line after the per-invoice cap. */
+  /** ₪ on this line after the per-invoice cap (a live claim: what is still outstanding on it). */
   amount: number;
   basis: VatBasis;
   /**
-   * The line is still open / escalated: it counts toward the cap (so the ₪ a decision
-   * could turn into a claim is reserved) but it is NEVER put on a supplier letter or
-   * offset in a payment until someone decides it (decision 18).
+   * The line is still open / escalated and holds no live claim: it counts toward the cap (the
+   * ledger's tier 3) but it is NEVER put on a supplier letter or offset in a payment until
+   * someone decides it (decision 18).
    */
   undecided: boolean;
+  /** The line already holds a live claim (recovery_claims): the tracker owns it, never ask it twice. */
+  claimed: boolean;
 }
 
-export interface ClaimableOptions {
-  /**
-   * Discrepancy ids that already hold a claim that is not written off (recovery). They
-   * are skipped — and do not use the invoice cap — so one ₪ is never claimed twice.
-   */
-  claimedIds?: ReadonlySet<string>;
-}
+/**
+ * Claim statuses whose remaining ₪ is still owed (recovery lifecycle OPEN_STATUSES). A closed claim
+ * — `recovered` (short or not) or `written_off` — has nothing outstanding (G-14 Q3 R4-1), exactly
+ * as the tracker shows it.
+ */
+const OWED = new Set<string>(OPEN_STATUSES);
 
-/** The claimable lines of one invoice, capped like the claims letters. */
-export function claimableLines(inv: LeakBreakdownInvoice, opts: ClaimableOptions = {}): ClaimLine[] {
+/** The claimable lines of one invoice: the leak ledger's allocation (see the module note). */
+export function claimableLines(inv: LeakBreakdownInvoice): ClaimLine[] {
   if (inv.pendingLink) return [];
-  const claimed = opts.claimedIds;
+  const askable = (l: LeakBreakdownLine) => l.countsAsLeak && !NEVER_CLAIMABLE.has(l.type);
+  // A persisted invoice (charts breakdownLines) carries the allocator's result on every line.
+  if (inv.lines.some((l) => l.ledger !== undefined)) {
+    const out: ClaimLine[] = [];
+    for (const l of inv.lines) {
+      const led = l.ledger;
+      if (!led || !askable(l)) continue;
+      if (led.liveClaim) {
+        const ag = OWED.has(led.claimStatus ?? '') ? Math.max(0, led.cappedAgorot - led.creditedAgorot) : 0;
+        if (ag > 0) out.push({ line: l, amount: ag / 100, basis: vatBasisOf(l.type), undecided: false, claimed: true });
+        continue;
+      }
+      if (led.effect === 'waive' || led.cappedAgorot <= 0) continue;
+      out.push({ line: l, amount: led.cappedAgorot / 100, basis: vatBasisOf(l.type), undecided: led.effect === 'undecided', claimed: false });
+    }
+    return out;
+  }
+  return handBuiltLines(inv, askable);
+}
+
+/**
+ * Lines that were never persisted (a ריכוז proposal, unit tests) have no ledger row and no
+ * claims: the SAME allocator in TypeScript — decided (claims before waivers), then undecided,
+ * (createdAt, id) inside a tier, integer agorot, cap = the invoice's capped leak.
+ * approvals-router.test.ts ("the hand-built mirror … = the SQL allocator") pins it to the SQL.
+ */
+function handBuiltLines(inv: LeakBreakdownInvoice, askable: (l: LeakBreakdownLine) => boolean): ClaimLine[] {
+  // 0 decided claim · 1 waiver (tolerated accept, or rejected) · 2 undecided — the ledger's
+  // tier 2 (claims before waivers) and tier 3.
+  const tierOf = (l: LeakBreakdownLine): 0 | 1 | 2 | null => {
+    if (!askable(l)) return null;
+    if (UNDECIDED.has(l.resolutionStatus)) return 2;
+    if (l.tolerated || !CLAIMABLE.has(l.resolutionStatus)) return 1;
+    return 0;
+  };
+  const key = (l: LeakBreakdownLine) => l.createdAt ?? '';
+  const ranked = inv.lines
+    .map((l) => ({ l, tier: tierOf(l) }))
+    .filter((x): x is { l: LeakBreakdownLine; tier: 0 | 1 | 2 } => x.tier !== null)
+    .sort(
+      (x, y) =>
+        x.tier - y.tier ||
+        (key(x.l) < key(y.l) ? -1 : key(x.l) > key(y.l) ? 1 : 0) ||
+        (x.l.discrepancyId < y.l.discrepancyId ? -1 : x.l.discrepancyId > y.l.discrepancyId ? 1 : 0),
+    );
+  const capAg = Math.max(0, Math.round(inv.leakIls * 100));
+  let usedAg = 0;
   const out: ClaimLine[] = [];
-  let invClaimed = 0;
-  for (const l of inv.lines) {
-    if (!l.countsAsLeak || !CLAIMABLE.has(l.resolutionStatus) || NEVER_CLAIMABLE.has(l.type)) continue;
-    if (claimed?.has(l.discrepancyId)) continue;
-    // Owner M7 (7.11): a tolerance row the engine auto-approved is waived — never asked back.
-    if (l.tolerated) continue;
-    // Never claim more on an invoice than its capped leak.
-    const amount = Math.min(Math.abs(l.deltaAmount), Math.max(0, inv.leakIls - invClaimed));
-    if (amount <= 0) continue;
-    invClaimed += amount;
-    out.push({ line: l, amount, basis: vatBasisOf(l.type), undecided: UNDECIDED.has(l.resolutionStatus) });
+  for (const { l, tier } of ranked) {
+    const ag = Math.min(Math.abs(Math.round(l.deltaAmount * 100)), Math.max(0, capAg - usedAg));
+    if (ag <= 0) continue;
+    usedAg += ag;
+    if (tier === 1) continue; // a waiver holds its share of the cap, never asked back
+    out.push({ line: l, amount: ag / 100, basis: vatBasisOf(l.type), undecided: tier === 2, claimed: false });
   }
   return out;
 }

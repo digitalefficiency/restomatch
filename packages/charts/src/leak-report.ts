@@ -1,5 +1,6 @@
 import { sql, type Database } from '@restomatch/db';
 import { computeLeakHero, type LeakHero } from './leak-hero';
+import { CLAIM_STATES, claimedAgorotOf, computeLeakLedger, heroLeakByInvoice, partitionOf } from './leak-ledger';
 import { LEAK_FILTER, LIVE_DUPLICATE, originalChecked } from './leak-views';
 
 /**
@@ -12,8 +13,9 @@ import { LEAK_FILTER, LIVE_DUPLICATE, originalChecked } from './leak-views';
  * no UNORDERED_ARRIVAL, per-invoice cap at the invoice total, month = the
  * restaurant's local calendar month by invoice date, spend = checked invoices.
  * The per-supplier rows are capped exactly like the hero, so they sum to it.
- * The per-type and per-status rows are line sums BEFORE the per-invoice cap
- * (`capAdjustmentIls` is the difference, almost always 0).
+ * The per-status rows (open / claimed / waived, ₪ and line counts) are the G-14 leak ledger's
+ * capped money states — they sum to the hero, claims first. The per-type rows are line sums
+ * BEFORE the per-invoice cap (`capAdjustmentIls` is the difference, almost always 0).
  */
 
 export interface LeakReportTypeRow {
@@ -75,6 +77,8 @@ export interface LeakReport {
   status: LeakReportStatus;
   /** Σ type rows − hero leak (≥ 0): the amount removed by the per-invoice cap. */
   capAdjustmentIls: number;
+  /** G-14: hero − Σ ledger money states, in agorot. 0 = the status tiles add up to the hero to the agora. */
+  ledgerDriftAgorot: number;
 }
 
 type Row = Record<string, unknown>;
@@ -102,7 +106,24 @@ export async function computeLeakReport(
   // Mid-month noon UTC is inside the same local month in every real timezone,
   // so the hero's tz-aware month bounds resolve to exactly this month.
   const anchor = new Date(Date.UTC(year, mm - 1, 15, 12, 0, 0));
-  const hero = await computeLeakHero(db, restaurantId, { now: anchor });
+  // G-14 Q3: the open / claimed / waived ₪ and line counts are the money states of the hero's own
+  // capped leak (open + claimed + waived = hero.leakIls to the agora; claims take the cap first).
+  const view = { period: 'this_month' as const, now: anchor };
+  const [ledger, heroByInvoice] = await Promise.all([
+    computeLeakLedger(db, restaurantId, view),
+    heroLeakByInvoice(db, restaurantId, view),
+  ]);
+  const partition = partitionOf(ledger, heroByInvoice);
+  // One ledger pass: the hero's "recovered" is this partition's claimed ₪ (same month view).
+  const hero = await computeLeakHero(db, restaurantId, { now: anchor, claimedAgorot: claimedAgorotOf(partition) });
+  const claimStates = new Set<string>(CLAIM_STATES);
+  const claimedRows = ledger.filter((r) => claimStates.has(r.moneyState) && r.cappedAgorot - r.writtenOffAgorot > 0);
+  const counts = {
+    open: ledger.filter((r) => r.moneyState === 'undecided' && r.cappedAgorot > 0).length,
+    claimed: claimedRows.length,
+    waived: ledger.filter((r) => (r.moneyState === 'waived' && r.cappedAgorot > 0) || r.writtenOffAgorot > 0).length,
+    suppliers: new Set(claimedRows.map((r) => r.supplierId ?? '')).size,
+  };
   const lo = hero.monthStart;
   const hi = hero.monthEnd;
   const creepLimit = Math.min(Math.max(options.priceCreepLimit ?? 8, 1), 50);
@@ -137,7 +158,7 @@ export async function computeLeakReport(
       FROM inv
     )`;
 
-  const [typeRes, supplierRes, statusRes] = await Promise.all([
+  const [typeRes, supplierRes] = await Promise.all([
     db.execute(sql`
       WITH ${monthInv}
       SELECT type, COUNT(*) AS c, COALESCE(SUM(amt), 0) AS amount
@@ -155,18 +176,6 @@ export async function computeLeakReport(
       GROUP BY per.supplier_id, s.name, s.name_en
       HAVING COUNT(*) FILTER (WHERE per.matched AND NOT per.no_po) > 0
       ORDER BY COALESCE(SUM(LEAST(per.raw_leak, per.total)), 0) DESC, s.name
-    `),
-    db.execute(sql`
-      WITH ${monthInv}
-      SELECT
-        COALESCE(SUM(amt) FILTER (WHERE resolution_status IN ('open','escalated')), 0) AS open_amt,
-        COUNT(*) FILTER (WHERE resolution_status IN ('open','escalated')) AS open_c,
-        COALESCE(SUM(amt) FILTER (WHERE resolution_status IN ('accepted','resolved')), 0) AS claimed_amt,
-        COUNT(*) FILTER (WHERE resolution_status IN ('accepted','resolved')) AS claimed_c,
-        COALESCE(SUM(amt) FILTER (WHERE resolution_status = 'rejected'), 0) AS waived_amt,
-        COUNT(*) FILTER (WHERE resolution_status = 'rejected') AS waived_c,
-        COUNT(DISTINCT supplier_id) FILTER (WHERE resolution_status IN ('accepted','resolved')) AS credit_suppliers
-      FROM lines WHERE counts
     `),
   ]);
 
@@ -233,7 +242,6 @@ export async function computeLeakReport(
     excessIls: ils(r.excess),
     qty: n(r.qty),
   }));
-  const s = rowsOf(statusRes)[0] ?? {};
   const typeSum = byType.reduce((acc, t) => acc + Math.round(t.amountIls * 100), 0) / 100;
 
   return {
@@ -244,14 +252,15 @@ export async function computeLeakReport(
     priceCreep,
     status: {
       caughtBeforePaymentIls: hero.caughtBeforePaymentIls,
-      stillOpenIls: ils(s.open_amt),
-      stillOpenCount: n(s.open_c),
-      claimedIls: ils(s.claimed_amt),
-      claimedCount: n(s.claimed_c),
-      waivedIls: ils(s.waived_amt),
-      waivedCount: n(s.waived_c),
-      creditRequestSuppliers: n(s.credit_suppliers),
+      stillOpenIls: partition.states.undecided / 100,
+      stillOpenCount: counts.open,
+      claimedIls: claimedAgorotOf(partition) / 100,
+      claimedCount: counts.claimed,
+      waivedIls: partition.states.waived / 100,
+      waivedCount: counts.waived,
+      creditRequestSuppliers: counts.suppliers,
     },
     capAdjustmentIls: Math.max(0, Math.round((typeSum - hero.leakIls) * 100) / 100),
+    ledgerDriftAgorot: partition.driftAgorot,
   };
 }

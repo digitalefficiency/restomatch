@@ -1,5 +1,5 @@
 import { sql, type Database } from '@restomatch/db';
-import { invoiceLeakStateCte, LEAK_FILTER, monthInvoicesCte, scanAwaitingCountSql } from '@restomatch/charts';
+import { invoiceLeakStateCte, LEAK_FILTER, monthInvoicesCte, scanAwaitingCountSql, TOLERATED_SQL } from '@restomatch/charts';
 import type { SQL } from 'drizzle-orm';
 import { discrepancyDecidableSql, duplicateHoldingSql } from '../lifecycle/predicates';
 
@@ -83,7 +83,8 @@ export function invoiceStateCte(restaurantId: string): SQL {
         (NOT COALESCE(per.matched, false)) AND ${scanAwaitingCountSql(restaurantId, sql`si`)} AS awaiting_count,
         ${finding(sql`d.type = 'DUPLICATE_INVOICE' AND d.severity IN ('warn','block') AND ${duplicateHoldingSql(sql`d.resolution_status`)}`)} AS duplicate,
         ${finding(sql`${LEAK_FILTER} AND ${discrepancyDecidableSql(sql`d.resolution_status`)} AND ABS(d.delta_amount) > 0`)} AS open_finding,
-        ${finding(sql`${LEAK_FILTER} AND d.resolution_status = 'accepted' AND d.type <> 'DUPLICATE_INVOICE' AND ABS(d.delta_amount) > 0`)} AS accepted_finding
+        -- G-14 Q3 / owner M7: a tolerance row the engine auto-approved is waived — never "claim_open".
+        ${finding(sql`${LEAK_FILTER} AND d.resolution_status = 'accepted' AND NOT ${TOLERATED_SQL} AND d.type <> 'DUPLICATE_INVOICE' AND ABS(d.delta_amount) > 0`)} AS accepted_finding
       FROM per
       JOIN invoices si ON si.id = per.id AND si.restaurant_id = ${restaurantId}
     ),

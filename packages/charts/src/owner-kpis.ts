@@ -13,6 +13,7 @@ import {
   sql,
   type Database,
 } from '@restomatch/db';
+import { claimedAgorotOf, computeLeakPartition } from './leak-ledger';
 
 export interface OwnerKpis {
   monthPotentialLossIls: number;
@@ -82,23 +83,14 @@ export async function computeOwnerKpis(
       ),
     );
 
-  // 2. Savings captured — resolved/accepted discrepancies this month
-  const savings = await db
-    .select({
-      sum: sql<string>`COALESCE(SUM(${discrepancies.deltaAmount}), 0)`.as('sum'),
-    })
-    .from(discrepancies)
-    .where(
-      and(
-        eq(discrepancies.restaurantId, restaurantId),
-        inArray(discrepancies.resolutionStatus, ['accepted', 'resolved']),
-        // G-15 Q8 (leak-economist condition): a SYSTEM auto-accept
-        // (non-leak-acknowledge / minor-info: status 'accepted', no resolved_at) is
-        // routing bookkeeping, never savings. A person's accept stamps resolved_at.
-        sql`NOT (${discrepancies.resolutionStatus} = 'accepted' AND ${discrepancies.resolvedAt} IS NULL)`,
-        gte(discrepancies.createdAt, startOfMonth),
-      ),
-    );
+  // 2. Savings captured — G-14 Q3: THE one "claimed" basis, the hero's own figure: the leak
+  //    ledger's claim money states (to_offset … recovered) for this month (invoice date, Israel
+  //    month — the hero's period), capped per invoice, a live claim at its own amount, a
+  //    partial write-off counting only what came back. So a tolerance row the engine auto-approved
+  //    (owner M7: waived) and the routing engine's auto-accepts (G-15 Q8, #357: they carry a
+  //    rule_id → 'tolerated' → waive; and are non-leak / info rows anyway) are never "captured".
+  //    savings == computeLeakHero().recoveredIls (pinned in owner-kpis.test.ts).
+  const savingsAgorot = claimedAgorotOf(await computeLeakPartition(db, restaurantId, { period: 'this_month', now }));
 
   // 3. Pending approvals — open or escalated, any severity above info, minus
   //    the ₪0 QTY_SHORT twin of a short delivery billed in full (nothing to decide).
@@ -136,7 +128,7 @@ export async function computeOwnerKpis(
 
   return {
     monthPotentialLossIls: Number(potentialLoss[0]?.sum ?? 0),
-    monthSavingsCapturedIls: Number(savings[0]?.sum ?? 0),
+    monthSavingsCapturedIls: savingsAgorot / 100,
     pendingApprovalsCount: Number(pending[0]?.c ?? 0),
     weekCleanMatchPct,
   };

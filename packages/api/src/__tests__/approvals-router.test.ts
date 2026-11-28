@@ -556,7 +556,10 @@ describe('approvals.queueSummary (approvals-08, functional-flows-07)', () => {
     // Σ|Δ| = 157.35 but the invoice is ₪150 — the letters claim at most ₪150.
     expect((await managerOf(s).approvals.queueSummary()).claimableIls).toBe(150);
     await managerOf(s).approvals.reject({ discrepancyId: big.id, reason: 'זניח', reasonCode: 'negligible' });
-    expect((await managerOf(s).approvals.queueSummary()).claimableIls).toBe(52.55);
+    // G-14 Q3: the leak ledger's tiers — a waiver (rejected) keeps its share of the invoice cap
+    // (tier 2, before undecided), so the open line gets what is left: 150 − 104.80 = 45.20,
+    // the same "to decide" ₪ the ledger / report / pay run show for this invoice.
+    expect((await managerOf(s).approvals.queueSummary()).claimableIls).toBe(45.2);
   });
 
   it('honours the view filters', async () => {
@@ -688,6 +691,54 @@ describe('claimability (verbs keyed by type AND claimability)', () => {
     expect(sum.others).toMatchObject({ count: 2, amountIls: 300 });
   });
 
+  it('a tolerance row the engine auto-approved is a waiver: it holds its share of the cap, never claimed; per-row ₪ = the tile (G-14 Q3, M7)', async () => {
+    const s = await seed();
+    const [i] = await db
+      .insert(invoices)
+      .values({ restaurantId: s.restaurantId, source: 'manual', status: 'matched', totalInclVat: '100.00' })
+      .returning();
+    const [mr] = await db
+      .insert(matchRuns)
+      .values({ restaurantId: s.restaurantId, invoiceId: i!.id, overallStatus: 'major', totalDiscrepancyAmount: '0' })
+      .returning();
+    // Cap ₪100. The engine accepted ₪90 within tolerance (rule, no person) — waived, never claimed.
+    await insertD(s, { matchRunId: mr!.id, type: 'PRICE_HIGHER', deltaAmount: '90.00', resolutionStatus: 'accepted', ruleId: 'minor-info' });
+    const open = await insertD(s, { matchRunId: mr!.id, type: 'QTY_SHORT', deltaAmount: '50.00', requiresRole: 'owner' });
+    const q = await ownerOf(s).approvals.myQueue({ limit: 100 });
+    const row = q.find((r) => r.id === open.id)!;
+    expect(row.claimable).toBe(true);
+    // The ledger's tiers: the waived ₪90 holds its share of the ₪100 cap → ₪10 left to decide.
+    expect(row.claimAgorot).toBe(1000);
+    expect((await ownerOf(s).approvals.queueSummary()).toDecide.amountIls).toBe(10);
+  });
+
+  it('one "to decide" ₪ on every screen: a waiver holds its share of a binding cap (G-14 Q3 probe)', async () => {
+    const { computeLeakReport, computeInvoiceLeak } = await import('@restomatch/charts');
+    const { payRunStatusOf } = await import('../routers/payRun');
+    const s = await seed();
+    const [i] = await db
+      .insert(invoices)
+      .values({ restaurantId: s.restaurantId, source: 'manual', status: 'matched', totalInclVat: '8.00' })
+      .returning();
+    const [mr] = await db
+      .insert(matchRuns)
+      .values({ restaurantId: s.restaurantId, invoiceId: i!.id, overallStatus: 'major', totalDiscrepancyAmount: '0' })
+      .returning();
+    // Cap ₪8: a person waived ₪4 (rejected), ₪5 is still open → ₪4 left to decide.
+    await insertD(s, { matchRunId: mr!.id, type: 'QTY_SHORT', deltaAmount: '4.00', resolutionStatus: 'rejected', resolvedAt: new Date() });
+    const open = await insertD(s, { matchRunId: mr!.id, type: 'PRICE_HIGHER', deltaAmount: '5.00', requiresRole: 'owner' });
+    const month = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit' }).format(new Date());
+    const report = await computeLeakReport(db, s.restaurantId, month);
+    const pay = payRunStatusOf(await computeInvoiceLeak(db, s.restaurantId, i!.id));
+    const sum = await ownerOf(s).approvals.queueSummary();
+    const row = (await ownerOf(s).approvals.myQueue({ limit: 100 })).find((r) => r.id === open.id)!;
+    expect(report.status.stillOpenIls).toBe(4);
+    expect(report.ledgerDriftAgorot).toBe(0);
+    expect(pay.pendingIls).toBe(4);
+    expect(sum.toDecide.amountIls).toBe(4);
+    expect(row.claimAgorot).toBe(400);
+  });
+
   it('an accepted duplicate is logged as a hold, never as a claim', async () => {
     const { DECISION_COPY } = await import('../notifications/templates');
     const { activityEvents } = await import('@restomatch/db');
@@ -697,6 +748,327 @@ describe('claimability (verbs keyed by type AND claimability)', () => {
     const [row] = await db.select().from(activityEvents).where(eq(activityEvents.entityId, dup.id));
     expect(row!.title).toBe(DECISION_COPY.he.duplicateHeld);
     expect(row!.title).not.toBe(DECISION_COPY.he.approved);
+  });
+});
+
+describe('G-14 Q3 round 3: one allocator — live claims first, on every screen', () => {
+  const month = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit' }).format(new Date());
+  async function run(s: Scenario, total: string) {
+    const [i] = await db
+      .insert(invoices)
+      .values({ restaurantId: s.restaurantId, source: 'manual', status: 'matched', totalInclVat: total })
+      .returning();
+    const [mr] = await db
+      .insert(matchRuns)
+      .values({ restaurantId: s.restaurantId, invoiceId: i!.id, overallStatus: 'major', totalDiscrepancyAmount: '0' })
+      .returning();
+    return { invoiceId: i!.id, matchRunId: mr!.id };
+  }
+  /** Every screen's figures for one invoice: report, approvals, Ask, pay run and the letters' rule. */
+  async function screens(s: Scenario, invoiceId: string) {
+    const { computeLeakReport, computeInvoiceLeak } = await import('@restomatch/charts');
+    const { payRunStatusOf } = await import('../routers/payRun');
+    const { claimableFor } = await import('../ask/tools');
+    const { claimableLines, sumClaims } = await import('../lib/claims');
+    const report = await computeLeakReport(db, s.restaurantId, month());
+    const leak = await computeInvoiceLeak(db, s.restaurantId, invoiceId);
+    const pay = payRunStatusOf(leak);
+    const queue = await ownerOf(s).approvals.myQueue({ limit: 100 });
+    const lines = leak ? claimableLines(leak) : [];
+    return {
+      report,
+      pay,
+      toDecide: (await ownerOf(s).approvals.queueSummary()).toDecide.amountIls,
+      rowsAgorot: queue.filter((r) => r.invoiceId === invoiceId).reduce((a, r) => a + (r.claimAgorot ?? 0), 0),
+      ask: (await claimableFor(db, s.restaurantId, 'en')).totalIls,
+      lettersUndecided: sumClaims(lines.filter((c) => c.undecided)),
+    };
+  }
+
+  it('F1: approve ₪9, approve ₪10 (claim ₪3), reopen the ₪9 → ₪9 to decide on every screen, ₪3 claimed', async () => {
+    const s = await seed();
+    const { invoiceId, matchRunId } = await run(s, '12.00');
+    const c = await insertD(s, { matchRunId, type: 'QTY_SHORT', deltaAmount: '9.00' });
+    const a = await insertD(s, { matchRunId, type: 'PRICE_HIGHER', deltaAmount: '10.00' });
+    await insertD(s, { matchRunId, type: 'PRICE_HIGHER', deltaAmount: '5.00' });
+    await managerOf(s).approvals.approve({ discrepancyId: c.id });
+    await managerOf(s).approvals.approve({ discrepancyId: a.id });
+    const claims = await db.select().from(recoveryClaims).where(eq(recoveryClaims.restaurantId, s.restaurantId));
+    expect(Object.fromEntries(claims.map((r) => [r.discrepancyId, r.amountAgorot]))).toEqual({ [c.id]: 900, [a.id]: 300 });
+    await managerOf(s).approvals.reopen({ discrepancyId: c.id });
+    const v = await screens(s, invoiceId);
+    expect(v.report.status.stillOpenIls).toBe(9);
+    expect(v.report.status.claimedIls).toBe(3);
+    expect(v.report.ledgerDriftAgorot).toBe(0);
+    expect(v.toDecide).toBe(9);
+    expect(v.rowsAgorot).toBe(900);
+    expect(v.ask).toBe(9);
+    expect(v.lettersUndecided).toBe(9);
+    expect(v.pay.pendingIls).toBe(9);
+    expect(v.pay.creditIls).toBe(v.report.status.claimedIls);
+  });
+
+  it('b3: an accept holding a live ₪3 claim takes ₪3 of the cap, not its ₪10 — the open ₪5 is ₪5 everywhere', async () => {
+    const s = await seed();
+    const { invoiceId, matchRunId } = await run(s, '12.00');
+    const a = await insertD(s, { matchRunId, deltaAmount: '10.00', resolutionStatus: 'accepted', resolvedAt: new Date(), resolvedBy: s.managerId });
+    await db.insert(recoveryClaims).values({ restaurantId: s.restaurantId, discrepancyId: a.id, status: 'claimed', amountAgorot: 300 });
+    await insertD(s, { matchRunId, deltaAmount: '5.00' });
+    const v = await screens(s, invoiceId);
+    expect(v.report.status.stillOpenIls).toBe(5);
+    expect(v.report.status.claimedIls).toBe(3);
+    expect(v.report.ledgerDriftAgorot).toBe(400); // hero ₪12, found ₪8: the page says so (report-drift-note)
+    expect([v.toDecide, v.rowsAgorot / 100, v.ask, v.lettersUndecided, v.pay.pendingIls]).toEqual([5, 5, 5, 5, 5]);
+    expect(v.pay.creditIls).toBe(3);
+  });
+
+  it('b5: a disputed ₪6 claim on a reopened row is claimed — never also "to decide"', async () => {
+    const s = await seed();
+    const { invoiceId, matchRunId } = await run(s, '100.00');
+    const d = await insertD(s, { matchRunId, deltaAmount: '6.00' });
+    const countBefore = (await ownerOf(s).approvals.queueSummary()).toDecide.count;
+    await db.insert(recoveryClaims).values({ restaurantId: s.restaurantId, discrepancyId: d.id, status: 'disputed', amountAgorot: 600 });
+    const v = await screens(s, invoiceId);
+    expect(v.report.status.claimedIls).toBe(6);
+    expect(v.report.status.stillOpenIls).toBe(0);
+    expect([v.toDecide, v.rowsAgorot, v.ask, v.lettersUndecided, v.pay.pendingIls]).toEqual([0, 0, 0, 0, 0]);
+    // R5-5: the row agrees with the count — not claimable, no decide ₪.
+    const row = (await ownerOf(s).approvals.myQueue({ limit: 100 })).find((r) => r.id === d.id)!;
+    expect([row.claimable, row.claimAgorot]).toEqual([false, 0]);
+    // R4-4: the count follows the ₪ — the claimed row leaves "to decide" (the report counts it open: 0).
+    expect((await ownerOf(s).approvals.queueSummary()).toDecide.count).toBe(countBefore - 1);
+    expect(v.report.status.stillOpenCount).toBe(0);
+  });
+
+  it('R4-1: a claim closed as recovered short of its amount owes ₪0 — pay credit 0, tracker 0, report claimed 6 / waived 4', async () => {
+    const { listClaims } = await import('../recovery/service');
+    const s = await seed();
+    const { invoiceId, matchRunId } = await run(s, '100.00');
+    const d = await insertD(s, { matchRunId, type: 'PRICE_HIGHER', deltaAmount: '10.00' });
+    await managerOf(s).approvals.approve({ discrepancyId: d.id });
+    const [claim] = await db.select().from(recoveryClaims).where(eq(recoveryClaims.discrepancyId, d.id));
+    expect(claim!.amountAgorot).toBe(1000);
+    // ₪6 of ₪10 came back (a credit note), then the claim is closed as recovered, with a reason.
+    await db.update(recoveryClaims).set({ status: 'credited', creditedAgorot: 600, creditedAt: new Date() }).where(eq(recoveryClaims.id, claim!.id));
+    // Closed as recovered with a reason (recovery.transition's short-recovery edge; the flag is off in this seed).
+    await db.update(recoveryClaims).set({ status: 'recovered', recoveredAt: new Date(), note: 'סגרנו: הספק לא יזכה ביתרה' }).where(eq(recoveryClaims.id, claim!.id));
+    const v = await screens(s, invoiceId);
+    const tracker = (await listClaims(db, s.restaurantId, { limit: null })).find((c) => c.id === claim!.id)!;
+    expect(tracker.status).toBe('recovered');
+    expect(tracker.outstandingAgorot).toBe(0);
+    expect(v.pay.creditIls).toBe(0);
+    expect(v.pay.status).toBe('pay');
+    expect(v.report.status.claimedIls).toBe(6);
+    expect(v.report.status.waivedIls).toBe(4);
+  });
+
+  it('R4-2: claims above a lowered invoice total — tracker, letters and reminders ask for the cap, like every other screen', async () => {
+    const { listClaims } = await import('../recovery/service');
+    const { buildClaimLetters } = await import('../recovery/letters');
+    const s = await seed();
+    const { invoiceId, matchRunId } = await run(s, '20.00');
+    const a = await insertD(s, { matchRunId, deltaAmount: '8.00' });
+    const b = await insertD(s, { matchRunId, type: 'QTY_SHORT', deltaAmount: '8.00' });
+    await managerOf(s).approvals.approve({ discrepancyId: a.id });
+    await managerOf(s).approvals.approve({ discrepancyId: b.id });
+    // The invoice total is corrected down to ₪10 after both ₪8 claims were made.
+    await db.update(invoices).set({ totalInclVat: '10.00' }).where(eq(invoices.id, invoiceId));
+    const v = await screens(s, invoiceId);
+    const claims = await listClaims(db, s.restaurantId, { limit: null });
+    const letters = await buildClaimLetters(db, s.restaurantId);
+    expect(v.report.status.claimedIls).toBe(10);
+    expect(v.pay.creditIls).toBe(10);
+    expect(claims.reduce((t, c) => t + c.outstandingAgorot, 0)).toBe(1000);
+    expect(letters.reduce((t, l) => t + l.totalAgorot, 0)).toBe(1000);
+    // R5-2: the monthly report's "still owed" = Σ tracker outstanding for the month's invoices.
+    const { computeMonthlyReport } = await import('../reports/monthly');
+    const monthly = await computeMonthlyReport(db, s.restaurantId, month());
+    expect(monthly.outstandingAgorot).toBe(1000);
+    // R5-3: the desk's claimed is on the same basis — its funnel adds up with outstanding.
+    const { summarize } = await import('../recovery/service');
+    const sum = summarize(claims);
+    expect(sum.claimedAgorot).toBe(1000);
+    expect(sum.bySupplier.reduce((t, x) => t + x.claimedAgorot, 0)).toBe(1000);
+    expect(sum.claimedAgorot).toBe(sum.outstandingAgorot + sum.creditedAgorot + sum.writtenOffAgorot);
+  });
+
+  it('R5-1/R5-4: a sent claim the lowered cap leaves at ₪0 is not chased — no digest, no draft — and is not "to send"', async () => {
+    const { listClaims, summarize, isCappedAway } = await import('../recovery/service');
+    const { findOverdue, supplierReminderDraft } = await import('../recovery/reminders');
+    const s = await seed();
+    const [sup] = await db.insert(suppliers).values({ restaurantId: s.restaurantId, name: 'ספק תקרה' }).returning();
+    const { invoiceId, matchRunId } = await run(s, '20.00');
+    await db.update(invoices).set({ supplierId: sup!.id }).where(eq(invoices.id, invoiceId));
+    const at = (k: number) => new Date(Date.UTC(2026, 9, 1, 8, 0, k));
+    const a = await insertD(s, { matchRunId, createdAt: at(1), deltaAmount: '8.00', resolutionStatus: 'accepted', resolvedAt: new Date(), resolvedBy: s.managerId });
+    const b = await insertD(s, { matchRunId, createdAt: at(2), type: 'QTY_SHORT', deltaAmount: '8.00', resolutionStatus: 'accepted', resolvedAt: new Date(), resolvedBy: s.managerId });
+    const [ca] = await db.insert(recoveryClaims).values({ restaurantId: s.restaurantId, discrepancyId: a.id, supplierId: sup!.id, invoiceId, amountAgorot: 800 }).returning();
+    const [cb] = await db.insert(recoveryClaims).values({ restaurantId: s.restaurantId, discrepancyId: b.id, supplierId: sup!.id, invoiceId, amountAgorot: 800 }).returning();
+    // The total is corrected to ₪8: A holds the cap (first), B is left at ₪0.
+    await db.update(invoices).set({ totalInclVat: '8.00' }).where(eq(invoices.id, invoiceId));
+    const unsent = await listClaims(db, s.restaurantId, { limit: null });
+    const B = unsent.find((c) => c.id === cb!.id)!;
+    expect([B.outstandingAgorot, B.cappedAgorot, isCappedAway(B)]).toEqual([0, 0, true]);
+    expect(summarize(unsent).byStatus.claimed.count).toBe(1); // R5-4: B is not "to send"
+    // Both letters went out 10 days ago; then A is credited in full.
+    const old = new Date(Date.now() - 10 * 86_400_000);
+    await db.update(recoveryClaims).set({ status: 'letter_sent', letterSentAt: old, claimedAt: old }).where(eq(recoveryClaims.restaurantId, s.restaurantId));
+    const now = new Date();
+    expect((await findOverdue(db, s.restaurantId, now)).count).toBe(1); // A only, never B at ₪0
+    await db.update(recoveryClaims).set({ status: 'credited', creditedAgorot: 800, creditedAt: now }).where(eq(recoveryClaims.id, ca!.id));
+    const digest = await findOverdue(db, s.restaurantId, now);
+    expect([digest.count, digest.totalAgorot, digest.claimIds]).toEqual([0, 0, []]);
+    const draft = await supplierReminderDraft(db, s.restaurantId, sup!.id, now);
+    expect([draft.count, draft.outstandingAgorot, draft.claimIds]).toEqual([0, 0, []]);
+    const tracked = await listClaims(db, s.restaurantId, { limit: null, now });
+    expect(tracked.find((c) => c.id === cb!.id)!.overdue).toBe(false);
+  });
+
+  it('R4-3: the per-line allocation is one linear query — a medium tenant beside a large one stays fast', async () => {
+    const { computeInvoicesLeak, invoiceAllocationSql, LEAK_FILTER } = await import('@restomatch/charts');
+    const { sql } = await import('@restomatch/db');
+    // A large neighbour (4,000 rows) and a medium tenant (120 invoices × 12 rows, a claim on every third).
+    const [bigR] = await db.insert(restaurants).values({ name: 'שכן גדול' }).returning();
+    const bigRun = await run({ restaurantId: bigR!.id } as Scenario, '1000000.00');
+    const filler = Array.from({ length: 4000 }, () => ({ restaurantId: bigR!.id, matchRunId: bigRun.matchRunId, type: 'PRICE_HIGHER' as const, severity: 'warn' as const, deltaAmount: '1.00', resolutionStatus: 'open' as const }));
+    for (let i = 0; i < filler.length; i += 1000) await db.insert(discrepancies).values(filler.slice(i, i + 1000));
+    const s = await seed();
+    const ids: string[] = [];
+    for (let k = 0; k < 120; k += 1) {
+      const r = await run(s, '50.00');
+      ids.push(r.invoiceId);
+      const ds = await db
+        .insert(discrepancies)
+        .values(Array.from({ length: 12 }, (_, j) => ({ restaurantId: s.restaurantId, matchRunId: r.matchRunId, type: 'PRICE_HIGHER' as const, severity: 'warn' as const, deltaAmount: '5.00', resolutionStatus: (j % 3 === 0 ? 'accepted' : 'open') as 'accepted' | 'open', resolvedAt: j % 3 === 0 ? new Date() : null })))
+        .returning({ id: discrepancies.id });
+      await db.insert(recoveryClaims).values(ds.filter((_, j) => j % 3 === 0).map((d) => ({ restaurantId: s.restaurantId, discrepancyId: d.id, amountAgorot: 300 })));
+    }
+    await db.execute(sql`ANALYZE discrepancies; ANALYZE recovery_claims; ANALYZE match_runs; ANALYZE invoices`);
+    const t0 = Date.now();
+    const leaks = await computeInvoicesLeak(db, s.restaurantId, ids.slice(0, 100));
+    const ms = Date.now() - t0;
+    expect(leaks.size).toBe(100);
+    expect([...leaks.values()].every((inv) => inv.lines.every((l) => l.ledger != null))).toBe(true);
+    // r3 ran this in tens of ms; the inline join re-ran the window per line (seconds). Generous bound.
+    expect(ms).toBeLessThan(2000);
+    // And the allocator itself runs its window once (no WindowAgg on the inner side of a loop).
+    const plan = (await db.execute(sql`EXPLAIN (ANALYZE, FORMAT JSON) ${invoiceAllocationSql(s.restaurantId, ids.slice(0, 100), LEAK_FILTER)}`)) as unknown as Array<{ 'QUERY PLAN': unknown }>;
+    const windows: Array<{ loops: number }> = [];
+    const walk = (n: Record<string, unknown>) => {
+      if (n['Node Type'] === 'WindowAgg') windows.push({ loops: Number(n['Actual Loops']) });
+      for (const c of (n.Plans as Record<string, unknown>[] | undefined) ?? []) walk(c);
+    };
+    const root = plan[0]!['QUERY PLAN'] as Array<{ Plan: Record<string, unknown> }>;
+    walk(root[0]!.Plan);
+    expect(windows.length).toBeGreaterThan(0);
+    expect(windows.every((w) => w.loops === 1)).toBe(true);
+  });
+
+  it('round 7 #1/#2: credit lands, then the cap — a claim credited its capped share keeps "recovered"; claimed = owed + credited + written off', async () => {
+    const { listClaims, summarize, isCappedAway } = await import('../recovery/service');
+    const s = await seed();
+    const at = (k: number) => new Date(Date.UTC(2026, 9, 1, 8, 0, k));
+    const two = async (total: string) => {
+      const { invoiceId, matchRunId } = await run(s, total);
+      const a = await insertD(s, { matchRunId, createdAt: at(1), deltaAmount: '8.00', resolutionStatus: 'accepted', resolvedAt: new Date(), resolvedBy: s.managerId });
+      const b = await insertD(s, { matchRunId, createdAt: at(2), type: 'QTY_SHORT', deltaAmount: '8.00', resolutionStatus: 'accepted', resolvedAt: new Date(), resolvedBy: s.managerId });
+      return { invoiceId, a, b };
+    };
+    const claimOn = (discrepancyId: string, invoiceId: string, v: Partial<typeof recoveryClaims.$inferInsert>) =>
+      db.insert(recoveryClaims).values({ restaurantId: s.restaurantId, discrepancyId, invoiceId, amountAgorot: 800, ...v }).returning();
+    const invariant = (rows: Awaited<ReturnType<typeof listClaims>>) => {
+      const sum = summarize(rows);
+      expect(sum.claimedAgorot).toBe(sum.outstandingAgorot + sum.creditedAgorot + sum.writtenOffAgorot);
+      return sum;
+    };
+    // #1: cap ₪10, both sent, ₪10 credited (A ₪8, B ₪2) → B credited its capped ₪2: not capped away.
+    const c1 = await two('10.00');
+    await claimOn(c1.a.id, c1.invoiceId, { status: 'credited', creditedAgorot: 800 });
+    const [b1] = await claimOn(c1.b.id, c1.invoiceId, { status: 'credited', creditedAgorot: 200 });
+    let rows = await listClaims(db, s.restaurantId, { limit: null });
+    const B1 = rows.find((c) => c.id === b1!.id)!;
+    expect([B1.cappedAgorot, B1.creditedAgorot, B1.outstandingAgorot, isCappedAway(B1)]).toEqual([200, 200, 0, false]);
+    expect(B1.next.map((e) => e.to)).toContain('recovered');
+    expect(invariant(rows).claimedAgorot).toBe(1000);
+    await db.delete(recoveryClaims);
+    // #2 S2: ₪20 invoice, ₪16 credited in full, then the total is corrected to ₪10 — credit already
+    // received is never capped away: claimed ₪16, rate 100%.
+    const c2 = await two('20.00');
+    for (const d of [c2.a, c2.b]) await claimOn(d.id, c2.invoiceId, { status: 'credited', creditedAgorot: 800 });
+    await db.update(invoices).set({ totalInclVat: '10.00' }).where(eq(invoices.id, c2.invoiceId));
+    rows = (await listClaims(db, s.restaurantId, { limit: null })).filter((c) => c.invoiceId === c2.invoiceId);
+    const s2 = invariant(rows);
+    expect([s2.claimedAgorot, s2.creditedAgorot, s2.recoveryRate]).toEqual([1600, 1600, 1]);
+    await db.delete(recoveryClaims);
+    // #2 S3: cap ₪10, the credit filled B (claimed first) with ₪8 and A with ₪2: A still owes ₪6.
+    const c3 = await two('10.00');
+    await claimOn(c3.b.id, c3.invoiceId, { status: 'credited', creditedAgorot: 800, claimedAt: at(10) });
+    await claimOn(c3.a.id, c3.invoiceId, { status: 'credited', creditedAgorot: 200, claimedAt: at(20) });
+    rows = (await listClaims(db, s.restaurantId, { limit: null })).filter((c) => c.invoiceId === c3.invoiceId);
+    const s3 = invariant(rows);
+    expect([s3.outstandingAgorot, s3.creditedAgorot]).toEqual([600, 1000]);
+    expect(s3.recoveryRate).toBeLessThan(1);
+  });
+
+  it('round 7 #4: an open duplicate holding a live claim keeps its hold verbs — approving keeps the copy on hold', async () => {
+    const { computeInvoiceLeak } = await import('@restomatch/charts');
+    const { payRunStatusOf } = await import('../routers/payRun');
+    const s = await seed();
+    const { invoiceId, matchRunId } = await run(s, '117.00');
+    const dup = await insertD(s, { matchRunId, type: 'DUPLICATE_INVOICE', severity: 'block', deltaAmount: '117.00' });
+    await db.insert(recoveryClaims).values({ restaurantId: s.restaurantId, discrepancyId: dup.id, invoiceId, amountAgorot: 11_700, status: 'letter_sent' });
+    const row = (await ownerOf(s).approvals.myQueue({ limit: 100 })).find((r) => r.id === dup.id)!;
+    expect([row.claimable, row.claimed, row.claimAgorot]).toEqual([false, true, 0]);
+    // The web maps claimed rows onto the type's real verbs (vocab decisionActions): "don't pay the copy" = approve.
+    await ownerOf(s).approvals.approve({ discrepancyId: dup.id });
+    expect(payRunStatusOf(await computeInvoiceLeak(db, s.restaurantId, invoiceId)).status).toBe('hold');
+  });
+
+  it('the hand-built mirror (lines without a ledger row: a ריכוז proposal) = the SQL allocator when no claim is involved', async () => {
+    const { computeInvoiceLeak } = await import('@restomatch/charts');
+    const { claimableLines } = await import('../lib/claims');
+    const s = await seed();
+    const { invoiceId, matchRunId } = await run(s, '20.00');
+    // A binding cap with every tier but live claims: a decided claim, a tolerated and a rejected waiver, open rows.
+    // Distinct created_at a second apart: the line's ISO createdAt keeps milliseconds only, while SQL orders by
+    // microseconds — rows inserted in the same millisecond would tie in the mirror (a persisted line never
+    // goes through it; a proposal's lines always have distinct createdAt).
+    const at = (k: number) => new Date(Date.UTC(2026, 9, 1, 8, 0, k));
+    await insertD(s, { matchRunId, createdAt: at(1), type: 'QTY_SHORT', deltaAmount: '4.00', resolutionStatus: 'accepted', resolvedAt: new Date(), resolvedBy: s.managerId });
+    await insertD(s, { matchRunId, createdAt: at(2), deltaAmount: '3.00', resolutionStatus: 'accepted', ruleId: 'minor-info' });
+    await insertD(s, { matchRunId, createdAt: at(3), deltaAmount: '5.00', resolutionStatus: 'rejected', resolvedAt: new Date(), resolvedBy: s.managerId });
+    await insertD(s, { matchRunId, createdAt: at(4), deltaAmount: '6.00' });
+    await insertD(s, { matchRunId, createdAt: at(5), type: 'QTY_OVER', deltaAmount: '7.00', resolutionStatus: 'escalated', requiresRole: 'owner' });
+    const leak = (await computeInvoiceLeak(db, s.restaurantId, invoiceId))!;
+    const persisted = claimableLines(leak);
+    const handBuilt = claimableLines({ ...leak, lines: leak.lines.map(({ ledger: _l, ...l }) => l) });
+    const view = (xs: typeof persisted) => xs.map((c) => [c.line.discrepancyId, c.amount, c.undecided]).sort();
+    expect(view(handBuilt)).toEqual(view(persisted));
+    expect(persisted.reduce((a, c) => a + c.amount, 0)).toBe(4 + 6 + 2); // 20 − 4 − 3 − 5 = 8 left for the open ₪6 + ₪7
+  });
+
+  it('F2: pay run credit = the report\'s claimed ₪ (b2: a live ₪4 claim on a ₪6 accept; b4: an acknowledged claim on a rejected row)', async () => {
+    const s = await seed();
+    // b2: ₪10 invoice; A ₪6 rejected, its claim written off with ₪0 back; B ₪6 accepted, live ₪4 claim.
+    const b2 = await run(s, '10.00');
+    const a = await insertD(s, { matchRunId: b2.matchRunId, deltaAmount: '6.00', resolutionStatus: 'rejected', resolvedAt: new Date(), resolvedBy: s.managerId });
+    await db.insert(recoveryClaims).values({ restaurantId: s.restaurantId, discrepancyId: a.id, status: 'written_off', amountAgorot: 600 });
+    const b = await insertD(s, { matchRunId: b2.matchRunId, deltaAmount: '6.00', resolutionStatus: 'accepted', resolvedAt: new Date(), resolvedBy: s.managerId });
+    await db.insert(recoveryClaims).values({ restaurantId: s.restaurantId, discrepancyId: b.id, status: 'claimed', amountAgorot: 400 });
+    const v2 = await screens(s, b2.invoiceId);
+    expect(v2.report.status.claimedIls).toBe(4);
+    expect(v2.pay.creditIls).toBe(v2.report.status.claimedIls);
+    expect(v2.pay.status).toBe('claim');
+    await db.delete(recoveryClaims);
+    await db.delete(discrepancies).where(eq(discrepancies.matchRunId, b2.matchRunId));
+    // b4: an acknowledged ₪6 claim on a rejected row → ₪6 claimed, offset in the pay run.
+    const b4 = await run(s, '100.00');
+    const r = await insertD(s, { matchRunId: b4.matchRunId, deltaAmount: '6.00', resolutionStatus: 'rejected', resolvedAt: new Date(), resolvedBy: s.managerId });
+    await db.insert(recoveryClaims).values({ restaurantId: s.restaurantId, discrepancyId: r.id, status: 'acknowledged', amountAgorot: 600 });
+    const v4 = await screens(s, b4.invoiceId);
+    expect(v4.report.status.claimedIls).toBe(6);
+    expect(v4.pay.creditIls).toBe(v4.report.status.claimedIls);
+    expect(v4.pay.status).toBe('claim');
   });
 });
 

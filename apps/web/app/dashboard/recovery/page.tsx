@@ -11,7 +11,7 @@ import { recovery as recoveryNs } from '@/lib/i18n/messages/recovery';
 import { Card, EmptyState, SectionHeader } from '@/lib/components';
 import { displayName } from '../approvals/vocab';
 import { TrackerClient } from './tracker-client';
-import { ALL_CLAIMS, ANSWER_DAYS, PERIODS, followUps, funnelOf, inPeriod, periodWindow, type FunnelPart, type Period } from './logic';
+import { ALL_CLAIMS, ANSWER_DAYS, PERIODS, followUps, funnelOf, inPeriod, isCappedAway, periodWindow, type FunnelPart, type Period } from './logic';
 
 const PART_ORDER: FunnelPart[] = ['returned', 'credited', 'open', 'disputed', 'writtenOff'];
 const PART_BAR: Record<FunnelPart, string> = {
@@ -78,8 +78,10 @@ export default async function RecoveryPage({
   // "שלחו ל-6 ספקים": the requests to send go out per supplier (WF-3), so the button names suppliers.
   const unsentSuppliers = new Set(claims.filter((c) => c.status === 'claimed' && c.outstandingAgorot > 0).map((c) => c.supplierId ?? c.supplierName)).size;
   const tabCount = {
-    send: claims.filter((c) => c.status === 'claimed').length,
-    track: claims.filter((c) => !['claimed', 'recovered', 'written_off'].includes(c.status)).length,
+    // An open claim the invoice cap left at ₪0 has nothing to send (R5-4).
+    send: claims.filter((c) => c.status === 'claimed' && !isCappedAway(c)).length,
+    // The same predicates as the tracker's lists (tracker-client inView): a capped-away claim is tracked.
+    track: claims.filter((c) => !['recovered', 'written_off'].includes(c.status) && (c.status !== 'claimed' || isCappedAway(c))).length,
   };
   // No tab asked: "מעקב" — unless nothing is out with suppliers yet and requests wait to be sent,
   // then "לשליחה" (never land the owner on an empty list while there is something to do).

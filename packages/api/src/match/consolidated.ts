@@ -295,10 +295,14 @@ export function claimSplit(
     seen.add(f.key);
     return true;
   });
+  // The allocator splits a binding cap in (createdAt, id) order inside a tier. A proposal's
+  // findings are all undecided, so a monotonic createdAt keeps the biggest-first order the
+  // excl / incl VAT split has always used (a padded id breaks no tie either).
   const lines = [...unique]
     .sort((a, b) => Math.abs(b.deltaAmount) - Math.abs(a.deltaAmount))
     .map((f, i) => ({
-      discrepancyId: f.key ?? `proposal-${i}`,
+      discrepancyId: f.key ?? `proposal-${String(i).padStart(6, '0')}`,
+      createdAt: new Date(PROPOSAL_EPOCH + i).toISOString(),
       type: f.type,
       severity: f.severity,
       resolutionStatus: 'open',
@@ -334,6 +338,9 @@ export function claimSplit(
     inclIls: sumClaims(claimed.filter((c) => c.basis !== 'excl')),
   };
 }
+
+/** createdAt of a proposal's first line (any fixed instant: only the order matters). */
+const PROPOSAL_EPOCH = Date.UTC(2000, 0, 1);
 
 /** The claimable ₪ of the cross-match (claimSplit's total). */
 export function claimableIls(

@@ -337,8 +337,15 @@ export default async function LeakReportPage({
                   {t('report.resolvedNote', { amount: ils(resolvedIls), items: resolvedItems })}
                 </p>
               ) : null}
-              {report.capAdjustmentIls > 0 ? (
-                <p className="mt-1 text-xs text-muted">{t('report.capNoteShort', { amount: ils(report.capAdjustmentIls) })}</p>
+              {/* G-14 Q3: the status tiles are the capped ledger states, so found = the hero unless a claim
+                  holds less than its gap (found below the hero), or a credit invoice's negative total pulls
+                  the hero below what was found (found above): say which way and by how much, never hide it. */}
+              {report.ledgerDriftAgorot !== 0 ? (
+                <p className="mt-1 text-xs text-muted" data-testid="report-drift-note" data-agorot={report.ledgerDriftAgorot}>
+                  {t(report.ledgerDriftAgorot > 0 ? 'report.driftNote' : 'report.driftNoteAbove', {
+                    amount: ils(Math.abs(report.ledgerDriftAgorot) / 100),
+                  })}
+                </p>
               ) : null}
             </section>
 

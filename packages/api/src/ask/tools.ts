@@ -197,7 +197,8 @@ export function claimableFromAwaiting(claims: readonly AwaitingClaim[], locale: 
 export function claimableData(invoices: LeakBreakdownInvoice[], locale: AskLocale = 'en') {
   const lines = invoices.flatMap((inv) =>
     claimableLines(inv)
-      .filter(({ line: l }) => l.resolutionStatus === 'open' || l.resolutionStatus === 'escalated')
+      // Waiting for a decision (the ledger's tier 3): a reopened row holding a live claim is not.
+      .filter(({ undecided }) => undecided)
       .map(({ line: l, amount }) => ({
         invoiceId: inv.invoiceId,
         invoiceNumber: clip(inv.invoiceNumber, 30),

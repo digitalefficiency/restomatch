@@ -664,7 +664,7 @@ function ApprovalsListInner({
     </div>
   );
   const primaryLabel = (d: QueueItem) => {
-    const a = decisionActions(d.type, d.claimable)[0];
+    const a = decisionActions(d.type, d.claimable, d.claimed)[0];
     if (!a) return t('decision.reviewed');
     const amount = formatIls(Math.abs(Number(d.deltaAmount ?? 0)), { locale, maximumFractionDigits: 2 });
     return 'withAmount' in a && a.withAmount ? t(a.label).replace('{amount}', amount) : t(a.label);
@@ -934,7 +934,7 @@ function DecisionCard({
   const supplier = displayName(locale, d.supplierName, d.supplierNameEn);
   const amountNum = Math.abs(Number(d.deltaAmount ?? 0));
   const amount = formatIls(amountNum, { locale, maximumFractionDigits: 2 });
-  const actions = decisionActions(d.type, d.claimable);
+  const actions = decisionActions(d.type, d.claimable, d.claimed);
   const why = whyLine(t, d);
   const headId = `dq-${d.id}-title`;
   const sumId = `dq-${d.id}-summary`;

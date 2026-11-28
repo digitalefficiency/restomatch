@@ -6,6 +6,7 @@ import { __resetOpsSources, __setOpsSources, israelWeek, runOpsTool, type OpsCon
 import { classifyQuestion } from '../ask/offline';
 import { runTool, TOOL_DEFINITIONS } from '../ask/tools';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
+import { coverClaim } from './au03-helpers';
 
 /**
  * AU-06 · the five "what needs me" tools on a seeded tenant. Tenant B always
@@ -42,7 +43,8 @@ async function claim(
       restaurantId: t.restaurantId,
       type,
       severity: 'warn',
-      deltaAmount: '10.00',
+      // The finding is what the claim asks back (syncClaims never claims more than |Δ|; G-14 Q3 R4-2).
+      deltaAmount: (((rest as { amountAgorot?: number }).amountAgorot ?? 1000) / 100).toFixed(2),
       resolutionStatus: 'accepted',
     })
     .returning({ id: discrepancies.id });
@@ -59,6 +61,7 @@ async function claim(
       ...rest,
     })
     .returning({ id: recoveryClaims.id });
+  await coverClaim(db, t.invoiceId, (rest as { amountAgorot?: number }).amountAgorot ?? 1000);
   return c!.id;
 }
 
