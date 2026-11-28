@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
 import { GET } from '../../app/receiver-sw.js/route';
-import { SNAPSHOT_CACHE, snapshotPathAllowed } from '../pwa/fieldSnapshot';
+import { SNAPSHOT_CACHE, SNAPSHOT_OWNER_PATH, snapshotPathAllowed } from '../pwa/fieldSnapshot';
 
 const ORIGIN = 'https://app.test';
 
@@ -28,8 +28,10 @@ function fakeCaches() {
       open,
       keys: async () => [...stores.keys()],
       delete: async (n: string) => stores.delete(n),
-      match: async (r: Request | string) => {
-        for (const m of stores.values()) {
+      match: async (r: Request | string, o?: { cacheName?: string }) => {
+        // Like CacheStorage.match: `cacheName` searches only that cache and never creates it.
+        for (const [name, m] of stores) {
+          if (o?.cacheName && name !== o.cacheName) continue;
           const hit = m.get(keyOf(r));
           if (hit) return hit.clone();
         }
@@ -128,13 +130,38 @@ describe('receiver service worker', () => {
     });
     const snap = await w.caches.api.open(SNAPSHOT_CACHE);
     await snap.put('/dashboard/receiving/11111111-1111-4111-8111-111111111111', new Response('<html>snapshot</html>'));
+    // The snapshot's owner, and that owner's live login on this phone (W3-03b: the worker checks both).
+    await snap.put(SNAPSHOT_OWNER_PATH, new Response('user-a:rest-1'));
+    await (await w.caches.api.open('rm-share-v1')).put('/__share/owner', new Response(JSON.stringify({ userId: 'user-a', exp: Date.now() + 3600_000 })));
     const po = '/dashboard/receiving/11111111-1111-4111-8111-111111111111';
     expect(await (await w.dispatch(po, { mode: 'navigate' }))!.text()).toBe('<html>fresh</html>');
     // Online, the worker never stores the page it fetched.
-    expect(w.caches.stores.get(SNAPSHOT_CACHE)!.size).toBe(1);
+    expect(w.caches.stores.get(SNAPSHOT_CACHE)!.size).toBe(2);
     online = false;
     expect(await (await w.dispatch(`${po}?x=1`, { mode: 'navigate' }))!.text()).toBe('<html>snapshot</html>');
     expect(await (await w.dispatch('/dashboard/receiving/other', { mode: 'navigate' }))!.text()).toBe('/pwa/offline.html');
+  });
+
+  it("offline, a snapshot whose owner has no live login on this phone is never served (W3-03b)", async () => {
+    const po = '/dashboard/receiving/11111111-1111-4111-8111-111111111111';
+    const cases: Array<[string, (w: Awaited<ReturnType<typeof loadWorker>>) => Promise<void>]> = [
+      ['no login stamp', async () => {}],
+      ['an expired login', async (w) => void (await (await w.caches.api.open('rm-share-v1')).put('/__share/owner', new Response(JSON.stringify({ userId: 'user-a', exp: Date.now() - 1 }))))],
+      ['another user signed in', async (w) => void (await (await w.caches.api.open('rm-share-v1')).put('/__share/owner', new Response(JSON.stringify({ userId: 'user-b', exp: Date.now() + 3600_000 }))))],
+    ];
+    for (const [, login] of cases) {
+      const w = await loadWorker(async () => Promise.reject(new TypeError('Failed to fetch')));
+      const snap = await w.caches.api.open(SNAPSHOT_CACHE);
+      await snap.put(po, new Response('<html>snapshot</html>'));
+      await snap.put(SNAPSHOT_OWNER_PATH, new Response('user-a:rest-1'));
+      await login(w);
+      expect(await (await w.dispatch(po, { mode: 'navigate' }))!.text()).not.toContain('snapshot');
+    }
+    // No stamp on the snapshot itself: not served either.
+    const w = await loadWorker(async () => Promise.reject(new TypeError('Failed to fetch')));
+    await (await w.caches.api.open(SNAPSHOT_CACHE)).put(po, new Response('<html>snapshot</html>'));
+    await (await w.caches.api.open('rm-share-v1')).put('/__share/owner', new Response(JSON.stringify({ userId: 'user-a', exp: Date.now() + 3600_000 })));
+    expect(await (await w.dispatch(po, { mode: 'navigate' }))!.text()).not.toContain('snapshot');
   });
 
   it('never intercepts a POST, an API / tRPC call or another origin', async () => {

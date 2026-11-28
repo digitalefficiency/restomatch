@@ -20,7 +20,8 @@
  *   navigation's network request fails.
  * NEVER CACHED HERE: any page HTML from the network, any /api/* or tRPC
  * response, any /scans/* file, any POST. Navigations go to the network first;
- * offline, the snapshot of that exact page, else the static offline page.
+ * offline, the snapshot of that exact page (only while its owner holds a live
+ * login on this phone: see snapshotIsLive), else the static offline page.
  * Field work done offline lives in IndexedDB (lib/pwa/outbox.ts), not here.
  *
  * W3-03b (app-wide PWA, scope /dashboard):
@@ -228,26 +229,55 @@ self.addEventListener('notificationclick', (event) => {
 });
 
 const MANIFEST_PATH = '/pwa/manifest.webmanifest';
+// The receiving snapshot is one user's board on a possibly shared phone. The
+// page purges another user's snapshot on mount, but an offline cold start
+// never mounts a page, so the worker checks it here before serving or linking
+// it: the snapshot's owner stamp ("<userId>:<restaurantId>") must name the user
+// of a LIVE login stamp (/__share/owner {userId, exp}: written on every
+// signed-in mount, deleted on sign-out, exp = the login's real end). A
+// lapsed or missing login → the board is neither served nor linked.
+// caches.match with cacheName never creates a cache (no empty snapshot cache
+// on a phone that never had one).
+const SNAPSHOT_OWNER_PATH = '/dashboard/receiving/__snapshot-owner';
+async function snapshotIsLive() {
+  try {
+    const stamp = await caches.match(SNAPSHOT_OWNER_PATH, { cacheName: SNAPSHOT_CACHE });
+    const owner = stamp ? (await stamp.text()).split(':')[0] : '';
+    if (!owner) return false;
+    const login = await caches.match(SHARE_OWNER_PATH, { cacheName: SHARE_CACHE });
+    const s = login ? await login.json().catch(() => null) : null;
+    return !!(s && typeof s.userId === 'string' && typeof s.exp === 'number' && s.exp > Date.now() && s.userId === owner);
+  } catch {
+    return false;
+  }
+}
+function snapshotMatch(path) {
+  return caches.match(path, { cacheName: SNAPSHOT_CACHE, ignoreSearch: true }).catch(() => undefined);
+}
+
 // offline.html's one action leads into receiving (the receiving shell's
 // fallback: its snapshot serves the board). Every role launches the app,
-// though: the launch page's offline copy keeps that link only when this
-// phone holds the receiving board's snapshot (written only for roles that
-// open receiving, owner-stamped, purged on sign-out), so a receiver's cold
-// offline start still reaches the board. Otherwise it retries the launch.
+// though, and a lapsed login must not reach the last user's board: the action
+// keeps that link only when a live snapshot of the board is on this phone,
+// so a receiver's cold offline start still reaches it. Otherwise it retries
+// the launch.
 const RECEIVING_RETRY = 'href="/dashboard/receiving?source=pwa"';
 const LAUNCH_RETRY = 'href="/dashboard?source=pwa"';
-async function offlineLaunch() {
+async function offlinePage(linkBoard) {
   const hit = await caches.match('/pwa/offline.html');
   if (!hit) return Response.error();
-  const board = await caches.open(SNAPSHOT_CACHE).then((c) => c.match('/dashboard/receiving', { ignoreSearch: true })).catch(() => null);
   const text = await hit.text();
-  const html = board ? text : text.split(RECEIVING_RETRY).join(LAUNCH_RETRY);
+  const html = linkBoard ? text : text.split(RECEIVING_RETRY).join(LAUNCH_RETRY);
   return new Response(html, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } });
+}
+async function offlineLaunch() {
+  const board = (await snapshotIsLive()) && (await snapshotMatch('/dashboard/receiving'));
+  return offlinePage(Boolean(board));
 }
 
 async function offlineNavigation(url) {
-  const snapshot = await caches.open(SNAPSHOT_CACHE);
-  const page = await snapshot.match(url.pathname, { ignoreSearch: true });
+  if (!(await snapshotIsLive())) return offlinePage(false);
+  const page = await snapshotMatch(url.pathname);
   return page || caches.match('/pwa/offline.html');
 }
 

@@ -37,8 +37,10 @@ function fakeCaches() {
       open,
       keys: async () => [...stores.keys()],
       delete: async (n: string) => stores.delete(n),
-      match: async (r: Request | string) => {
-        for (const m of stores.values()) {
+      match: async (r: Request | string, o?: { cacheName?: string }) => {
+        // Like CacheStorage.match: `cacheName` searches only that cache and never creates it.
+        for (const [name, m] of stores) {
+          if (o?.cacheName && name !== o.cacheName) continue;
           const hit = m.get(keyOf(r));
           if (hit) return hit.clone();
         }
@@ -304,6 +306,13 @@ describe('share target without a worker (server fallback)', () => {
 describe('two registrations, one script (W3-03b)', () => {
   const nav = (w: Awaited<ReturnType<typeof loadWorker>>, path: string) =>
     w.run('fetch', { request: { url: ORIGIN + path, method: 'GET', mode: 'navigate' } });
+  /** The receiving board's snapshot, owner-stamped as fieldSnapshot does, and (unless exp is null) that user's login stamp. */
+  const liveBoard = async (w: Awaited<ReturnType<typeof loadWorker>>, userId: string, exp: number | null) => {
+    const snap = await w.caches.open('rm-receiver-snapshot-v1');
+    await snap.put('/dashboard/receiving', new Response('<html>board</html>'));
+    await snap.put('/dashboard/receiving/__snapshot-owner', new Response(`${userId}:rest-1`));
+    if (exp !== null) await (await w.caches.open('rm-share-v1')).put('/__share/owner', new Response(JSON.stringify({ userId, exp })));
+  };
   it('the app-wide registration leaves every other navigation to the browser; the receiving one keeps the offline shell', async () => {
     const app = await loadWorker();
     expect(await nav(app, '/dashboard/chain')).toBeNull();
@@ -325,19 +334,34 @@ describe('two registrations, one script (W3-03b)', () => {
     expect(body).toContain('אין חיבור לאינטרנט');
     // Every role launches the app; not every role can open receiving: the launch's offline page retries the launch.
     expect(body).toContain('href="/dashboard?source=pwa"'); // no receiving snapshot on this phone
-    // The receiving shell's own fallback keeps the way into the board (its snapshot).
+    // The receiving shell's own fallback keeps the way into the board (its live owner's snapshot).
     const shell = await loadWorker(`${ORIGIN}/dashboard/receiving`, async () => Promise.reject(new TypeError('offline')));
     await (await shell.caches.open('rm-receiver-v2')).put('/pwa/offline.html', new Response(html));
+    await liveBoard(shell, 'user-a', Date.now() + 3600_000);
     expect(await (await nav(shell, '/dashboard/receiving/x'))!.text()).toContain('href="/dashboard/receiving?source=pwa"');
+    // Never an empty snapshot cache created on a phone that had none.
+    expect(offline.caches.stores.has('rm-receiver-snapshot-v1')).toBe(false);
   });
-  it("a receiver's cold offline start: with the receiving board's snapshot on the phone, the launch page links into it", async () => {
+  it("a receiver's cold offline start: with a live receiver's board snapshot on the phone, the launch page links into it", async () => {
     const html = readFileSync(join(__dirname, '../../../public/pwa/offline.html'), 'utf8');
     const w = await loadWorker(`${ORIGIN}/dashboard`, async () => Promise.reject(new TypeError('offline')));
     await (await w.caches.open('rm-receiver-v2')).put('/pwa/offline.html', new Response(html));
-    await (await w.caches.open('rm-receiver-snapshot-v1')).put('/dashboard/receiving', new Response('<html>board</html>'));
+    await liveBoard(w, 'user-a', Date.now() + 3600_000);
     const body = await (await nav(w, '/dashboard'))!.text();
     expect(body).toContain('href="/dashboard/receiving?source=pwa"');
     expect(body).not.toContain('href="/dashboard?source=pwa"');
+  });
+  it("the previous user's board is never linked from the launch: lapsed login, no login stamp, or someone else's", async () => {
+    const html = readFileSync(join(__dirname, '../../../public/pwa/offline.html'), 'utf8');
+    for (const login of [{ userId: 'user-a', exp: Date.now() - 1 }, null, { userId: 'user-b', exp: Date.now() + 3600_000 }]) {
+      const w = await loadWorker(`${ORIGIN}/dashboard`, async () => Promise.reject(new TypeError('offline')));
+      await (await w.caches.open('rm-receiver-v2')).put('/pwa/offline.html', new Response(html));
+      await liveBoard(w, 'user-a', null);
+      if (login) await (await w.caches.open('rm-share-v1')).put('/__share/owner', new Response(JSON.stringify(login)));
+      const body = await (await nav(w, '/dashboard'))!.text();
+      expect(body).toContain('href="/dashboard?source=pwa"');
+      expect(body).not.toContain('/dashboard/receiving');
+    }
   });
   it('the manifest is network first (a deploy reaches the installed app), the precached copy offline', async () => {
     const get = (w: Awaited<ReturnType<typeof loadWorker>>) =>

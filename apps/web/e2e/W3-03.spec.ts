@@ -128,10 +128,8 @@ test('the installed app launches controlled, and offline its launch page is the 
   });
 });
 
-test("a receiver's cold offline start reaches the receiving board's snapshot from the launch page", async ({ page, context }) => {
-  test.setTimeout(120_000);
-  await page.goto('/dashboard/settings/notifications');
-  // Both registrations, as AppPwa + ReceiverPwa make them, and the board's snapshot as the receiving shell keeps it.
+/** Both registrations, as AppPwa + ReceiverPwa make them, all active. */
+async function registerBoth(page: Page) {
   await page.evaluate(async () => {
     await navigator.serviceWorker.register('/receiver-sw.js', { scope: '/dashboard' });
     await navigator.serviceWorker.register('/receiver-sw.js', { scope: '/dashboard/receiving' });
@@ -147,9 +145,47 @@ test("a receiver's cold offline start reaches the receiving board's snapshot fro
           }),
       ),
     );
+  });
+}
+
+/** The live login stamp this signed-in page wrote on mount (claimSharesFor): {userId, exp}. */
+async function loginStamp(page: Page): Promise<{ userId: string; exp: number }> {
+  let stamp: { userId: string; exp: number } | null = null;
+  await expect
+    .poll(async () => {
+      stamp = await page.evaluate(async () => {
+        const r = await caches.match('/__share/owner', { cacheName: 'rm-share-v1' });
+        return r ? r.json() : null;
+      });
+      return stamp?.userId ?? '';
+    }, { timeout: 30_000 })
+    .not.toBe('');
+  return stamp!;
+}
+
+/** The board's snapshot as the receiving shell keeps it, owner-stamped "<userId>:<restaurantId>". */
+async function putBoard(page: Page, ownerUserId: string) {
+  await page.evaluate(async (owner) => {
     const snap = await caches.open('rm-receiver-snapshot-v1');
     await snap.put('/dashboard/receiving', new Response('<!doctype html><title>board</title><meta charset="utf-8"><h1>לוח הקבלה (שמור)</h1>', { headers: { 'content-type': 'text/html; charset=utf-8' } }));
+    await snap.put('/dashboard/receiving/__snapshot-owner', new Response(`${owner}:restaurant`));
+  }, ownerUserId);
+}
+
+async function cleanUp(page: Page) {
+  await page.evaluate(async () => {
+    await caches.delete('rm-receiver-snapshot-v1');
+    for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
   });
+}
+
+test("a receiver's cold offline start reaches their own board's snapshot from the launch page", async ({ page, context }) => {
+  test.setTimeout(120_000);
+  await page.goto('/dashboard/settings/notifications');
+  await registerBoth(page);
+  const me = await loginStamp(page);
+  expect(me.exp).toBeGreaterThan(Date.now());
+  await putBoard(page, me.userId);
   await context.setOffline(true);
   try {
     await page.goto('/dashboard?source=pwa');
@@ -161,8 +197,40 @@ test("a receiver's cold offline start reaches the receiving board's snapshot fro
   } finally {
     await context.setOffline(false);
   }
-  await page.evaluate(async () => {
-    await caches.delete('rm-receiver-snapshot-v1');
-    for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
-  });
+  await cleanUp(page);
+});
+
+test("the previous user's board never shows offline: lapsed login, no login stamp, or another user's board", async ({ page, context }) => {
+  test.setTimeout(180_000);
+  await page.goto('/dashboard/settings/notifications');
+  await registerBoth(page);
+  const me = await loginStamp(page);
+  const cases: Array<{ name: string; board: string; login: { userId: string; exp: number } | null }> = [
+    { name: 'login lapsed without sign-out', board: me.userId, login: { userId: me.userId, exp: Date.now() - 1000 } },
+    { name: 'no login stamp at all', board: me.userId, login: null },
+    { name: "someone else's board", board: 'previous-user', login: me },
+  ];
+  for (const c of cases) {
+    await putBoard(page, c.board);
+    await page.evaluate(async (login) => {
+      const share = await caches.open('rm-share-v1');
+      if (login) await share.put('/__share/owner', new Response(JSON.stringify(login), { headers: { 'content-type': 'application/json' } }));
+      else await share.delete('/__share/owner');
+    }, c.login);
+    await context.setOffline(true);
+    try {
+      await page.goto('/dashboard?source=pwa');
+      await expect(page.getByRole('heading', { name: 'אין חיבור לאינטרנט' }), c.name).toBeVisible();
+      await expect(page.locator('a.retry'), c.name).toHaveAttribute('href', '/dashboard?source=pwa');
+      // Straight to the board's URL: still never the board.
+      await page.goto('/dashboard/receiving?source=pwa');
+      await expect(page.getByRole('heading', { name: 'אין חיבור לאינטרנט' }), c.name).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'לוח הקבלה (שמור)' }), c.name).toHaveCount(0);
+    } finally {
+      await context.setOffline(false);
+    }
+    // Back on a page the workers do not answer (settings), ready for the next case.
+    await page.goto('/dashboard/settings/notifications');
+  }
+  await cleanUp(page);
 });
