@@ -81,6 +81,7 @@ export function WhatChanges({ diff, stale }: { diff: Diff; stale: boolean }) {
               <li key={`${l.rowNumber}-${l.supplierSku ?? l.name}`} className="flex items-center justify-between gap-3 px-3 py-2">
                 <span className="min-w-0 truncate" lang="he">
                   {l.kind === 'up' ? '↑' : '↓'} {l.name}
+                  {l.basisChanged && <span className="ms-1 text-xs text-subtle">{t('import.diff.basisChanged')}</span>}
                 </span>
                 <span className="shrink-0 text-end">
                   {l.beforeUnits != null && <Money agorot={unitsToAgorot(l.beforeUnits)} />} →{' '}

@@ -69,7 +69,8 @@ describe('W3-10 catalog.import_committed', () => {
     expect(rows).toHaveLength(2);
     const second = rows.find((r) => r.userId === A.ownerUserId)!;
     const after = second.after as { supplierId: string; updated: number; created: number; priceChanges: ImportPriceChange[] };
-    expect(after).toMatchObject({ supplierId: A.supplierId, updated: 3, created: 1 });
+    // S-1 at the same price is not written (W3-10 round 2): unchanged, not updated.
+    expect(after).toMatchObject({ supplierId: A.supplierId, updated: 2, unchanged: 1, created: 1 });
     expect(after.priceChanges).toHaveLength(1);
     expect(after.priceChanges[0]).toMatchObject({ name: 'חלב', sku: 'M-1', unit: 'ל' });
     expect(Number(after.priceChanges[0]!.oldListPrice)).toBe(5.9);

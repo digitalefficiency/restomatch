@@ -19,9 +19,9 @@ import {
   restaurants,
   type Database,
 } from '@restomatch/db';
-import { MockEmbeddingProvider, recordConfirmedMatch } from '@restomatch/catalog';
+import { MockEmbeddingProvider, normalizeLinkName, recordConfirmedMatch } from '@restomatch/catalog';
 import { enqueueCatalogImport, isQueueUnavailableError } from '@restomatch/queue';
-import { managerProcedure, memberProcedure, router } from '../trpc';
+import { MANAGER_PROCEDURE_ROLES, managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
 import {
   analyzeCatalogRows,
@@ -32,7 +32,9 @@ import {
   type CatalogImportMapping,
   type ParsedTable,
 } from '../catalog/parse';
-import { commitCatalogRows } from '../catalog/commit';
+import { commitCatalogRows, lockSupplierCatalog, samePack, sameUnitOrBlank, storedBasis } from '../catalog/commit';
+import { revertCatalogImport } from '../catalog/revert';
+import { anyOpenImport, expireStaleImports, importActiveSql } from '../catalog/importLifecycle';
 import { buildImportDiff } from '../catalog/importDiff';
 import { loadCurrentForDiff } from '../catalog/importDiffLoad';
 import { toPriceUnits } from '../lib/parseMoneyCell';
@@ -127,26 +129,46 @@ function priceFlag(price: number | null, current: number | null): PriceFlag | nu
   return null;
 }
 
-/** The supplier's current list prices, keyed the way commit finds an existing row (SKU, else name). */
+/**
+ * The price on the row the commit will write, found exactly the way the commit
+ * finds it (round 2): by SKU when the file row has one, else by G-08's name key
+ * among rows without a SKU; the oldest row wins; active or not (the commit
+ * writes an inactive row too). So the outlier check and the "kept price" line
+ * judge the very row the commit changes.
+ */
 async function currentPrices(db: Database, restaurantId: string, supplierId: string) {
   const items = await db
     .select({
+      id: supplierCatalogItems.id,
       supplierSku: supplierCatalogItems.supplierSku,
       supplierNameRaw: supplierCatalogItems.supplierNameRaw,
       listPrice: supplierCatalogItems.listPrice,
+      unit: supplierCatalogItems.unit,
+      packSize: supplierCatalogItems.packSize,
     })
     .from(supplierCatalogItems)
-    .where(and(eq(supplierCatalogItems.restaurantId, restaurantId), eq(supplierCatalogItems.supplierId, supplierId)));
-  const bySku = new Map<string, number>();
-  const byName = new Map<string, number>();
+    .where(and(eq(supplierCatalogItems.restaurantId, restaurantId), eq(supplierCatalogItems.supplierId, supplierId)))
+    .orderBy(asc(supplierCatalogItems.createdAt), asc(supplierCatalogItems.id));
+  type Current = { id: string; price: number | null; unit: string | null; packSize: string | null };
+  const bySku = new Map<string, Current>();
+  const byName = new Map<string, Current>();
   for (const it of items) {
-    if (it.listPrice == null) continue;
-    const v = Number(it.listPrice);
-    if (it.supplierSku) bySku.set(it.supplierSku, v);
-    byName.set(it.supplierNameRaw, v);
+    const v: Current = {
+      id: it.id,
+      price: it.listPrice == null ? null : Number(it.listPrice),
+      unit: it.unit,
+      packSize: it.packSize,
+    };
+    if (it.supplierSku) {
+      if (!bySku.has(it.supplierSku)) bySku.set(it.supplierSku, v);
+    } else {
+      const key = normalizeLinkName(it.supplierNameRaw);
+      if (!byName.has(key)) byName.set(key, v);
+    }
   }
-  return (sku: string | null, name: string): number | null =>
-    (sku ? bySku.get(sku) : byName.get(name)) ?? null;
+  /** The row the commit will write (null: the commit creates a new row). */
+  return (sku: string | null, name: string): Current | null =>
+    (sku ? bySku.get(sku) : byName.get(normalizeLinkName(name))) ?? null;
 }
 
 const embedder = new MockEmbeddingProvider(1536);
@@ -336,8 +358,18 @@ export const catalogRouter = router({
       const vatBasis = input.vatBasis ?? vatBasisDetected ?? 'ex';
       const analysis = analyzeCatalogRows(table, { ...mapping, vatBasis, vatRate });
       const current = await currentPrices(ctx.db, restaurantId, input.supplierId);
+      const columns = { unit: !!mapping.unit, packSize: !!mapping.packSize };
       const priced = analysis.rows.map((r) => {
-        const cur = current(r.supplierSku, r.supplierNameRaw);
+        const row = current(r.supplierSku, r.supplierNameRaw);
+        const cur = row?.price ?? null;
+        // The unit and pack the commit will store (one basis, round 4), next to
+        // what the row has today: kept (the file says nothing new) or changed.
+        const basis = row ? storedBasis(row, { unit: r.unit, packSize: r.packSize, listPrice: r.listPrice }, columns) : null;
+        const basisMoved =
+          row != null &&
+          basis != null &&
+          (!sameUnitOrBlank(basis.unit, row.unit) || !samePack(basis.packSize, row.packSize));
+        const fileSilent = (!columns.unit || r.unit == null) && (!columns.packSize || r.packSize == null);
         return {
           rowNumber: r.rowNumber,
           supplierNameRaw: r.supplierNameRaw,
@@ -346,19 +378,44 @@ export const catalogRouter = router({
           rawPrice: r.rawPrice,
           price: r.listPrice,
           currentPrice: cur,
+          /** A blank price cell on a priced row: the commit keeps that price (and its unit and pack). */
+          keepsPrice: r.listPrice == null && cur != null,
+          /** The unit / pack basis the row will have, when it differs from the file or from today. */
+          basis:
+            row && basis && basisMoved
+              ? { change: 'changed' as const, from: { unit: row.unit, packSize: row.packSize }, to: basis }
+              : row && basis && fileSilent && (row.unit != null || row.packSize != null)
+                ? { change: 'kept' as const, from: { unit: row.unit, packSize: row.packSize }, to: basis }
+                : null,
           flag: priceFlag(r.listPrice, cur),
         };
       });
       const flagged = priced.filter((r) => r.flag != null);
+      // Over ALL rows, not the 20 shown (round 5): how many change their unit / pack
+      // (a spelling-only unit rewrite is no change). Accepted difference: a key
+      // listed twice in one file is judged here against today's row each time,
+      // while the commit applies the rows in order.
+      const basisChangedCount = priced.filter((r) => r.basis?.change === 'changed').length;
       // W3-10 · "מה ישתנה": ↑/↓ with ₪/month (integer agorot), rows the file
       // drops (to disable, never automatic) and unclear rows, before any write.
+      // On the basis the import will write (revert merge): each row against the
+      // very row the commit writes, a blank price cell at the price it keeps
+      // (no ↑/↓, ₪0), and the unit / pack the commit stores — a basis change is
+      // priced on the new basis, or held as unclear when it cannot be restated.
       const diff = buildImportDiff(await loadCurrentForDiff(ctx.db, restaurantId, input.supplierId), [
-        ...analysis.rows.map((r) => ({
-          rowNumber: r.rowNumber,
-          supplierSku: r.supplierSku,
-          name: r.supplierNameRaw,
-          priceUnits: r.listPrice == null ? null : toPriceUnits(r.listPrice),
-        })),
+        ...analysis.rows.map((r) => {
+          const row = current(r.supplierSku, r.supplierNameRaw);
+          const basis = row ? storedBasis(row, { unit: r.unit, packSize: r.packSize, listPrice: r.listPrice }, columns) : null;
+          const keptPrice = r.listPrice == null && row?.price != null ? row.price : null;
+          return {
+            rowNumber: r.rowNumber,
+            supplierSku: r.supplierSku,
+            name: r.supplierNameRaw,
+            priceUnits: r.listPrice != null ? toPriceUnits(r.listPrice) : keptPrice != null ? toPriceUnits(keptPrice) : null,
+            matchId: row ? row.id : null,
+            ...(basis ? { unit: basis.unit, packSize: basis.packSize } : {}),
+          };
+        }),
         ...analysis.held.map((h) => ({ rowNumber: h.rowNumber, supplierSku: h.supplierSku, name: h.supplierNameRaw, priceUnits: null })),
       ]);
       return {
@@ -376,6 +433,7 @@ export const catalogRouter = router({
           heldCount: analysis.held.length,
           flagged: flagged.slice(0, LIST_CAP),
           flaggedCount: flagged.length,
+          basisChangedCount,
         },
         diff: {
           counts: diff.counts,
@@ -422,7 +480,7 @@ export const catalogRouter = router({
       if (!input.confirmFlagged) {
         const current = await currentPrices(ctx.db, restaurantId, input.supplierId);
         const flagged = analysis.rows.filter(
-          (r) => priceFlag(r.listPrice, current(r.supplierSku, r.supplierNameRaw)) != null,
+          (r) => priceFlag(r.listPrice, current(r.supplierSku, r.supplierNameRaw)?.price ?? null) != null,
         ).length;
         if (flagged > 0) {
           throw new TRPCError({
@@ -448,6 +506,17 @@ export const catalogRouter = router({
         });
       }
 
+      // One import per supplier at a time (W3-10 rounds 4–5). Expired ones end
+      // failed first; then ANY import of the supplier still pending / mapped
+      // refuses — it is live, or another transaction holds it (skipped by the
+      // expiry, possibly mid-chunk). The supplier lock makes two commits of the
+      // same supplier wait for each other, so both cannot pass this check.
+      await expireStaleImports(ctx.db, restaurantId, input.supplierId);
+      await lockSupplierCatalog(ctx.db, restaurantId, input.supplierId);
+      if (await anyOpenImport(ctx.db, restaurantId, input.supplierId)) {
+        throw new TRPCError({ code: 'CONFLICT', message: 'CATALOG_IMPORT_RUNNING: ייבוא קודם של הספק הזה עדיין רץ' });
+      }
+
       const [imp] = await ctx.db
         .insert(catalogImports)
         .values({
@@ -471,6 +540,7 @@ export const catalogRouter = router({
           importId: imp.id,
           file: input.file,
           mapping: { ...mapping },
+          queuedAt: new Date().toISOString(),
         }).catch((err: unknown) => {
           if (!isQueueUnavailableError(err)) throw err;
           console.warn(`[catalog.import] ${err.message} — committing import=${imp.id} inline`);
@@ -494,7 +564,13 @@ export const catalogRouter = router({
 
       const result = await commitCatalogRows(
         ctx.db,
-        { restaurantId, supplierId: input.supplierId, sourceImportId: imp.id, userId: ctx.session.userId },
+        {
+          restaurantId,
+          supplierId: input.supplierId,
+          sourceImportId: imp.id,
+          userId: ctx.session.userId,
+          columns: { unit: !!input.mapping.unit, packSize: !!input.mapping.packSize },
+        },
         rows,
         embedder,
       );
@@ -503,6 +579,36 @@ export const catalogRouter = router({
         .set({ status: 'committed', createdItems: result.created, updatedItems: result.updated })
         .where(eq(catalogImports.id, imp.id));
       return { importId: imp.id, queued: false, rowCount: rows.length, ...result, held, heldCount };
+    }),
+
+  /**
+   * W3-10 · undo the latest price-list import of a supplier from its audit
+   * record: written rows go back where the row is still exactly as the import
+   * left it (a later hand edit wins and is listed), rows the import created are
+   * turned off. Only the latest un-reverted import of the supplier; one revert
+   * per import; audited. Owner / manager, like commitImport. Another
+   * restaurant's import → NOT_FOUND.
+   */
+  revertImport: managerProcedure
+    .input(z.object({ importId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const res = await revertCatalogImport(ctx.db, {
+        restaurantId: ctx.session.restaurantId,
+        importId: input.importId,
+        userId: ctx.session.userId,
+      });
+      if (res === 'NOT_FOUND') throw new TRPCError({ code: 'NOT_FOUND', message: 'import not found' });
+      if (res === 'ALREADY_REVERTED') throw new TRPCError({ code: 'CONFLICT', message: 'import already reverted' });
+      if (res === 'NOT_REVERTABLE') {
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'CATALOG_IMPORT_NOT_REVERTABLE: no record a revert can trust' });
+      }
+      if (res === 'NOT_LATEST') {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: 'CATALOG_IMPORT_NOT_LATEST: only the latest import of this supplier can be reverted',
+        });
+      }
+      return res;
     }),
 
   /**
@@ -520,6 +626,8 @@ export const catalogRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
+      // W3-10: only who may call revertImport is offered it (the bookkeeper reads, never undoes).
+      const canRevert = MANAGER_PROCEDURE_ROLES.includes(ctx.session.role);
       return ctx.db
         .select({
           id: catalogImports.id,
@@ -538,6 +646,36 @@ export const catalogRouter = router({
            */
           unlinkedItems: sql<number>`(SELECT count(*)::int FROM supplier_catalog_items sci
             WHERE sci.source_import_id = "catalog_imports"."id" AND sci.restaurant_id = ${rid} AND sci.product_id IS NULL)`,
+          /**
+           * W3-10: "ביטול הייבוא האחרון" — the latest un-reverted import of its
+           * supplier, finished (or failed part-way), with revertable records and
+           * committed once. revertImport re-checks all of it (and the chunk set).
+           */
+          revertable: sql<boolean>`${canRevert}
+            AND "catalog_imports"."status" IN ('committed', 'failed')
+            AND EXISTS (SELECT 1 FROM audit_log a WHERE a.entity_type = 'catalog_import' AND a.restaurant_id = ${rid}
+              AND a.action IN ('catalog.import_committed', 'catalog.import_chunk_committed')
+              AND a.entity_id = "catalog_imports"."id" AND (a.after ->> 'revertVersion') = '2')
+            AND (SELECT count(*) FROM audit_log a WHERE a.entity_type = 'catalog_import' AND a.restaurant_id = ${rid}
+              AND a.action = 'catalog.import_committed' AND a.entity_id = "catalog_imports"."id") <= 1
+            AND NOT EXISTS (SELECT 1 FROM audit_log a WHERE a.entity_type = 'catalog_import' AND a.restaurant_id = ${rid}
+              AND a.action = 'catalog.import_reverted' AND a.entity_id = "catalog_imports"."id")
+            AND NOT EXISTS (SELECT 1 FROM catalog_imports o WHERE o.restaurant_id = ${rid}
+              AND o.supplier_id = "catalog_imports"."supplier_id" AND o.id <> "catalog_imports"."id"
+              AND o.status IN ('pending', 'mapped')
+              AND ${importActiveSql(rid, sql`o.id`, sql`o.created_at`)})
+            AND NOT EXISTS (SELECT 1 FROM audit_log l WHERE l.restaurant_id = ${rid}
+              AND l.action IN ('catalog.import_committed', 'catalog.import_chunk_committed')
+              AND l.after ->> 'supplierId' = "catalog_imports"."supplier_id"::text
+              AND l.entity_id IS DISTINCT FROM "catalog_imports"."id"
+              AND coalesce((l.after ->> 'lockedAt')::timestamptz, l.at) >
+                (SELECT max(coalesce((m.after ->> 'lockedAt')::timestamptz, m.at)) FROM audit_log m
+                  WHERE m.entity_type = 'catalog_import' AND m.restaurant_id = ${rid} AND m.entity_id = "catalog_imports"."id"
+                  AND m.action IN ('catalog.import_committed', 'catalog.import_chunk_committed'))
+              AND NOT EXISTS (SELECT 1 FROM audit_log r WHERE r.entity_type = 'catalog_import' AND r.restaurant_id = ${rid}
+                AND r.action = 'catalog.import_reverted' AND r.entity_id = l.entity_id))`,
+          reverted: sql<boolean>`EXISTS (SELECT 1 FROM audit_log a WHERE a.entity_type = 'catalog_import' AND a.restaurant_id = ${rid}
+            AND a.action = 'catalog.import_reverted' AND a.entity_id = "catalog_imports"."id")`,
         })
         .from(catalogImports)
         .where(
