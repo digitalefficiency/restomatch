@@ -22,6 +22,7 @@ import {
   autopilotOption,
   briefOptionOn,
   findSendRescues,
+  localWallToInstant,
   newOrderPath,
   notifyPreparedDraft,
   notifySendRescue,
@@ -53,6 +54,12 @@ import {
 import { jobDb } from '../db';
 import { sendBrief } from '../lib/briefSend';
 import { ilMinuteOfDay, parseCutoff } from './orderCutoff';
+
+/** The instant of IL wall time `minute` (0–1439) on IL date `dayKey` ('YYYY-MM-DD'), DST-safe. */
+function ilWallInstant(dayKey: string, minute: number): Date {
+  const [y, m, d] = dayKey.split('-').map(Number);
+  return localWallToInstant(y!, m!, d!, Math.floor(minute / 60), minute % 60);
+}
 
 export interface OrderRemindersJob {
   /** When omitted, sweeps ALL restaurants. */
@@ -241,7 +248,7 @@ export async function processOrderReminders(job: WorkerJob<OrderRemindersJob>) {
         // An order created today AFTER today's cut-off (or any order today, when today is
         // not an order day for it) is tomorrow's order: no second draft for it.
         const todayCut = parseCutoff(s.orderSchedule?.windows?.find((x) => x.orderDays.includes(weekday))?.cutoff);
-        const forTomorrowFrom = todayCut === null ? startToday : new Date(startToday.getTime() + todayCut * 60_000);
+        const forTomorrowFrom = todayCut === null ? startToday : ilWallInstant(todayKey, todayCut);
         const r = await db.transaction((tx) =>
           prepareOrderDraft(tx as unknown as typeof db, {
             restaurantId: restaurant.id,
@@ -255,9 +262,9 @@ export async function processOrderReminders(job: WorkerJob<OrderRemindersJob>) {
         );
         if (r.status === 'skipped' || r.lineCount === 0) continue;
         if (r.status === 'created') prepared += 1;
-        // Useful until tomorrow's cut-off (startOfIlDay(tomorrow) = endToday).
+        // Useful until tomorrow's cut-off, as IL wall time (DST-safe); no cut-off → tomorrow's start.
         const cut = parseCutoff(w?.cutoff);
-        const deadline = new Date(endToday.getTime() + (cut ?? 0) * 60_000);
+        const deadline = cut === null ? endToday : ilWallInstant(tomorrowKey, cut);
         preparedTomorrow.set(s.id, { poId: r.poId, lines: r.lineCount, cutoff: w?.cutoff ?? null, tomorrow: true, deadline });
       }
     }
@@ -323,32 +330,36 @@ export async function processOrderReminders(job: WorkerJob<OrderRemindersJob>) {
       enqueued += res.enqueued;
     }
 
-    // Today's prepared drafts that already exist (a re-run after the cut-off skips the
-    // prepare step above, but its "טיוטה מוכנה" notice already went out): no A5 on top.
-    const preparedToday = new Set(
+    // A5 is replaced, per person, only by a notice that announced TODAY's draft and was
+    // enqueued today (also on a re-run after the cut-off). Yesterday's "tomorrow" notice
+    // for today shares the key but never hides today's reminder; a cancelled one neither.
+    const announced = new Set(
       preparedOn
         ? (
             await db
-              .select({ supplierId: purchaseOrders.supplierId })
-              .from(purchaseOrders)
+              .select({ key: notificationsOutbox.dedupeKey })
+              .from(notificationsOutbox)
               .where(
                 and(
-                  eq(purchaseOrders.restaurantId, restaurant.id),
-                  eq(purchaseOrders.status, 'draft'),
-                  sql`${purchaseOrders.sourceRef} like ${`au:A16:%:${todayKey}`}`,
+                  eq(notificationsOutbox.restaurantId, restaurant.id),
+                  sql`${notificationsOutbox.dedupeKey} like ${`au:A16:${todayKey}:${restaurant.id}:%`}`,
+                  sql`${notificationsOutbox.status} <> 'cancelled'`,
+                  sql`${notificationsOutbox.createdAt} >= ${startToday.toISOString()}::timestamptz`,
+                  sql`coalesce(${notificationsOutbox.payload}->>'notice', 'today') <> 'tomorrow'`,
                 ),
               )
-          ).map((r) => r.supplierId)
+          ).map((r) => r.key)
         : [],
     );
 
     for (const s of missing) {
-      if (preparedBySupplier.has(s.id) || preparedToday.has(s.id)) continue; // the prepared message replaced the A5 line
       const window = s.orderSchedule?.windows?.find((w) => w.orderDays.includes(weekday));
       const told = (r: { userId: string; email: string }) =>
         legacyToday.has(legacyOrderReminderKey(s.id, todayKey, r.email)) ||
         legacyToday.has(`au:A5:${restaurant.id}:${r.userId}:${s.id}:${todayKey}`);
-      const userIds = recipients.filter((r) => !told(r)).map((r) => r.userId);
+      const userIds = recipients
+        .filter((r) => !told(r) && !announced.has(`au:A16:${todayKey}:${restaurant.id}:${s.id}:${r.userId}:email`))
+        .map((r) => r.userId);
       if (userIds.length === 0) continue;
       // G-06 notify(): quiet hours / Shabbat / ≤6 a day; perishable (a 09:00 reminder
       // after noon is noise). Key = au:A5:<IL day>:<rid>:<sid>:<userId>:email.

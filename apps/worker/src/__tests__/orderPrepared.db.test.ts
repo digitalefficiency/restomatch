@@ -278,3 +278,68 @@ describe("tomorrow's notice is held, not dropped; a re-run never adds A5 (orches
     expect(a5).toEqual([]);
   });
 });
+
+describe("yesterday's notice never hides today's A5; tomorrow's deadline is IL wall time (orchestrator review 28.11 #2)", () => {
+  const made: Record<string, string> = {};
+  beforeAll(async () => {
+    const mk = async (key: string, name: string, orderDays: number[], cutoff: string) => {
+      const sched = { windows: [{ orderDays, cutoff, fulfillment: { kind: 'lead_days', leadDays: 1 } }] };
+      const [s] = await sql<{ id: string }[]>`
+        insert into suppliers (restaurant_id, name, active, order_schedule) values (${rid}, ${name}, true, ${sql.json(sched)}) returning id`;
+      made[key] = s!.id;
+    };
+    await mk('daily', 'ירקן יומי', [0, 1, 2, 3, 4, 5, 6], '08:00');
+    await mk('p5', 'מאפייה חמש', [0], '05:00');
+    await mk('dst', 'ביצים שש וחצי', [0], '06:30');
+  });
+  /** Only this supplier is active, so no other supplier's rows reach the daily cap. */
+  const only = (id: string) => sql`update suppliers set active = (id = ${id}) where restaurant_id = ${rid}`;
+  const a5For = async (supplierId: string, day: string) =>
+    (await rows()).filter((o) => o.dedupe_key.startsWith(`au:A5:${day}:`) && o.dedupe_key.includes(`:${supplierId}:`));
+
+  it('two days, daily 08:00 cut-off: Saturday prepares Sunday\'s draft, Sunday 09:00 still sends 3 A5 lines', async () => {
+    await only(made.daily!);
+    await guide(made.daily!);
+    await setOption({ preparedOrderDraft: true });
+    await processOrderReminders(job({ restaurantId: rid, forDate: '2026-10-24T06:00:00Z' })); // Sat 09:00 IL
+    const [draft] = await sql<{ id: string }[]>`
+      select id from purchase_orders where restaurant_id = ${rid} and status = 'draft' and source_ref = ${`au:A16:${made.daily}:2026-10-25`}`;
+    expect(draft).toBeDefined();
+    await processOrderReminders(job({ restaurantId: rid, forDate: SLOT })); // Sun 09:00 IL, past the 08:00 cut-off
+    expect(await a5For(made.daily!, '2026-10-25')).toHaveLength(3);
+  });
+
+  it('Sunday 05:00 cut-off, chef at the cap on Saturday: the chef\'s A16 is cancelled and Sunday\'s A5 still reaches the chef', async () => {
+    await only(made.p5!);
+    await guide(made.p5!);
+    await setOption({ preparedOrderDraft: true });
+    for (let i = 0; i < 6; i++) {
+      await sql`insert into notifications_outbox (restaurant_id, channel, target, body, status, payload, dedupe_key, created_at)
+                values (${rid}, 'email', ${`${TAG}-chef@example.test`}, 'x', 'sent', ${sql.json({ userId: uids.chef! })}, ${`cap-p5-${i}-${process.pid}`}, '2026-10-24T10:00:00Z')`;
+    }
+    await processOrderReminders(job({ restaurantId: rid, forDate: '2026-10-24T06:00:00Z' })); // Sat 09:00 IL
+    const a16 = await sql<{ dedupe_key: string; status: string }[]>`
+      select dedupe_key, status from notifications_outbox where restaurant_id = ${rid} and dedupe_key like ${`au:A16:2026-10-25:%:${made.p5}:%`}`;
+    expect(a16.find((r) => r.dedupe_key.includes(uids.chef!))?.status).toBe('cancelled'); // Sun 06:00 is after the 05:00 cut-off
+    await processOrderReminders(job({ restaurantId: rid, forDate: SLOT })); // Sun 09:00 IL
+    const a5 = await a5For(made.p5!, '2026-10-25');
+    expect(a5).toHaveLength(3);
+    expect(a5.some((r) => r.dedupe_key.includes(uids.chef!))).toBe(true);
+  });
+
+  it('DST weekend: Sat 23:30 IL, Sunday 06:30 cut-off (IST) → held to Sun 06:00, before the wall-clock cut-off, queued', async () => {
+    await only(made.dst!);
+    await guide(made.dst!);
+    await setOption({ preparedOrderDraft: true });
+    // Israel leaves DST on Sun 25.10 02:00. Sat 23:30 IDT = 20:30Z; Sun 06:00 IST = 04:00Z; the cut-off 06:30 IST = 04:30Z
+    // (a fixed "IL midnight + 390 min" would say 03:30Z and drop the notice).
+    await processOrderReminders(job({ restaurantId: rid, forDate: '2026-10-24T20:30:00Z' }));
+    const r = await sql<{ status: string; scheduled_at: Date | null }[]>`
+      select status, scheduled_at from notifications_outbox where restaurant_id = ${rid} and dedupe_key like ${`au:A16:2026-10-25:%:${made.dst}:%`}`;
+    expect(r).toHaveLength(3);
+    for (const x of r) {
+      expect(x.status).toBe('queued');
+      expect(new Date(x.scheduled_at!).toISOString()).toBe('2026-10-25T04:00:00.000Z');
+    }
+  });
+});

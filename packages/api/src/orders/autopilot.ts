@@ -734,7 +734,9 @@ export async function notifyPreparedDraft(
     entity: { type: 'supplier', id: args.supplierId },
     channels: ['email'],
     now: args.now,
-    payload: { automationId: 'A16', poId: args.poId },
+    // `notice` tells the order-day run which rows announced TODAY's draft: a row made
+    // the day before (tomorrow's notice) shares the dedupe key but never replaces A5.
+    payload: { automationId: 'A16', poId: args.poId, notice: args.tomorrow ? 'tomorrow' : 'today' },
     render: ({ role, locale, channel }) => {
       if (channel !== 'email' || !(AUTOPILOT_ROLES as readonly string[]).includes(role)) return null;
       const t = locale === 'en' ? ordersAutopilotEn : ordersAutopilotHe;
