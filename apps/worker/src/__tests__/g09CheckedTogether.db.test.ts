@@ -117,6 +117,49 @@ describe('round 12 · checked together, through the worker', () => {
   const undoDoc = (documentId: string) =>
     resolvePageFlag(db, { restaurantId: rid, documentId, action: 'undo_checked_together', userId: null }, { enqueueMatch: async () => true });
 
+  const answerDoc = (documentId: string, payable: string) =>
+    resolvePageFlag(db, { restaurantId: rid, documentId, action: 'checked_together', payableInvoiceId: payable, userId: null }, { enqueueMatch: async () => true });
+  const stampOf = async (id: string) => (await rawOf(id)).groupRematchPending;
+
+  it('round 14 N3: a signed-off carrier is never stamped by its page; a permanent skip clears a stamp; the sweep skips them', async () => {
+    const { p1, p2, documentId } = await pair('A-1431');
+    await answerDoc(documentId, p2);
+    // signed off on its combined run
+    await db.insert(matchRuns).values({ restaurantId: rid, invoiceId: p2, overallStatus: 'clean' });
+    await db.update(invoices).set({ status: 'approved' }).where(eq(invoices.id, p2));
+    await db.execute(sql`update invoices set ocr_payload = jsonb_set(ocr_payload, '{raw}', (ocr_payload -> 'raw') - 'groupRematchPending') where id = ${p2}::uuid`);
+    // a job on the included page: the approved carrier is NOT stamped
+    expect((await matchInvoiceForJob(db, { restaurantId: rid, invoiceId: p1 })).skipped).toBe('included');
+    expect(await stampOf(p2)).toBeUndefined();
+    // a stamp left on it anyway: the sweep never re-enqueues it…
+    const old = new Date(Date.now() - 60 * 60_000).toISOString();
+    await db.execute(sql`update invoices set ocr_payload = jsonb_set(ocr_payload, '{raw,groupRematchPending}', to_jsonb(${old}::text), true) where id = ${p2}::uuid`);
+    expect(await runGroupRematchSweep(qsql, new Date())).not.toContain(p2);
+    // …and its own re-match (settled: permanent) clears it
+    expect((await matchInvoiceForJob(db, { restaurantId: rid, invoiceId: p2, rematch: true })).skipped).toBe('settled');
+    expect(await stampOf(p2)).toBeUndefined();
+  });
+
+  it('round 14 N2: an included page\'s own job clears ITS stamp (never re-enqueued forever)', async () => {
+    const { p1, p2, documentId } = await pair('A-1432');
+    await answerDoc(documentId, p2);
+    await db.execute(sql`update invoices set ocr_payload = jsonb_set(ocr_payload, '{raw,groupRematchPending}', to_jsonb(now()), true) where id = ${p1}::uuid`);
+    expect((await matchInvoiceForJob(db, { restaurantId: rid, invoiceId: p1, rematch: true })).skipped).toBe('included');
+    expect(await stampOf(p1)).toBeUndefined();
+  });
+
+  it('round 14 M3: a page put on a review hold AFTER the answer holds the carrier\'s re-match — its lines never folded in unreviewed', async () => {
+    const { p1, p2, documentId } = await pair('A-1433');
+    await answerDoc(documentId, p2);
+    await db
+      .update(invoices)
+      .set({ status: 'parsed', ocrPayload: sql`jsonb_set(${invoices.ocrPayload}, '{raw,reviewReasons}', '["supplier_id_mismatch"]'::jsonb, true)` })
+      .where(eq(invoices.id, p1));
+    expect((await matchInvoiceForJob(db, { restaurantId: rid, invoiceId: p2, rematch: true })).skipped).toBe('awaiting_review');
+    expect(await runsOf(p2)).toHaveLength(0);
+    expect(typeof (await stampOf(p2))).toBe('string'); // a passing skip keeps it
+  });
+
   it('round 13 #1/#7: answered → the REAL re-match moves the carrier (matched → disputed) → undo is still exact: status, runs, no stale pending stamp', async () => {
     const { p1, p2, documentId } = await pair('A-1301');
     const [r1] = await runsOf(p1);

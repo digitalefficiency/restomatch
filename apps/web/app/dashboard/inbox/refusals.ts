@@ -19,6 +19,7 @@ export const REFUSALS = [
   'reocr_pending',
   'carrier_total_short',
   'member_on_hold',
+  'member_gone',
 ] as const;
 export type Refusal = (typeof REFUSALS)[number];
 

@@ -3,6 +3,8 @@ import { DECISION_KEY_SQL } from './decisions';
 import { sql, type Database } from '@restomatch/db';
 import { scanAwaitingCountSql } from './awaiting-count';
 import { LEAK_FILTER, LIVE_DUPLICATE, lineFilter, originalChecked, viewInvoicesSql, type ViewSpec } from './leak-views';
+import { includedInLiveCarrierSql } from './included';
+export { includedInLiveCarrierSql } from './included';
 
 /**
  * The owner's 10-second story: "₪X leaked this month, Y% of spend, Z caught
@@ -62,20 +64,6 @@ export interface LeakHeroOptions {
   now?: Date;
   /** 0 = this month, -1 = last month, … */
   monthOffset?: number;
-}
-
-/**
- * G-09 (round 12 #5): a page a person "checked together" into another invoice of the same
- * document (raw.paidWith → a carrier that still exists). Its lines are matched with the
- * carrier's, so it never gets a run of its own — it is never "waiting to be linked", and
- * its page total is never a pending ₪ (the carrier's printed total holds it). Alias given.
- */
-export function includedInLiveCarrierSql(alias: string) {
-  const a = sql.raw(alias);
-  return sql`(coalesce((${a}.ocr_payload -> 'raw') ? 'paidWith', false) AND EXISTS (
-    SELECT 1 FROM invoices c
-     WHERE c.restaurant_id = ${a}.restaurant_id
-       AND c.id::text = ${a}.ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId'))`;
 }
 
 /**

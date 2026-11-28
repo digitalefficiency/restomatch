@@ -137,6 +137,7 @@ export const en: Shape<typeof he> = {
     already_paid: 'That invoice is already marked paid — it cannot be included in another',
     duplicate_on_file: 'One of the invoices is on file as a duplicate of an invoice already received — check it before marking "one invoice"',
     reocr_pending: 'The invoice is still being re-read — try again in a minute',
+    member_gone: 'One of these invoices no longer exists, so the answer stays',
     member_on_hold: 'One of these invoices still waits for a review, finish it first',
     carrier_total_short: "The invoice you picked prints less than the document's lines",
     too_large: 'The document would be too large to attach this page',

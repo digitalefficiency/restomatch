@@ -41,6 +41,7 @@ import { decidePages, settleDocumentPages, windowCloseGate, WINDOW_MAX_ATTEMPTS,
 import { resolvePageFlag, REMATCH_PENDING_KEY } from '../documents/resolve';
 import { rematchHoldReason } from '../receiving/matchTriggers';
 import { buildClaimLetters } from '../recovery/letters';
+import { fetchInvoices } from '../routers/exports';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { toObjectRef } from '../documents/objectRef';
@@ -365,7 +366,12 @@ const pages = async (n: number, tag: string, gapMin = 1, startMin = 0) => {
   for (let i = 0; i < n; i++) ids.push(await invoiceOf(await send(ch.wa, wa([jpegBytes(`${tag}-${i}`)]), at(startMin + i * gapMin))));
   return ids;
 };
-const NOHEAD: OcrHead = { invoiceNumber: null };
+/**
+ * A continuation page as the real OCR writes it (round 14 N5): no number of its own, so its
+ * per-document checks park it 'parsed' with the page-level reasons — exactly the pages
+ * settle asks about.
+ */
+const NOHEAD: OcrHead = { invoiceNumber: null, status: 'parsed', reviewReasons: ['missing_invoice_number', 'continues_on_another_page'] };
 const linesOf = async (id: string) => ownerDb.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, id));
 
 describe('review fixes: false-leak paths (CRITICAL-1/2, HIGH-1)', () => {
@@ -2795,5 +2801,122 @@ describe('round 13 · "checked together": held pages, the own-group stamp, an FK
       const marks = await Promise.all([p1, p2, p3!].map(async (id) => (await rawOf(id)).paidWith ?? null));
       expect(marks.filter((m) => m === null)).toHaveLength(1);
     }
+  });
+});
+
+describe('round 14 · "checked together": re-read carriers, chains, hand-typed pages, real partial pages, RLS restores, gone members, exports', () => {
+  beforeEach(() => {
+    matchCalls = [];
+    ocrCalls = [];
+  });
+  const owner = () =>
+    appRouter.createCaller({ db: ownerDb, session: { userId: A.ownerUserId, restaurantId: A.restaurantId, role: 'owner' } } as AppContext);
+  const docOf = async (invoiceId: string) => (await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.invoiceId, invoiceId)))[0]!;
+  const rawOf = async (invoiceId: string) => {
+    const [inv] = await ownerDb.select().from(invoices).where(eq(invoices.id, invoiceId));
+    return ((inv?.ocrPayload as { raw?: Record<string, unknown> } | null)?.raw ?? {}) as Record<string, unknown>;
+  };
+  const statusOf = async (invoiceId: string) => (await ownerDb.select().from(invoices).where(eq(invoices.id, invoiceId)))[0]?.status;
+  const answer = async (page: string, payable: string, extra: { acceptShortTotal?: boolean; withInvoiceId?: string } = {}) =>
+    owner().ingest.resolvePageFlag({ documentId: (await docOf(page)).id, action: 'checked_together', payableInvoiceId: payable, ...extra });
+  const undo = async (page: string) => owner().ingest.resolvePageFlag({ documentId: (await docOf(page)).id, action: 'undo_checked_together' });
+  const chain = async (tag: string, number: string, n = 2) => {
+    const ids = await pages(n, tag);
+    const p1 = ids[0]!;
+    await ocr(p1, { ...ACME, invoiceNumber: number, lines: [{ qty: '1', total: '400.00', desc: 'עגבניות שרי ארגז' }] });
+    const [r1] = await ownerDb.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: p1, grId: A.grId, overallStatus: 'clean' }).returning();
+    for (const [k, id] of ids.slice(1).entries()) {
+      const total = String(400 + 600 * (k + 1));
+      await ocr(id, { ...NOHEAD, lines: [{ qty: '1', total: '600.00', desc: `מלפפונים ארגז ${k}` }], totalExclVat: `${total}.00`, totalInclVat: `${total}.00` });
+    }
+    return { p1, p2: ids[1]!, p3: ids[2] ?? null, r1: r1! };
+  };
+
+  it('N5: a continuation the OCR parked "parsed" only for its page-level checks is answerable — and the carrier goes to the matcher', async () => {
+    const { p1, p2 } = await chain('r14n5', 'A-1405');
+    expect(await statusOf(p2)).toBe('parsed');
+    await answer(p2, p2);
+    expect((await rawOf(p1)).paidWith).toEqual({ invoiceId: p2 });
+    expect(await statusOf(p2)).toBe('matched');
+    // …while a review reason beyond the page-level ones still holds the group
+    const { p2: q2 } = await chain('r14n5b', 'A-1406');
+    await ownerDb
+      .update(invoices)
+      .set({ ocrPayload: sql`jsonb_set(${invoices.ocrPayload}, '{raw,reviewReasons}', '["missing_invoice_number","supplier_id_mismatch"]'::jsonb, true)` })
+      .where(eq(invoices.id, q2));
+    await expect(answer(q2, q2)).rejects.toMatchObject({ message: 'member_on_hold' });
+  });
+
+  it('N4: a failed read whose lines a person typed AND linked is no longer held', async () => {
+    const { p1, p2 } = await chain('r14n4', 'A-1404');
+    await ownerDb
+      .update(invoices)
+      .set({ ocrPayload: sql`jsonb_set(jsonb_set(${invoices.ocrPayload}, '{raw,ocrFailed}', 'true'::jsonb, true), '{raw,manualLines}', 'true'::jsonb, true)` })
+      .where(eq(invoices.id, p1));
+    await ownerDb.update(invoiceLines).set({ productId: A.productId }).where(eq(invoiceLines.invoiceId, p1));
+    await answer(p2, p2);
+    expect((await rawOf(p1)).paidWith).toEqual({ invoiceId: p2 });
+  });
+
+  it('N1: an undo while the carrier is being read again is refused (reocr_pending) — its ₪ never vanishes', async () => {
+    const { p1, p2 } = await chain('r14n1', 'A-1401');
+    await answer(p2, p2);
+    await withRestaurant(appDb, A.restaurantId, (tx) => reopenForOcr(tx, A.restaurantId, p2));
+    expect(await statusOf(p2)).toBe('ocr_pending');
+    await expect(undo(p2)).rejects.toMatchObject({ message: 'reocr_pending' });
+    expect(await statusOf(p2)).toBe('ocr_pending');
+    expect((await rawOf(p1)).paidWith).toEqual({ invoiceId: p2 });
+  });
+
+  it('N2: a LIFO undo on a chain never stamps the page that stays included', async () => {
+    const { p1, p2, p3 } = await chain('r14n2', 'A-1402', 3);
+    await answer(p2, p2, { acceptShortTotal: true });
+    await ownerDb
+      .update(invoices)
+      .set({ ocrPayload: sql`jsonb_set(${invoices.ocrPayload}, '{raw,pageOf}', ${JSON.stringify({ invoiceId: p2, invoiceIds: [p2] })}::jsonb, true)` })
+      .where(eq(invoices.id, p3!));
+    await answer(p3!, p3!, { acceptShortTotal: true });
+    await undo(p3!);
+    expect((await rawOf(p1)).paidWith).toEqual({ invoiceId: p2 });
+    expect((await rawOf(p1))[REMATCH_PENDING_KEY]).toBeUndefined();
+  });
+
+  it('m9: the exact restore keeps WHO decided, even on the RLS connection (other users are hidden there)', async () => {
+    const { p2 } = await chain('r14m9', 'A-1409');
+    // the carrier's own run, with a finding a person decided BEFORE the answer
+    const [r2] = await ownerDb.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: p2, grId: A.grId, overallStatus: 'minor' }).returning();
+    const [f] = await ownerDb
+      .insert(discrepancies)
+      .values({ matchRunId: r2!.id, restaurantId: A.restaurantId, type: 'PRICE_HIGHER', severity: 'warn', resolutionStatus: 'rejected', resolvedBy: A.ownerUserId, resolvedAt: new Date(Date.now() - 3_600_000) })
+      .returning();
+    await answer(p2, p2);
+    const doc = await docOf(p2);
+    await withRestaurant(appDb, A.restaurantId, (tx) =>
+      resolvePageFlag(tx, { restaurantId: A.restaurantId, documentId: doc.id, action: 'undo_checked_together', userId: A.ownerUserId }),
+    );
+    const [back] = await ownerDb.select().from(discrepancies).where(eq(discrepancies.id, f!.id));
+    expect(back).toMatchObject({ matchRunId: r2!.id, resolvedBy: A.ownerUserId, resolutionStatus: 'rejected' });
+  });
+
+  it('m-new: an undo after a member was retired is refused (member_gone) — never an orphan run', async () => {
+    const { p1, p2 } = await chain('r14mn', 'A-1407');
+    await answer(p2, p1, { acceptShortTotal: true });
+    // page 1 is gone since the answer (attached into another document and retired)
+    await ownerDb.delete(matchRuns).where(eq(matchRuns.invoiceId, p1));
+    await ownerDb.delete(invoices).where(eq(invoices.id, p1));
+    await expect(undo(p2)).rejects.toMatchObject({ message: 'member_gone' });
+    expect(await ownerDb.select().from(matchRuns).where(and(eq(matchRuns.restaurantId, A.restaurantId), sql`${matchRuns.invoiceId} is null`))).toHaveLength(0);
+  });
+
+  it('M5: the accounting export lists the document ONCE — as its carrier, under the number page 1 printed', async () => {
+    const { p1, p2 } = await chain('r14m5', 'A-1405X');
+    await answer(p2, p2);
+    const day = new Date('2026-11-10T10:00:00Z');
+    await ownerDb.update(invoices).set({ invoiceDate: day }).where(inArray(invoices.id, [p1, p2]));
+    const rows = await fetchInvoices(ownerDb, A.restaurantId, '2026-11-01', '2026-11-30');
+    const ids = rows.rows.map((r) => r.id);
+    expect(ids).toContain(p2);
+    expect(ids).not.toContain(p1);
+    expect(rows.rows.find((r) => r.id === p2)!.invoiceNumber).toBe('A-1405X');
   });
 });

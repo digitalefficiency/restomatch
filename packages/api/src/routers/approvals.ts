@@ -800,7 +800,9 @@ async function decide(
   // G-09: never decide (approve / reject — desk, quick or bulk) a finding on an invoice
   // whose page still waits for a person in the inbox; escalating it is fine.
   if (opts.decision !== 'escalated') await refuseWhilePageQuestion(tx, rid, row.id);
-  const now = new Date();
+  // G-09 (round 14 nit): the DB clock — the same clock that stamps a "checked together"
+  // answer (clock_timestamp), so "decided after the answer" never depends on two clocks.
+  const now = sql`clock_timestamp()`;
   const set =
     opts.decision === 'escalated'
       ? { resolutionStatus: 'escalated' as const, requiresRole: 'owner' as const, resolutionNote: opts.note ?? null }

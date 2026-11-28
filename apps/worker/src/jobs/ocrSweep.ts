@@ -320,12 +320,17 @@ export async function runGroupRematchSweep(sql: Sql, now = new Date()): Promise<
   const tenants = await sql<Array<{ id: string }>>`
     SELECT id FROM restaurants WHERE coalesce(settings -> 'features', '{}'::jsonb) ? 'multiPage'`;
   if (tenants.length === 0) return [];
+  // Round 14 (N3/m12): by restaurant (the index — a uuid[], never a ::text cast), oldest stamp
+  // first, and never an invoice whose re-match is skipped for good (signed off, paid, or
+  // itself included elsewhere): a stuck stamp can't starve a genuinely lost re-match.
   const pending = await sql<Array<{ id: string; restaurant_id: string }>>`
     SELECT i.id, i.restaurant_id FROM invoices i
-     WHERE i.restaurant_id::text = ANY(string_to_array(${tenants.map((t) => t.id).join(',')}, ','))
+     WHERE i.restaurant_id = ANY(string_to_array(${tenants.map((t) => t.id).join(',')}, ',')::uuid[])
        AND (i.ocr_payload -> 'raw') ? ${REMATCH_PENDING_KEY}
        AND (i.ocr_payload -> 'raw' ->> ${REMATCH_PENDING_KEY})::timestamptz < ${before}
-     ORDER BY i.updated_at
+       AND i.status NOT IN ('approved', 'paid')
+       AND NOT coalesce((i.ocr_payload -> 'raw') ? 'paidWith', false)
+     ORDER BY (i.ocr_payload -> 'raw' ->> ${REMATCH_PENDING_KEY})::timestamptz
      LIMIT ${OCR_SWEEP_BATCH}`;
   const requeued: string[] = [];
   for (const inv of pending) {

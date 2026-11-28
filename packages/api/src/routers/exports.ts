@@ -1,3 +1,4 @@
+import { includedInLiveCarrierSql } from '@restomatch/charts';
 import { z } from 'zod';
 import {
   and,
@@ -185,11 +186,23 @@ export async function fetchInvoices(
   const tz = restaurant?.timezone || DEFAULT_EXPORT_TZ;
   const { start: fromDate, end: toDate } = exportPeriodBounds(from, to, tz);
   const notDuplicate = sql`not exists ${unacceptedDuplicate(db, restaurantId)}`;
+  // G-09 (round 14 M5): a page "checked together" into another invoice of the same document
+  // is exported once, AS its carrier — never its own row (the hero, pay run and close count
+  // it there too). A carrier without a number of its own (a continuation) carries the number
+  // its document printed first (its earliest page).
+  const notIncluded = sql`not ${includedInLiveCarrierSql('invoices')}`;
+  const documentNumber = sql<string | null>`coalesce(${invoices.invoiceNumber}, (
+    select m.invoice_number from invoices m
+     where m.restaurant_id = ${invoices.restaurantId} and m.invoice_number is not null
+       and jsonb_typeof(${invoices.ocrPayload} -> 'raw' -> 'carrierOf') = 'array'
+       and m.id = any(array(select jsonb_array_elements_text(${invoices.ocrPayload} -> 'raw' -> 'carrierOf'))::uuid[])
+       and m.ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' = ${invoices.id}::text
+     order by m.created_at, m.id limit 1))`;
   const rows = await db
     .select({
       id: invoices.id,
       supplierId: invoices.supplierId,
-      invoiceNumber: invoices.invoiceNumber,
+      invoiceNumber: documentNumber,
       invoiceDate: invoices.invoiceDate,
       supplierName: suppliers.name,
       supplierBusinessId: suppliers.businessId,
@@ -212,6 +225,7 @@ export async function fetchInvoices(
         gte(invoices.invoiceDate, fromDate),
         lte(invoices.invoiceDate, toDate),
         notDuplicate,
+        notIncluded,
       ),
     )
     .orderBy(invoices.invoiceDate);
