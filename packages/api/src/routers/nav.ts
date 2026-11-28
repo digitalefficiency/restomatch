@@ -1,8 +1,10 @@
 import { z } from 'zod';
 import { isFeatureOn } from '../lib/featureGate';
 import { memberProcedure, router, userScopedProcedure } from '../trpc';
-import { connectionsBadge, foldBadges } from '../tasks/badges';
+import { connectionsBadge, foldBadges, linkBadge } from '../tasks/badges';
 import { integrationsRouter } from './integrations';
+import { buildLinkQueue, summarizeLinkQueue } from '../catalog/linkQueue';
+import { loadLinkQueueCandidates } from '../catalog/linkQueueLoad';
 import { collectTasks } from '../tasks/collect';
 import { WHERE_IS_KINDS, whereIs } from '../tasks/whereIs';
 import { priceAlertsRouter } from './priceAlerts';
@@ -50,6 +52,16 @@ export const navRouter = router({
         if (dot) badges.connections = dot;
       } catch {
         failed.push('connections');
+      }
+    }
+    // W3-10 · "N לקישור · ₪X עוד לא נבדקו": the one לקשר queue's summary, neutral
+    // always. It carries ₪, so only owner / manager / bookkeeper get it.
+    if (finance) {
+      try {
+        const link = linkBadge(summarizeLinkQueue(buildLinkQueue(await loadLinkQueueCandidates(ctx.db, rid))), finance);
+        if (link) badges.link = link;
+      } catch {
+        failed.push('link');
       }
     }
     return { badges, failed };

@@ -5,6 +5,7 @@ import { getT } from '@/lib/i18n/server';
 import { catalog as catalogNs } from '@/lib/i18n/messages/catalog';
 import { components } from '@/lib/i18n/messages/components';
 import { SkuMapper } from './mapper';
+import { LinkQueue } from './link-queue';
 
 /**
  * Catalog mapping queue — supplier SKUs (מק״ט) that arrived on an imported order
@@ -25,6 +26,9 @@ export default async function CatalogMappingPage() {
   // returns only those to a chef); no search, no new product, no SKU rows.
   const role = (memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0])?.role;
   const chef = role === 'chef';
+  // W3-10: owner / manager work the one "לקשר" queue, ranked by unmapped ₪. The
+  // G-08 list stays below for the charge-line actions; the chef keeps only it.
+  const queue = chef ? null : await caller.mapping.queue({ limit: 50, suggestFor: 10 });
 
   return (
     <div>
@@ -41,7 +45,19 @@ export default async function CatalogMappingPage() {
         title={chef ? t('mapping.chefTitle') : t('mapping.title')}
         subtitle={chef ? t('mapping.chefSubtitle') : t('mapping.subtitle')}
       />
-      <SkuMapper initial={initial} chef={chef} />
+      {queue ? (
+        <>
+          <LinkQueue initial={queue} />
+          <details className="mt-8">
+            <summary className="cursor-pointer text-sm font-medium text-ink">{t('mapping.allRows')}</summary>
+            <div className="mt-4">
+              <SkuMapper initial={initial} chef={chef} />
+            </div>
+          </details>
+        </>
+      ) : (
+        <SkuMapper initial={initial} chef={chef} />
+      )}
     </div>
   );
 }

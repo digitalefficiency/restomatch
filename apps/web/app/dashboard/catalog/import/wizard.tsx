@@ -741,6 +741,11 @@ function PriceCheck({
           {t('import.check.flaggedSummary', { count: formatNumber(check.flaggedCount, locale) })}
         </p>
       )}
+      {check.basisChangedCount > 0 && (
+        <p className="mb-2 text-sm text-muted" data-testid="basis-summary">
+          {t('import.check.basisSummary', { count: formatNumber(check.basisChangedCount, locale) })}
+        </p>
+      )}
       <div className="overflow-x-auto rounded-xl border border-line">
         <table className="w-full text-start text-sm">
           <thead>
@@ -782,10 +787,22 @@ function PriceCheck({
                   data-testid="imported-price"
                 >
                   {r.price == null ? (
-                    <span className="font-normal text-subtle">{t('import.check.noPrice')}</span>
+                    <span className="font-normal text-subtle">
+                      {t(r.keepsPrice ? 'import.check.keptPrice' : 'import.check.noPrice')}
+                    </span>
                   ) : (
                     money(r.price)
                   )}
+                  {r.basis ? (
+                    <span className="block text-xs font-normal text-subtle" data-testid="unit-basis">
+                      {r.basis.change === 'changed'
+                        ? t('import.check.basisChanged', {
+                            from: basisLabel(r.basis.from),
+                            to: basisLabel(r.basis.to),
+                          })
+                        : t('import.check.basisKept', { unit: basisLabel(r.basis.from) })}
+                    </span>
+                  ) : null}
                 </td>
                 <td className="hidden whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-muted sm:table-cell">
                   {money(r.currentPrice)}
@@ -1129,4 +1146,11 @@ function ReviewRow({
       )}
     </div>
   );
+}
+
+/** "ארגז ×12" / "ק״ג" — the unit and pack a row is priced in (W3-10 round 4). */
+function basisLabel(b: { unit: string | null; packSize: string | null }): string {
+  const pack = b.packSize == null ? null : Number(b.packSize);
+  const unit = b.unit ?? '—';
+  return pack != null && pack !== 1 ? `${unit} ×${pack}` : unit;
 }

@@ -14,6 +14,7 @@ import {
   queueCounts,
   queueDbUrl,
   queueSql,
+  failOrphanedCatalogImports,
   recoverStalled,
   renewLocks,
   type JobRow,
@@ -520,6 +521,9 @@ export async function runMaintenance(sql: Sql, now = Date.now()): Promise<void> 
   await renewLocks(sql, mine, WORKER_ID);
   const { requeued, failed } = await recoverStalled(sql, STALL_AFTER_MS, mine);
   if (requeued || failed) console.warn(`[worker] recovered stalled jobs: ${requeued} requeued, ${failed} failed`);
+  // W3-10 round 4: a price-list import left pending with no job ends failed (and is finalized).
+  const orphans = await failOrphanedCatalogImports(sql);
+  if (orphans) console.warn(`[worker] finalizing ${orphans} orphaned price-list import(s)`);
   if (now - lastPruneAt >= PRUNE_EVERY_MS) {
     lastPruneAt = now;
     const pruned = await pruneJobs(sql, KEEP_FINISHED_MS);
