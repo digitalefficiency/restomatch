@@ -42,6 +42,8 @@ export interface ImportPoResult {
   supplierId: string;
   /** 'sent' when the checksum passed; 'draft' (needs review) when it failed. */
   status: 'sent' | 'draft';
+  /** true → an existing DRAFT PO became 'sent' (G-04 Q4: its pinned invoices are re-matched). */
+  promotedFromDraft: boolean;
   lineCount: number;
   mappedCount: number;
   unmappedCount: number;
@@ -261,6 +263,7 @@ export async function importPurchaseOrder(
     created,
     supplierId,
     status,
+    promotedFromDraft: !created && existing?.status === 'draft' && status === 'sent',
     lineCount: resolved.length,
     mappedCount,
     unmappedCount: resolved.length - mappedCount,

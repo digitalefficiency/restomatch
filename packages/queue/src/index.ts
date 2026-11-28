@@ -121,11 +121,15 @@ export function ocrJobDeadlineMs(env: NodeJS.ProcessEnv = process.env): number {
   return ocrJobHeadroomMs(env) - OCR_PERSIST_MARGIN_MS;
 }
 
+/** What one enqueue did: a new row, a duplicate of a live dedupe key, or nothing (no queue DB). */
+export type EnqueueOutcome = 'queued' | 'duplicate' | 'no_queue';
+
 /**
  * Insert a job with a hard deadline. Returns false when no queue database is
  * configured (dev/test without DATABASE_URL); throws QueueUnavailableError on
  * any database error or timeout. (A timed-out INSERT may still commit later:
- * consumers must be idempotent, as they were under BullMQ.)
+ * consumers must be idempotent, as they were under BullMQ.) A duplicate of a
+ * live dedupe key also returns true; use enqueueOutcome to tell them apart.
  */
 export async function enqueue(
   queue: string,
@@ -133,17 +137,28 @@ export async function enqueue(
   opts: EnqueueOptions = {},
   timeoutMs = ENQUEUE_TIMEOUT_MS,
 ): Promise<boolean> {
+  return (await enqueueOutcome(queue, payload, opts, timeoutMs)) !== 'no_queue';
+}
+
+/** enqueue, reporting whether a row was inserted or a dedupe key swallowed it (G-04 Q4). */
+export async function enqueueOutcome(
+  queue: string,
+  payload: unknown,
+  opts: EnqueueOptions = {},
+  timeoutMs = ENQUEUE_TIMEOUT_MS,
+): Promise<EnqueueOutcome> {
   const url = queueDbUrl();
   if (!url) {
     console.warn(`[queue] no DATABASE_URL — skipping enqueue of ${queue}`);
-    return false;
+    return 'no_queue';
   }
   const restaurantId =
     opts.restaurantId !== undefined
       ? opts.restaurantId
       : (payload as { restaurantId?: unknown } | null)?.restaurantId;
+  let inserted: { id: string } | null;
   try {
-    await withDeadline(
+    inserted = await withDeadline(
       insertJob(queueSql(url), queue, payload, {
         maxAttempts: MAX_ATTEMPTS[queue] ?? 1,
         ...opts,
@@ -158,7 +173,7 @@ export async function enqueue(
   }
   // Serverless mode: let an in-process runner pick it up now (kick.ts). Never throws.
   notifyEnqueued(queue);
-  return true;
+  return inserted ? 'queued' : 'duplicate';
 }
 
 /** Queue name shared with the worker consumer (apps/worker/src/jobs/ocrInvoice.ts). */

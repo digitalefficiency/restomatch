@@ -40,7 +40,13 @@ import {
   withoutOpenQuestions,
   sumAbsIls,
 } from '../catalog/linkQuestions';
-import { enqueue, isQueueUnavailableError, MATCH_INVOICE_QUEUE, type MatchInvoiceQueueJob } from '@restomatch/queue';
+import {
+  enqueue,
+  enqueueOutcome,
+  isQueueUnavailableError,
+  MATCH_INVOICE_QUEUE,
+  type MatchInvoiceQueueJob,
+} from '@restomatch/queue';
 import { chefProcedure, financeProcedure, managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
 import { readConsolidatedRaw } from '../match/consolidated';
@@ -67,6 +73,8 @@ export interface RematchReport {
   settled: number;
   /** The queue database did not answer; the lines are linked, the re-check did not start. */
   failed: number;
+  /** Not queued again: a re-match with the same dedupe key is already in the queue (G-04 Q4). */
+  alreadyQueued?: number;
 }
 
 /**
@@ -119,11 +127,16 @@ export async function requeueInvoicesForRematch(
     try {
       // Per job: each enqueue can take up to its own timeout, so a runAt fixed
       // before the loop could expire before this request commits.
-      await enqueue(MATCH_INVOICE_QUEUE, job, {
-        runAt: new Date(Date.now() + REMATCH_DELAY_MS),
-        ...(opts.dedupeKey ? { dedupeKey: opts.dedupeKey(inv.id) } : {}),
-      });
-      report.requeued += 1;
+      const runAt = new Date(Date.now() + REMATCH_DELAY_MS);
+      if (opts.dedupeKey) {
+        // Deduped (G-04 Q4): count only a real insert, so `requeued` stays truthful.
+        const outcome = await enqueueOutcome(MATCH_INVOICE_QUEUE, job, { runAt, dedupeKey: opts.dedupeKey(inv.id) });
+        if (outcome === 'duplicate') report.alreadyQueued = (report.alreadyQueued ?? 0) + 1;
+        else report.requeued += 1;
+      } else {
+        await enqueue(MATCH_INVOICE_QUEUE, job, { runAt });
+        report.requeued += 1;
+      }
     } catch (err) {
       report.failed += 1;
       console.error(
