@@ -35,3 +35,10 @@ describe('credit-note amount input → integer agorot', () => {
     for (const bad of ['', 'abc', '0', '1.234', '-5', '1e3']) expect(parseIlsInput(bad)).toBeNull();
   });
 });
+
+describe('₪ formatting parity: signDisplay (H-01)', () => {
+  // The server twin formatIlsAgorot has no signDisplay yet: G-13 mirrors the
+  // option in packages/api/src/reports/money.ts. Until then this row is skipped
+  // with a reason, not silently omitted.
+  it.skip('server twin formatIlsAgorot mirrors signDisplay (pending G-13)', () => {});
+});
