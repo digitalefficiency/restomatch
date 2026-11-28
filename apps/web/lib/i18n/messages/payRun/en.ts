@@ -142,7 +142,7 @@ export const en = {
     openLeak: 'This invoice has gaps · decide before marking it paid',
     conflict: 'The invoice changed since it loaded · refresh',
     notYet: 'Mark as paid opens after the system update',
-    methods: { bank_transfer: 'Bank transfer', check: 'Cheque', cash: 'Cash', credit_card: 'Credit card', other: 'Other' },
+    methods: { bank_transfer: 'Bank transfer', check: 'Cheque', cash: 'Cash', card: 'Credit card', offset: 'Offset against a credit', other: 'Other' },
   },
   errorPage: {
     title: "The pay run didn't load",
