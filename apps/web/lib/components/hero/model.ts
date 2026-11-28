@@ -322,8 +322,8 @@ export function parseCubicBezier(token: string): [number, number, number, number
 }
 
 /**
- * The CSS cubic-bezier timing function, for the one motion CSS cannot run: a number counting to
- * its value (SPEC §8). x(t) is solved by bisection; precise to well under a frame.
+ * The CSS cubic-bezier timing function in JavaScript, for a motion CSS cannot run (SPEC §8). x(t) is
+ * solved by bisection; precise to well under a frame. (The hero's number no longer counts: 28.11.)
  */
 export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (progress: number) => number {
   const at = (a: number, b: number, t: number) => 3 * a * t * (1 - t) ** 2 + 3 * b * t ** 2 * (1 - t) + t ** 3;
@@ -352,26 +352,22 @@ const HERO_SCOPE = 'section[aria-labelledby="leak-hero-label"][data-entry]';
  * renders with `data-entry`. Everything runs only under `prefers-reduced-motion: no-preference`,
  * on the motion tokens (`var(--dur-*)`, `var(--ease-*)`), and plays when the streamed HTML is
  * inserted, whatever the hydration timing:
- *  - `count` — the final number is held invisible for the long duration, with NO fill, so CSS
- *    alone shows it again even if no script runs; the HeroAmount island counts over that hold;
+ *  - the number is never held or counted (owner decision 28.11: a money figure only ever shows its
+ *    true value) — it is final from the first frame;
  *  - `draw` / `fade` / `pop` — the shared pace line's parts; the shared split bar grows from its
  *    start edge (its transform origin is set where it is rendered).
  * The keyframes are `rm-hero-*` (globals.css already has an `rm-draw`).
  */
 export const HERO_ENTRY_CSS = [
   '@media (prefers-reduced-motion: no-preference){',
-  `${HERO_SCOPE} [data-entry-part="count"]{animation:rm-hero-hold var(--dur-long) linear}`,
   `${HERO_SCOPE} [data-entry-part="draw"]{animation:rm-hero-draw var(--dur-long) var(--ease-standard) both}`,
   `${HERO_SCOPE} [data-entry-part="fade"]{animation:rm-hero-fade var(--dur-medium) linear both}`,
   `${HERO_SCOPE} [data-entry-part="pop"]{animation:rm-hero-pop var(--dur-short) var(--ease-enter) calc(var(--dur-long) - var(--dur-short)) backwards}`,
   `${HERO_SCOPE} [data-split-bar]{animation:rm-hero-grow var(--dur-long) var(--ease-enter) both}`,
   '}',
-  '@keyframes rm-hero-hold{from,to{opacity:0}}',
   '@keyframes rm-hero-draw{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}',
   '@keyframes rm-hero-fade{from{opacity:0}to{opacity:1}}',
   '@keyframes rm-hero-pop{from{opacity:0;transform:scale(.7)}to{opacity:1;transform:none}}',
   '@keyframes rm-hero-grow{from{transform:scaleX(0)}to{transform:none}}',
 ].join('');
 
-/** The name of the hold animation the HeroAmount island reads (it counts only while the hold runs). */
-export const HERO_HOLD_ANIMATION = 'rm-hero-hold';

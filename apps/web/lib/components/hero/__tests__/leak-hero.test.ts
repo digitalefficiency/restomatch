@@ -110,16 +110,18 @@ describe('leak state (SPEC §10.1)', () => {
     expect(markup).toMatch(/<\/h2><span[^>]*data-testid="leak-hero-period"[^>]*>מתחילת נובמבר<\/span>/);
   });
 
-  it('the number: <Money context="display"> (DS3-01’s money-hero role) inside the count wrapper, the drill link, the G-16 markers', () => {
+  it('the number: <Money context="display"> (DS3-01’s money-hero role) directly in the drill link, the G-16 markers', () => {
     const amount = tagOf(markup, 'leak-hero-amount');
     expect(amount).toMatch(/^<a /);
     expect(amount).toContain('href="/dashboard/leaks/breakdown"');
     expect(amount).toContain('data-money-agorot="76977"');
     expect(amount).toContain('data-money-sum-of="hero-split"');
-    expect(markup).toMatch(/data-testid="leak-hero-amount"[^>]*><span data-entry-part="count"[^>]*><span data-money-figure=""[^>]*text-money-hero/);
+    expect(markup).toMatch(/data-testid="leak-hero-amount"[^>]*><span data-money-figure=""[^>]*text-money-hero/);
+    // Owner decision 28.11: the figure is never held or counted, so nothing wraps it as an entry part.
+    expect(markup).not.toContain('data-entry-part="count"');
     expect(markup).not.toContain('text-metric-hero');
     expect(markup).toContain('<span class="money-glyph">₪</span>');
-    // No count overlay on the server: it mounts only from the island's effect, beside the link.
+    // No count overlay at all.
     expect(markup).not.toContain('data-hero-count');
   });
 
@@ -204,7 +206,8 @@ describe('entry motion, once (v4 H1)', () => {
     expect(sectionTag(markup)).toContain('data-entry=""');
     expect(markup.match(/<style>/g)).toHaveLength(1);
     expect(markup).toMatch(/<style>@media \(prefers-reduced-motion: no-preference\)\{section\[aria-labelledby="leak-hero-label"\]\[data-entry\]/);
-    expect(markup).toContain('rm-hero-hold');
+    expect(markup).toContain('rm-hero-draw');
+    expect(markup).not.toContain('rm-hero-hold');
   });
   it('no entry → neither; and entry only plays in the leak state with the exact number', () => {
     for (const props of [LEAK, { ...LEAK, entry: true, state: 'clean' as const, amountIls: 0 }, { ...LEAK, entry: true, amountIls: undefined }]) {

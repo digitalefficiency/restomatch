@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { HERO_ENTRY_CSS, HERO_HOLD_ANIMATION, SPLIT_MIN_AGOROT, agorotOf, calcRowsGuard, heroMonthKey, heroSplitForm, type CalcReport } from '../model';
+import { HERO_ENTRY_CSS, SPLIT_MIN_AGOROT, agorotOf, calcRowsGuard, heroMonthKey, heroSplitForm, type CalcReport } from '../model';
 
 describe('heroMonthKey — the month owner.leakReport reads is the hero’s own (v2 A1)', () => {
   it('Israel November: bounds 31.10 22:00Z → 30.11 22:00Z → "2026-11" (never monthStart.slice(0, 7))', () => {
@@ -104,12 +104,12 @@ describe('HERO_ENTRY_CSS — once, on the tokens, never under reduced motion (v4
     for (const rule of inside.match(/[^{}]+\{animation:[^}]+\}/g) ?? []) {
       expect(rule).toMatch(/^section\[aria-labelledby="leak-hero-label"\]\[data-entry\] /);
     }
-    expect(inside.match(/animation:/g)).toHaveLength(5);
+    expect(inside.match(/animation:/g)).toHaveLength(4);
   });
 
-  it('the hold applies to the count only and has no fill (the number shows again by CSS alone)', () => {
-    expect(HERO_ENTRY_CSS).toMatch(/\[data-entry-part="count"\]\{animation:rm-hero-hold var\(--dur-long\) linear\}/);
-    expect(HERO_HOLD_ANIMATION).toBe('rm-hero-hold');
+  it('the number is never held or counted: no rule targets it (owner decision 28.11 — a money figure only ever shows its true value)', () => {
+    expect(HERO_ENTRY_CSS).not.toMatch(/data-entry-part="count"/);
+    expect(HERO_ENTRY_CSS).not.toMatch(/opacity:0\}\}/);
     expect(HERO_ENTRY_CSS).not.toMatch(/\[data-entry\] \[data-entry-part\]\{/);
   });
 
@@ -124,7 +124,7 @@ describe('HERO_ENTRY_CSS — once, on the tokens, never under reduced motion (v4
 
   it('its keyframes are rm-hero-* (globals.css already has rm-draw)', () => {
     const names = [...HERO_ENTRY_CSS.matchAll(/@keyframes ([\w-]+)/g)].map((m) => m[1]);
-    expect(names.sort()).toEqual(['rm-hero-draw', 'rm-hero-fade', 'rm-hero-grow', 'rm-hero-hold', 'rm-hero-pop']);
+    expect(names.sort()).toEqual(['rm-hero-draw', 'rm-hero-fade', 'rm-hero-grow', 'rm-hero-pop']);
     for (const used of HERO_ENTRY_CSS.matchAll(/animation:([\w-]+)/g)) expect(names).toContain(used[1]);
   });
 });

@@ -718,9 +718,9 @@ test.describe('owner · reduced motion', () => {
     const { hero, state } = await openHome(page);
     const figures = await trpc<HeroFigures>(page, 'owner.leakHero');
     const amount = page.getByTestId('leak-hero-amount');
-    // At once: no hold (opaque), the procedure's figure, no count overlay.
+    // At once: opaque, the procedure's figure, no count overlay (the number is never held: owner decision 28.11).
     const now = await amount.evaluate((el) => ({
-      opacity: getComputedStyle(el.querySelector('[data-entry-part="count"]') ?? el).opacity,
+      opacity: getComputedStyle(el.firstElementChild ?? el).opacity,
       text: el.textContent ?? '',
     }));
     expect(now.opacity, 'the number is not held').toBe('1');
@@ -741,6 +741,8 @@ interface EntryRecord {
   texts: string[];
   overlayInside: boolean;
   overlays: { hidden: boolean; events: string }[];
+  /** The lowest opacity the number's figure had in any frame (DS3-03, owner decision 28.11: never hidden). */
+  minOpacity: number;
 }
 
 test.describe('owner · entry motion', () => {
@@ -751,7 +753,7 @@ test.describe('owner · entry motion', () => {
     // Before any page script: record when the card arrives with data-entry and when it loses it, every
     // frame's text of the testid element (complete figures only, with the ₪), and where a count overlay sits.
     await page.addInitScript(() => {
-      const rec: EntryRecord = { inserted: [], removed: [], texts: [], overlayInside: false, overlays: [] };
+      const rec: EntryRecord = { inserted: [], removed: [], texts: [], overlayInside: false, overlays: [], minOpacity: 1 };
       (window as unknown as { __ds3Entry: EntryRecord }).__ds3Entry = rec;
       const HERO = 'section[data-testid="leak-hero"]';
       new MutationObserver((records) => {
@@ -780,6 +782,8 @@ test.describe('owner · entry motion', () => {
           const text = (amount.textContent ?? '').replace(/[‎‏⁦-⁩\s]/g, '');
           if (text.includes('₪') && !rec.texts.includes(text)) rec.texts.push(text);
           if (amount.querySelector('[data-hero-count]')) rec.overlayInside = true;
+          const figure = amount.firstElementChild ?? amount;
+          rec.minOpacity = Math.min(rec.minOpacity, Number(getComputedStyle(figure).opacity), Number(getComputedStyle(amount).opacity));
         }
         const overlay = document.querySelector('[data-hero-count]');
         if (overlay && rec.overlays.length < 50) rec.overlays.push({ hidden: overlay.getAttribute('aria-hidden') === 'true', events: getComputedStyle(overlay).pointerEvents });
@@ -793,7 +797,7 @@ test.describe('owner · entry motion', () => {
     const figures = await trpc<HeroFigures>(page, 'owner.leakHero');
     const record = () => page.evaluate(() => (window as unknown as { __ds3Entry: EntryRecord }).__ds3Entry);
 
-    // The entry ends by itself: the island removes data-entry once the hold (and any late pace part) has finished.
+    // The entry ends by itself: the island removes data-entry once the long duration (and any late pace part) has passed.
     await expect(hero).not.toHaveAttribute('data-entry', { timeout: 20_000 });
     await expect(page.locator('[data-hero-count]')).toHaveCount(0);
     const first = await record();
@@ -802,13 +806,14 @@ test.describe('owner · entry motion', () => {
     const durLong = await page.evaluate(() => Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dur-long')));
     expect(durLong, '--dur-long resolves').toBeGreaterThan(0);
     expect(first.removed.at(-1)! - first.inserted[0]!, 'data-entry lasts at least the long duration').toBeGreaterThanOrEqual(durLong - 50);
-    // The testid element only ever said the final figure; the count (if it ran) was a hidden, inert sibling.
+    // DS3-03, owner decision 28.11: the number is final from the first frame — never held, hidden or counted.
     const final = (await page.getByTestId('leak-hero-amount').textContent())!.replace(/[‎‏⁦-⁩\s]/g, '');
     expect(num(final)).toBe(Math.round(figures.leakIls));
     expect(first.texts, 'every frame showed the final figure').toEqual([final]);
-    expect(first.overlayInside, 'the count overlay is never inside the testid element').toBe(false);
-    for (const o of first.overlays) expect(o, 'the count overlay is aria-hidden and lets clicks through').toEqual({ hidden: true, events: 'none' });
-    test.info().annotations.push({ type: 'entry', description: `data-entry for ${Math.round(first.removed.at(-1)! - first.inserted[0]!)} ms · count overlay seen in ${first.overlays.length} frames` });
+    expect(first.minOpacity, 'the number is never hidden, not even for a frame').toBe(1);
+    expect(first.overlays, 'no count overlay').toEqual([]);
+    expect(first.overlayInside, 'no count overlay inside the testid element').toBe(false);
+    test.info().annotations.push({ type: 'entry', description: `data-entry for ${Math.round(first.removed.at(-1)! - first.inserted[0]!)} ms · the number final in every frame` });
 
     // A client navigation away and Back: the router restores the page, the island removes data-entry before paint.
     await page.evaluate(() => {
@@ -835,7 +840,7 @@ test.describe('owner · entry motion', () => {
     expect(await runningHeroAnimations(page), 'still nothing half a second later').toEqual([]);
     await expect(page.locator('[data-hero-count]')).toHaveCount(0);
     expect(
-      await page.getByTestId('leak-hero-amount').evaluate((el) => getComputedStyle(el.querySelector('[data-entry-part="count"]') ?? el).opacity),
+      await page.getByTestId('leak-hero-amount').evaluate((el) => getComputedStyle(el.firstElementChild ?? el).opacity),
       'the number shows (no hold on Back)',
     ).toBe('1');
   });
