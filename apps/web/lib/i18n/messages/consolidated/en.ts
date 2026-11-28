@@ -25,6 +25,9 @@ export const en: Shape<typeof he> = {
     ask: 'Please credit {amount} + VAT.',
     askIncl: 'Please credit {amount} (VAT included).',
     askBoth: 'Please credit {excl} + VAT, and {incl} (VAT included).',
+    toDecide: 'Pending our decision: {amount} + VAT.',
+    toDecideIncl: 'Pending our decision: {amount} (VAT included).',
+    toDecideBoth: 'Pending our decision: {excl} + VAT, and {incl} (VAT included).',
     inclVat: '(VAT included)',
   },
   finding: {

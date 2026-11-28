@@ -87,7 +87,10 @@ for (const [lang, viewport] of [
       const letter = page.getByTestId('xmatch-letter');
       await expect(letter).toBeVisible();
       await expect(letter).toContainText('61036');
-      await expect(letter).toContainText(lang === 'he' ? 'נא לזכות' : 'Please credit');
+      // G-14 Q1 (decision 18, owner-approved): a proposal's findings are undecided — the letter
+      // says the ₪ is pending a decision and never asks for a credit yet.
+      await expect(letter).toContainText(lang === 'he' ? 'ממתינים להחלטה שלנו' : 'Pending our decision');
+      await expect(letter).not.toContainText(lang === 'he' ? 'נא לזכות' : 'Please credit');
       await page.emulateMedia({ media: 'screen' });
     }
     expect(await page.getByTestId('xmatch-products').locator('tbody tr').count()).toBeGreaterThan(0);

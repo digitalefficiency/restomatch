@@ -173,6 +173,7 @@ export const en: Shape<typeof he> = {
     },
     atStake: 'At stake',
     quantitiesOnly: 'Quantities only',
+    toDecide: 'Not decided yet',
     total: 'Total of gaps',
     computing: 'Calculating the amounts…',
     afterClose: 'The amount is set once the goods receipt is closed.',

@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
-import { claimableLines, sumClaims } from '../../../packages/api/src/lib/claims';
+import { decidedClaimLines, sumClaims } from '../../../packages/api/src/lib/claims';
 import { DEMO_RESTAURANT_NAME, OWNER_STATE } from './env';
 import { collectPageErrors, e2eSql } from './helpers';
 import { seededLeakMonth } from './seededMonth';
@@ -68,12 +68,13 @@ test('ledger ₪ ties out with the hero, the claim letters and the receiving dat
   expect(leak).toBe(Math.round(hero.leakIls * 100));
   expect(leak, 'the demo seed leaks in the month it populated').toBeGreaterThan(0);
 
-  // The letters' total: the shared rule (lib/claims) over the month's breakdown — the letters page uses it too.
-  const breakdown = await trpc<Array<Parameters<typeof claimableLines>[0]>>(page.request, 'owner.leakBreakdown', {
+  // Credits asked: the shared rule (lib/claims) over the month's breakdown, DECIDED lines only —
+  // G-14 Q1 (decision 18, owner-approved): an open gap is "to decide", never a credit asked.
+  const breakdown = await trpc<Array<Parameters<typeof decidedClaimLines>[0]>>(page.request, 'owner.leakBreakdown', {
     monthOffset: offset,
     limit: 200,
   });
-  const letters = Math.round(sumClaims(breakdown.flatMap((inv) => claimableLines(inv))) * 100);
+  const letters = Math.round(sumClaims(breakdown.flatMap((inv) => decidedClaimLines(inv))) * 100);
   expect(current.reduce((s, m) => s + m.creditsAskedAgorot, 0)).toBe(letters);
 
   const sql = e2eSql();

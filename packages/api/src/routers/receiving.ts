@@ -495,6 +495,8 @@ export const receivingRouter = router({
           expected: number | null;
           actual: number | null;
           amountIls: number;
+          /** Still open / escalated (decision 18): the slip shows it as "to decide", never asked. null for a receiver. */
+          undecided: boolean | null;
         }>;
       } = { receiptClosed, ready: false, holdReason: null, totalIls: 0, lines: [] };
 
@@ -539,8 +541,10 @@ export const receivingRouter = router({
           }
         }
         const leak = ready ? await computeInvoiceLeak(ctx.db, restaurantId, inv.id) : null;
-        const claim = leak ? claimableLines(leak) : [];
-        const lines = claim.map(({ line, amount }) => ({
+        // G-14 Q1 (decision 18): decided lines take the cap first; an open gap stays on the slip
+        // as "to decide" (undecided: true) and never counts in the total asked.
+        const claim = leak ? claimableLines(leak, { decidedFirst: true }) : [];
+        const lines = claim.map(({ line, amount, undecided }) => ({
           discrepancyId: line.discrepancyId,
           type: line.type,
           poLineId: line.poLineId,
@@ -554,8 +558,11 @@ export const receivingRouter = router({
           actual: line.actual,
           // The letters' amount, to the agora (the letters print each line rounded).
           amountIls: Math.round(amount * 100) / 100,
+          undecided,
         }));
-        // Summed in agorot so the total is exact.
+        // Summed in agorot so the total is exact. totalIls = the engine ₪ of every slip line; the
+        // slip (web _dockSlip.slipTotals) splits it by each line's `undecided` flag into the
+        // total asked (decided) and "לבירור — טרם הוחלט" (open), per decision 18.
         const totalIls = lines.reduce((acc, l) => acc + Math.round(l.amountIls * 100), 0) / 100;
         engine = { receiptClosed, ready, holdReason, totalIls, lines };
       }
@@ -569,6 +576,8 @@ export const receivingRouter = router({
           lines: engine.lines.map((l) => ({
             ...stripMoneyDeep(l),
             ...(QTY_DISCREPANCY_TYPES.has(l.type) ? {} : { expected: null, actual: null }),
+            // The decision state is the money side's, not the dock's (G-14 Q1): same shape, no value.
+            undecided: null,
           })),
         };
       }

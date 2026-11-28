@@ -207,8 +207,14 @@ export interface ConsolidatedProposal {
   deliveryNotes: ProposalDeliveryNote[];
   products: ProposalProduct[];
   findings: ProposalFinding[];
-  /** What a letter asks, capped like the claims letters: before VAT ("+ מע״מ") and incl. VAT / VAT. */
+  /**
+   * What a letter asks, capped like the claims letters: before VAT ("+ מע״מ") and incl. VAT / VAT.
+   * G-14 Q1 (decision 18): only DECIDED findings are asked — a proposal's findings are all
+   * undecided by construction, so this is ₪0 until they are decided; their ₪ is `toDecide`.
+   */
   claim: { exclIls: number; inclIls: number };
+  /** G-14 Q1: the proposal's capped ₪ nobody decided yet ("ממתינים להחלטה"), split like `claim`. */
+  toDecide: { exclIls: number; inclIls: number };
   totals: {
     deliveryNotesIls: number;
     invoiceSubtotalIls: number;
@@ -835,7 +841,9 @@ export function buildConsolidatedProposal(args: {
     deliveryNotes,
     products: productRows,
     findings,
-    claim: { exclIls: claim.exclIls, inclIls: claim.inclIls },
+    // G-14 Q1 (decision 18): nothing in a proposal is decided yet — it is "to decide", not asked.
+    claim: { exclIls: 0, inclIls: 0 },
+    toDecide: { exclIls: claim.exclIls, inclIls: claim.inclIls },
     pendingNotes: [...pendingAg].filter(([number]) => !missingNumbers.has(number)).map(([number, a]) => ({ number, billedIls: ils(a) })),
     reviewItems,
     totals: {

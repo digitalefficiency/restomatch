@@ -349,6 +349,7 @@ describe('buildConsolidatedProposal — #95 review (P1)', () => {
     expect(p.findings.filter((f) => f.countsAsLeak)).toEqual([]);
     expect(p.totals.leakIls).toBe(0);
     expect(p.claim).toEqual({ exclIls: 0, inclIls: 0 });
+    expect(p.toDecide).toEqual({ exclIls: 0, inclIls: 0 });
     expect(p.deliveryNotes.find((n) => n.number === '9002')).toMatchObject({ deltaIls: 0, alreadyBilledOn: { invoiceNumber: 'BR-R-24100' } });
     expect(p.status).toBe('differences'); // a T2 item never reads "תואמת"
   });
@@ -488,6 +489,7 @@ describe('buildConsolidatedProposal — #95 verification (P3)', () => {
     expect(dup).toMatchObject({ basis: 'incl', countsAsLeak: true });
     // Without the duplicate the billed-twice note is a T2 review item and claims nothing (§9).
     expect(twice({ billIt: true }).claim).toEqual({ exclIls: 0, inclIls: 0 });
+    expect(twice({ billIt: true }).toDecide).toEqual({ exclIls: 0, inclIls: 0 });
   });
 
   it('(4) a note RANGE on a month line is pooled, not the first note', () => {
@@ -525,7 +527,8 @@ describe('buildConsolidatedProposal — #114 verification (P4)', () => {
     b.knownInvoiceNumbers = new Set([b.invoice.invoiceNumber]); // …on a held duplicate
     const p = buildConsolidatedProposal({ invoiceId: 'i', supplierId: 's', periodStart: new Date(), periodEnd: new Date(), base: b, notes });
     expect(p.findings.filter((f) => f.countsAsLeak).map((f) => f.type)).toEqual(['DUPLICATE_INVOICE']);
-    expect(p.claim).toEqual({ exclIls: 0, inclIls: b.invoice.totalInclVat });
+    expect(p.claim).toEqual({ exclIls: 0, inclIls: 0 }); // G-14 Q1: nothing in a proposal is decided → never asked
+    expect(p.toDecide).toEqual({ exclIls: 0, inclIls: b.invoice.totalInclVat });
     expect(p.totals.leakIls).toBe(b.invoice.totalInclVat);
     // And the split is capped in general: three findings above the invoice total.
     const split = claimSplit(
@@ -639,6 +642,7 @@ describe('G-04: only closed receipts are delivery notes (pending note → "not r
     });
     expect(p.findings.filter((f) => f.countsAsLeak)).toEqual([]);
     expect(p.claim).toEqual({ exclIls: 0, inclIls: 0 });
+    expect(p.toDecide).toEqual({ exclIls: 0, inclIls: 0 });
     expect(p.totals.leakIls).toBe(0);
     expect(p.pendingNotes).toEqual([{ number: '9002', billedIls: 30 }]);
     expect(p.findings.filter((f) => f.notReceivedYet).every((f) => f.deliveryNoteNumber === '9002' && !f.countsAsLeak)).toBe(true);
@@ -659,7 +663,8 @@ describe('G-04: only closed receipts are delivery notes (pending note → "not r
         [unknown.id, '9002'],
       ]),
     });
-    expect(p.claim.exclIls).toBeGreaterThan(0);
+    expect(p.claim.exclIls).toBe(0); // G-14 Q1: an undecided proposal is never asked
+    expect(p.toDecide.exclIls).toBeGreaterThan(0);
     expect(p.pendingNotes).toEqual([]);
   });
 });

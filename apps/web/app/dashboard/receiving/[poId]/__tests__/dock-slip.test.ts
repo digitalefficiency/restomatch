@@ -7,7 +7,7 @@ import { receiving as ru } from '@/lib/i18n/messages/receiverLangs/overlays/ru/r
 import { receiving as th } from '@/lib/i18n/messages/receiverLangs/overlays/th/receiving';
 import { receiving as ar } from '@/lib/i18n/messages/receiverLangs/overlays/ar/receiving';
 import { receiving as ti } from '@/lib/i18n/messages/receiverLangs/overlays/ti/receiving';
-import { buildSlipLines, issueMessageKey, lineIssues, needsSlip, slipBullet, slipNote, sumIls, type EngineSlipLine } from '../_dockSlip';
+import { buildSlipLines, issueMessageKey, lineIssues, needsSlip, slipBullet, slipNote, slipTotals, sumIls, type EngineSlipLine } from '../_dockSlip';
 
 const line = (o: Partial<ReconciliationLine>): ReconciliationLine => ({
   invoiceLineIndex: 0,
@@ -185,5 +185,22 @@ describe('dock slip — status note', () => {
       { discrepancyId: 'v', type: 'VAT_MISMATCH', poLineId: null, productId: null, productName: null, productNameEn: null, lineDescription: null, lineDescriptionEn: null, expected: null, actual: null, amountIls: 12.5 },
     ]);
     expect(needsSlip(lines, null)).toBe(true);
+  });
+});
+
+describe('G-14 Q1 (decision 18) — an open gap is "to decide", never in the total asked', () => {
+  it('slipTotals splits decided (asked) from undecided (to decide); lines keep their ₪', () => {
+    const slip = buildSlipLines([], {}, [
+      engine({ discrepancyId: 'd1', type: 'VAT_MISMATCH', amountIls: 12.5, undecided: false }),
+      engine({ discrepancyId: 'd2', type: 'TOTAL_MISMATCH', amountIls: 7.25, undecided: true }),
+    ]);
+    expect(slip.map((l) => [l.amountIls, l.toDecideIls])).toEqual([
+      [12.5, null],
+      [7.25, 7.25],
+    ]);
+    expect(slipTotals(slip)).toEqual({ asked: 12.5, toDecide: 7.25 });
+  });
+  it('every receiver locale has the "to decide" label', () => {
+    for (const m of [receivingHe, receivingEn, ru, th, ar, ti]) expect(m.dockSlip.toDecide.length).toBeGreaterThan(3);
   });
 });

@@ -236,7 +236,10 @@ test('390 px: quantities on the review; the engine ₪ only after the receipt is
   const expectedTotal = Math.round((priceDelta + b!.price) * 100) / 100;
   await expect(slip.getByTestId('dock-slip-amount')).toHaveCount(2, { timeout: 30_000 });
   await expect(slip.getByTestId('dock-slip-computing')).toHaveCount(0);
-  const totalText = (await slip.getByTestId('dock-slip-total').innerText()).replace(/[^\d.]/g, '');
+  // G-14 Q1 (decision 18, owner-approved): both findings are still open — their ₪ is the slip's
+  // "טרם הוחלט" total, and nothing is asked yet (no T2 total badge).
+  await expect(slip.getByTestId('dock-slip-total')).toHaveCount(0);
+  const totalText = (await slip.getByTestId('dock-slip-to-decide-total').innerText()).replace(/[^\d.]/g, '');
   expect(Number(totalText)).toBe(expectedTotal);
   expect(await slip.getByTestId('dock-slip-copy').getAttribute('data-slip-text')).toMatch(/₪/);
   // Phone-first: nothing overflows the 390-px viewport.
@@ -287,7 +290,9 @@ test('390 px: a count "= order" with an engine-only finding (VAT) still gets a s
   const slip = page.getByTestId('dock-slip');
   await expect(slip).toBeVisible({ timeout: 30_000 });
   await expect(slip.getByTestId('dock-slip-amount')).toHaveCount(1);
-  expect(Number((await slip.getByTestId('dock-slip-total').innerText()).replace(/[^\d.]/g, ''))).toBe(12.5);
+  // G-14 Q1: the open VAT finding is "טרם הוחלט", not asked yet.
+  await expect(slip.getByTestId('dock-slip-total')).toHaveCount(0);
+  expect(Number((await slip.getByTestId('dock-slip-to-decide-total').innerText()).replace(/[^\d.]/g, ''))).toBe(12.5);
   const text = (await slip.getByTestId('dock-slip-copy').getAttribute('data-slip-text'))!;
   expect(text).not.toMatch(/•\s*:/); // an invoice-level line has no empty name prefix
 });

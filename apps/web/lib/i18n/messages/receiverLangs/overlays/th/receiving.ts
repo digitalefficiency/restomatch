@@ -199,6 +199,7 @@ export const receiving: Shape<typeof he> = {
     },
     atStake: 'ยอดที่โต้แย้ง',
     quantitiesOnly: 'เฉพาะจำนวน',
+    toDecide: 'ยังไม่ได้ตัดสินใจ', // review: new (G-14 Q1)
     total: 'ยอดรวมที่ขอลดหนี้', // review: "credit note" wording
     computing: 'ระบบจับคู่กำลังคำนวณยอดเงิน…',
     afterClose: 'ยอด ₪ จะกำหนดหลังปิดการรับสินค้า — ระบบจับคู่จะตรวจกับจำนวนที่นับได้จริง',

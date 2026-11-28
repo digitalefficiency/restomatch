@@ -280,7 +280,7 @@ export const TOOL_DEFINITIONS = [
   {
     name: 'claimable_lines',
     description:
-      'Open gaps (not yet decided) with ₪ to claim back from suppliers, from every month, biggest first, capped per invoice like the credit letters. totalIls is before VAT; duplicate invoices (incl. VAT) and VAT amounts are separate totals — never add them.',
+      'Open gaps NOT YET DECIDED, with the ₪ a decision could turn into a credit request, from every month, biggest first, capped per invoice like the credit letters. They are to decide first — never say they "can be claimed" yet (owner decision 18). totalIls is before VAT; duplicate invoices (incl. VAT) and VAT amounts are separate totals — never add them.',
     input_schema: { type: 'object', properties: {}, additionalProperties: false },
     strict: true,
   },
