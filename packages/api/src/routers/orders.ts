@@ -59,6 +59,8 @@ import {
 } from '../orders/document';
 import { addCalendarDaysInTz, localDateKeyInTz, startOfDayInTz, startOfLocalDateInTz } from '../lib/time';
 import { poRefOf, renderSupplierMessage } from '../orders/supplierMessage';
+import { queueRematchOnPoSent } from '../match/rematchOnPoSent';
+import type { AfterCommit } from '../trpc';
 
 /** Cap on an uploaded order document, decoded — a single-page PO PDF is ~50KB. */
 const MAX_PO_DOC_BYTES = 8 * 1024 * 1024;
@@ -327,7 +329,7 @@ const OPEN_PO_STATUSES = ['sent', 'confirmed', 'partial'] as const;
  */
 const PO_LINE_ORDER = [sql`${poLines.rawDescription} ASC NULLS LAST`, asc(poLines.id)] as const;
 
-type OrderCtx = { db: Database; session: { restaurantId: string; userId: string } };
+type OrderCtx = { db: Database; session: { restaurantId: string; userId: string }; afterCommit: AfterCommit };
 
 /** placeOrder's body, shared with sendMany (one transaction, no nested callers). */
 async function placeOrderImpl(
@@ -478,6 +480,9 @@ async function placeOrderImpl(
     .update(purchaseOrders)
     .set({ status: 'sent', sentAt: new Date(), sentChannel, updatedAt: new Date() })
     .where(eq(purchaseOrders.id, input.poId));
+  // G-04 Q4: the order left 'draft' — re-match the invoices pinned to it, after
+  // the transaction commits (a rolled-back sendMany queues nothing).
+  queueRematchOnPoSent(ctx, restaurantId, input.poId);
   return { ok: true as const, sentChannel };
 }
 
@@ -927,6 +932,8 @@ export const ordersRouter = router({
         normalized,
         createdBy: ctx.session.userId,
       });
+      // G-04 Q4: a re-import that promoted an existing draft to 'sent' re-matches its pinned invoices.
+      if (result.promotedFromDraft) queueRematchOnPoSent(ctx, restaurantId, result.poId);
       return result;
     }),
 
@@ -1384,7 +1391,10 @@ export const ordersRouter = router({
     .mutation(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;
       await assertPoOwned(ctx.db, input.poId, restaurantId);
-      return markPoSentManually(ctx.db, { restaurantId, poId: input.poId });
+      const res = await markPoSentManually(ctx.db, { restaurantId, poId: input.poId });
+      // G-04 Q4: draft → sent here too (a replay changed nothing, so it queues nothing).
+      if (!res.replayed) queueRematchOnPoSent(ctx, restaurantId, input.poId);
+      return res;
     }),
 
   /** Add a line to a DRAFT (§5.5), priced with the expected price when unpriced. */
