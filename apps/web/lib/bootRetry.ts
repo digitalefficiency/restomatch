@@ -7,12 +7,13 @@
  * pooler timeout while Vercel froze the instance mid-handshake, seen in
  * production as `write CONNECT_TIMEOUT …` / SCRAM timeouts) used to take the
  * instance down until it was recycled. The guards now run on the first tenant
- * query instead; a connection failure that outlasts these retries is not cached
- * there either (the next tenant query runs the guard again).
+ * query instead, and the guard remembers only a pass or a verdict: whatever
+ * outlasts these retries — or is not on this list at all — is not remembered
+ * (the next tenant query runs the guard again).
  *
  * Only connection-level failures are retried. A guard VERDICT (role bypasses
- * RLS, RLS disabled) is a plain Error with no such code and fails on the first
- * attempt, as before.
+ * RLS, RLS disabled) carries no such code and fails on the first attempt, as
+ * before.
  */
 
 /** postgres.js connection codes plus the Node socket errnos it surfaces. */

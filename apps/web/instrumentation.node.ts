@@ -47,24 +47,12 @@ export async function registerNode(): Promise<void> {
   // until the instance was recycled. lib/db now holds every tenant query until
   // the guard passed (lib/tenantGuard.ts), so tenant access stays fail-closed;
   // starting it early still reports a bad role or a table without RLS at boot.
-  const { tenantGuardRequired } = await import('./lib/tenantGuard');
+  const { tenantGuardRequired, warmUpTenantGuard } = await import('./lib/tenantGuard');
   if (tenantGuardRequired()) {
     // No I/O (postgres.js connects lazily), but an unusable tenant URL still fails the boot.
     const { ensureTenantGuard } = await import('./lib/db');
-    const { isTransientDbError } = await import('./lib/bootRetry');
-    void ensureTenantGuard().catch((err: unknown) => {
-      const transient = isTransientDbError(err);
-      const message = err instanceof Error ? err.message : String(err);
-      if (transient) {
-        console.warn(`[boot] tenant guard: database unreachable, runs again on the next tenant query (${message})`);
-      } else {
-        console.error(`[boot] tenant guard FAILED — tenant DB access is blocked on this instance: ${message}`);
-      }
-      try {
-        captureException(err, { stage: 'tenant-guard-warmup', transient });
-      } catch {
-        /* observability must never break the boot */
-      }
-    });
+    // Never rejects: a verdict → console.error, anything else → console.warn;
+    // both → captureException. Not awaited.
+    void warmUpTenantGuard(ensureTenantGuard, captureException);
   }
 }

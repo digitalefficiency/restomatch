@@ -2,7 +2,7 @@ import { createDb, type Database } from '@restomatch/db';
 import * as schema from '@restomatch/db/schema';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { resolveWebDbUrl } from './env';
-import { gateClient, tenantGuard } from './tenantGuard';
+import { gateClient, tenantGuard, type EnsureGuard } from './tenantGuard';
 
 /**
  * The web app connects with a NON-OWNER, RLS-enforced role so the
@@ -14,16 +14,17 @@ import { gateClient, tenantGuard } from './tenantGuard';
  * (ALLOW_OWNER_DB=1 / NODE_ENV=test). No more silent owner fallback in prod.
  *
  * Every query and transaction on `db` first waits for the tenant guard (the
- * role does not bypass RLS, every tenant table has RLS on — lib/tenantGuard.ts)
- * and never reaches the database unless it passed. The guard used to run in the
- * boot hook, where one dropped connection took the whole instance down.
+ * role does not bypass RLS, every tenant table has RLS on — lib/tenantGuard.ts),
+ * at most TENANT_GUARD_DEADLINE_MS, and never reaches the database unless it
+ * passed. The guard used to run in the boot hook, where one dropped connection
+ * took the whole instance down.
  *
  * The worker and migrations keep using the owner/service DATABASE_URL — their
  * cross-tenant jobs are guarded explicitly in code.
  */
 interface TenantDb {
   db: Database;
-  ensureTenantGuard: () => Promise<void>;
+  ensureTenantGuard: EnsureGuard;
 }
 
 function createTenantDb(): TenantDb {
@@ -49,7 +50,9 @@ export const db: Database = tenant.db;
 
 /**
  * Resolves once the tenant guard passed on this instance; rejects with its
- * verdict otherwise. Tenant queries on `db` already wait for it — call it only
- * to start the guard early (the boot hook's warm-up).
+ * verdict, with the failure that kept it from running (not remembered: the
+ * next call runs it again), or after the deadline (TenantGuardPendingError).
+ * Tenant queries on `db` already wait for it — call it only to start the guard
+ * early (the boot hook's warm-up).
  */
-export const ensureTenantGuard: () => Promise<void> = tenant.ensureTenantGuard;
+export const ensureTenantGuard: EnsureGuard = tenant.ensureTenantGuard;

@@ -1,17 +1,55 @@
 import type { Sql } from 'postgres';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import type { Database } from '@restomatch/db';
-import { gateClient, memoizeGuard, tenantGuard, tenantGuardRequired } from '../tenantGuard';
+import {
+  gateClient,
+  isTenantGuardVerdict,
+  memoizeGuard,
+  TENANT_GUARD_DEADLINE_MS,
+  tenantGuard,
+  tenantGuardRequired,
+  TenantGuardPendingError,
+  TenantGuardVerdict,
+  warmUpTenantGuard,
+} from '../tenantGuard';
 
 /**
  * The tenant guard moved out of the boot hook (a rejected register() 500s every
- * request on the instance). These pin its memo — a dropped connection is
- * retried by the next caller, a verdict is final — and the gate that keeps the
- * tenant pool closed until the guard passed. lib/__tests__/tenantDbGate.test.ts
- * proves the same against a real database, through lib/db and the boot hook.
+ * request on the instance). These pin its memo — only a pass or a verdict is
+ * remembered, every other failure is retried by the next caller, and no caller
+ * waits past the deadline — the boot warm-up's reporting, and the gate that
+ * keeps the tenant pool closed until the guard passed.
+ * lib/__tests__/tenantDbGate.test.ts proves the same against a real database,
+ * through lib/db and the boot hook.
  */
-const transient = () => Object.assign(new Error('write CONNECT_TIMEOUT pooler:6543'), { code: 'CONNECT_TIMEOUT' });
-const verdict = () => new Error('[env] tenant-boundary guard FAILED: the web DB connection runs as "postgres" which BYPASSES RLS.');
+const withCode = (message: string, code: string, extra: object = {}) =>
+  Object.assign(new Error(message), { code }, extra);
+const transient = () => withCode('write CONNECT_TIMEOUT pooler:6543', 'CONNECT_TIMEOUT');
+const verdict = () =>
+  new TenantGuardVerdict(
+    new Error('[env] tenant-boundary guard FAILED: the web DB connection runs as "postgres" which BYPASSES RLS.'),
+  );
+
+/**
+ * Real connection/database failures that bootRetry's retry list does not know.
+ * Before, the memo kept every one of them as a verdict: tenant access stayed
+ * blocked on the instance until it was recycled.
+ */
+const unclassified: Array<[string, () => Error]> = [
+  ['ENOTFOUND (DNS)', () => withCode('getaddrinfo ENOTFOUND aws-0-ap-northeast-1.pooler.supabase.com', 'ENOTFOUND')],
+  ['EHOSTUNREACH', () => withCode('connect EHOSTUNREACH 10.0.0.1:6543', 'EHOSTUNREACH')],
+  ['ENETUNREACH', () => withCode('connect ENETUNREACH 10.0.0.1:6543', 'ENETUNREACH')],
+  ['57014 statement timeout', () => withCode('canceling statement due to statement timeout', '57014')],
+  ['53000 insufficient resources', () => withCode('insufficient resources', '53000')],
+  ['53200 out of memory', () => withCode('out of memory', '53200')],
+  ['Supavisor ECHECKOUTTIMEOUT', () => withCode('(ECHECKOUTTIMEOUT) checkout timeout', 'ECHECKOUTTIMEOUT')],
+  ['Supavisor XX000 checkout timeout', () => withCode('(ECHECKOUTTIMEOUT) checkout timeout', 'XX000', { severity: 'FATAL' })],
+  ['28P01 password authentication failed', () => withCode('password authentication failed for user "restomatch_app"', '28P01')],
+  ['42501 permission denied', () => withCode('permission denied for table pg_roles', '42501')],
+  ['an error with no code', () => new Error('something nobody classified')],
+  // The memo goes by the brand only; turning an env.ts message into a verdict is tenantGuard's job.
+  ['an unbranded Error with a verdict message', () => new Error('[env] tenant-boundary guard FAILED: not wrapped')],
+];
 
 /** A promise the test resolves or rejects by hand. */
 function deferred() {
@@ -26,22 +64,13 @@ function deferred() {
 
 const tick = () => new Promise((r) => setTimeout(r, 5));
 
-describe('memoizeGuard', () => {
+describe('memoizeGuard — remembers a pass and a verdict, nothing else', () => {
   it('caches a pass: the check runs once', async () => {
     const check = vi.fn(async () => {});
     const ensure = memoizeGuard(check);
     await ensure();
     await ensure();
     expect(check).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not cache a transient failure: the next caller runs the check again', async () => {
-    const check = vi.fn<() => Promise<void>>().mockRejectedValueOnce(transient()).mockResolvedValueOnce(undefined);
-    const ensure = memoizeGuard(check);
-    await expect(ensure()).rejects.toMatchObject({ code: 'CONNECT_TIMEOUT' });
-    await expect(ensure()).resolves.toBeUndefined();
-    await ensure();
-    expect(check).toHaveBeenCalledTimes(2);
   });
 
   it('caches a verdict: every later caller gets it and the check never runs again', async () => {
@@ -52,19 +81,31 @@ describe('memoizeGuard', () => {
     expect(check).toHaveBeenCalledTimes(1);
   });
 
-  it('treats an unclassified error (and a synchronous throw) as a verdict — fail closed', async () => {
-    const auth = Object.assign(new Error('password authentication failed'), { code: '28P01' });
-    const ensureAuth = memoizeGuard(vi.fn(async () => Promise.reject(auth)));
-    await expect(ensureAuth()).rejects.toBe(auth);
-    await expect(ensureAuth()).rejects.toBe(auth);
+  it.each<[string, () => unknown]>([
+    ['CONNECT_TIMEOUT (on the retry list)', transient],
+    ...unclassified,
+    ['a thrown non-Error', () => 'not an error'],
+  ])('does not cache %s: the next caller runs the check again', async (_label, make) => {
+    const err = make();
+    const check = vi.fn<() => Promise<void>>().mockRejectedValueOnce(err).mockResolvedValueOnce(undefined);
+    const ensure = memoizeGuard(check);
+    await expect(ensure()).rejects.toBe(err);
+    await expect(ensure()).resolves.toBeUndefined();
+    await ensure();
+    expect(check).toHaveBeenCalledTimes(2);
+  });
 
-    const sync = vi.fn((): Promise<void> => {
-      throw verdict();
-    });
-    const ensureSync = memoizeGuard(sync);
-    await expect(ensureSync()).rejects.toThrow('guard FAILED');
-    await expect(ensureSync()).rejects.toThrow('guard FAILED');
-    expect(sync).toHaveBeenCalledTimes(1);
+  it('does not cache a synchronous throw either', async () => {
+    const check = vi
+      .fn<() => Promise<void>>()
+      .mockImplementationOnce(() => {
+        throw new Error('sync');
+      })
+      .mockResolvedValueOnce(undefined);
+    const ensure = memoizeGuard(check);
+    await expect(ensure()).rejects.toThrow('sync');
+    await expect(ensure()).resolves.toBeUndefined();
+    expect(check).toHaveBeenCalledTimes(2);
   });
 
   it('shares one in-flight check between concurrent callers', async () => {
@@ -79,8 +120,115 @@ describe('memoizeGuard', () => {
   });
 });
 
+describe('memoizeGuard — no caller waits past the deadline', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('refuses a caller after deadlineMs; the refusal is not cached and the attempt keeps running', async () => {
+    const gate = deferred();
+    const check = vi.fn(() => gate.promise);
+    const ensure = memoizeGuard(check, { deadlineMs: 30 });
+    const started = Date.now();
+    const err = await ensure().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(TenantGuardPendingError);
+    expect(err).toMatchObject({ code: 'TENANT_GUARD_PENDING', waitedMs: 30 });
+    expect(isTenantGuardVerdict(err)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(1_000);
+    // A later caller joins the same attempt (no second check) and gets its pass.
+    const later = ensure();
+    gate.resolve();
+    await expect(later).resolves.toBeUndefined();
+    await ensure();
+    expect(check).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failure that lands after the deadline is not cached: the next caller runs the check again', async () => {
+    const gate = deferred();
+    const check = vi
+      .fn<() => Promise<void>>()
+      .mockImplementationOnce(() => gate.promise)
+      .mockResolvedValueOnce(undefined);
+    const ensure = memoizeGuard(check, { deadlineMs: 20 });
+    await expect(ensure()).rejects.toBeInstanceOf(TenantGuardPendingError);
+    gate.reject(withCode('getaddrinfo ENOTFOUND pooler', 'ENOTFOUND'));
+    await tick();
+    await expect(ensure()).resolves.toBeUndefined();
+    expect(check).toHaveBeenCalledTimes(2);
+  });
+
+  it('a verdict that lands after the deadline is cached', async () => {
+    const gate = deferred();
+    const check = vi.fn(() => gate.promise);
+    const ensure = memoizeGuard(check, { deadlineMs: 20 });
+    await expect(ensure()).rejects.toBeInstanceOf(TenantGuardPendingError);
+    const err = verdict();
+    gate.reject(err);
+    await tick();
+    await expect(ensure()).rejects.toBe(err);
+    await expect(ensure()).rejects.toBe(err);
+    expect(check).toHaveBeenCalledTimes(1);
+  });
+
+  it(`defaults to TENANT_GUARD_DEADLINE_MS (${TENANT_GUARD_DEADLINE_MS} ms)`, async () => {
+    vi.useFakeTimers();
+    const ensure = memoizeGuard(() => new Promise<void>(() => {}));
+    let outcome: unknown = 'pending';
+    void ensure().catch((e: unknown) => (outcome = e));
+    await vi.advanceTimersByTimeAsync(TENANT_GUARD_DEADLINE_MS - 1);
+    expect(outcome).toBe('pending');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(outcome).toBeInstanceOf(TenantGuardPendingError);
+    expect(TENANT_GUARD_DEADLINE_MS).toBe(10_000);
+  });
+
+  it('deadlineMs: null waits for the attempt itself (the boot warm-up)', async () => {
+    const gate = deferred();
+    const ensure = memoizeGuard(() => gate.promise, { deadlineMs: 10 });
+    const warmUp = ensure({ deadlineMs: null });
+    await expect(ensure()).rejects.toBeInstanceOf(TenantGuardPendingError);
+    gate.resolve();
+    await expect(warmUp).resolves.toBeUndefined();
+  });
+
+  it('a settled guard answers without arming a timer', async () => {
+    vi.useFakeTimers();
+    const passed = memoizeGuard(async () => {});
+    await passed();
+    const err = verdict();
+    const failed = memoizeGuard(() => Promise.reject(err));
+    await expect(failed()).rejects.toBe(err);
+    const before = vi.getTimerCount();
+    await passed();
+    await expect(failed()).rejects.toBe(err);
+    expect(vi.getTimerCount()).toBe(before);
+  });
+
+  it('abandons an attempt still running after attemptTtlMs; its late outcome is ignored; a pass never expires', async () => {
+    let t = 0;
+    const hung = deferred();
+    const check = vi
+      .fn<() => Promise<void>>()
+      .mockImplementationOnce(() => hung.promise)
+      .mockResolvedValueOnce(undefined);
+    const ensure = memoizeGuard(check, { deadlineMs: 10, attemptTtlMs: 1_000, now: () => t });
+    await expect(ensure()).rejects.toBeInstanceOf(TenantGuardPendingError);
+    t = 999;
+    await expect(ensure()).rejects.toBeInstanceOf(TenantGuardPendingError);
+    expect(check).toHaveBeenCalledTimes(1);
+    t = 1_000;
+    await expect(ensure()).resolves.toBeUndefined();
+    expect(check).toHaveBeenCalledTimes(2);
+    hung.reject(verdict());
+    await tick();
+    t = 1e9;
+    await expect(ensure()).resolves.toBeUndefined();
+    expect(check).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('tenantGuard — the lib/env.ts checks on the raw pool', () => {
-  /** A raw Database whose execute() answers the two guard queries in order. */
+  /** A raw Database whose execute() answers the guard queries in order. */
   function rawDb(...answers: Array<unknown[] | Error>) {
     const execute = vi.fn(async () => {
       const next = answers.shift();
@@ -90,29 +238,61 @@ describe('tenantGuard — the lib/env.ts checks on the raw pool', () => {
     return { db: { execute } as unknown as Database, execute };
   }
   const prod = { NODE_ENV: 'production' } as NodeJS.ProcessEnv;
+  const appRole = [{ current_user: 'restomatch_app', rolbypassrls: false }];
 
   it('runs the role check, then the RLS check, once', async () => {
-    const { db, execute } = rawDb([{ current_user: 'restomatch_app', rolbypassrls: false }], []);
+    const { db, execute } = rawDb(appRole, []);
     const ensure = tenantGuard(db, prod);
     await ensure();
     await ensure();
     expect(execute).toHaveBeenCalledTimes(2);
   });
 
-  it('caches a role that bypasses RLS; the RLS check never runs', async () => {
+  it('a role that bypasses RLS is a verdict: cached; the RLS check never runs', async () => {
     const { db, execute } = rawDb([{ current_user: 'postgres', rolbypassrls: true }]);
     const ensure = tenantGuard(db, prod);
-    await expect(ensure()).rejects.toThrow(/BYPASSES RLS/);
-    await expect(ensure()).rejects.toThrow(/BYPASSES RLS/);
+    const err = await ensure().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(TenantGuardVerdict);
+    expect(isTenantGuardVerdict(err)).toBe(true);
+    // The real env.ts message, unchanged, with the env.ts error as its cause.
+    expect((err as Error).message).toMatch(/^\[env\] tenant-boundary guard FAILED: .*"postgres" which BYPASSES RLS/);
+    expect((err as Error).cause).toBeInstanceOf(Error);
+    expect((err as Error).cause).not.toBeInstanceOf(TenantGuardVerdict);
+    await expect(ensure()).rejects.toBe(err);
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
-  it('caches a tenant table without RLS', async () => {
-    const { db, execute } = rawDb([{ current_user: 'restomatch_app', rolbypassrls: false }], [{ table_name: 'invoices' }]);
+  it('a tenant table without RLS is a verdict: cached', async () => {
+    const { db, execute } = rawDb(appRole, [{ table_name: 'invoices' }]);
     const ensure = tenantGuard(db, prod);
-    await expect(ensure()).rejects.toThrow(/RLS provisioning INCOMPLETE: .*invoices/);
-    await expect(ensure()).rejects.toThrow(/RLS provisioning INCOMPLETE/);
+    const err = await ensure().catch((e: unknown) => e);
+    expect(isTenantGuardVerdict(err)).toBe(true);
+    expect((err as Error).message).toMatch(/^\[env\] RLS provisioning INCOMPLETE: .*invoices/);
+    await expect(ensure()).rejects.toBe(err);
     expect(execute).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(unclassified.filter(([label]) => !label.startsWith('an unbranded')))(
+    '%s from the role check is not a verdict: not cached, the next caller runs both checks again',
+    async (_label, make) => {
+      const err = make();
+      const { db, execute } = rawDb(err, appRole, []);
+      const ensure = tenantGuard(db, prod);
+      const first = await ensure().catch((e: unknown) => e);
+      expect(first).toBe(err);
+      expect(isTenantGuardVerdict(first)).toBe(false);
+      await expect(ensure()).resolves.toBeUndefined();
+      expect(execute).toHaveBeenCalledTimes(3);
+    },
+  );
+
+  it('the same for a failure of the RLS check (a Supavisor XX000 checkout timeout)', async () => {
+    const err = withCode('(ECHECKOUTTIMEOUT) checkout timeout', 'XX000');
+    const { db, execute } = rawDb(appRole, err, appRole, []);
+    const ensure = tenantGuard(db, prod);
+    await expect(ensure()).rejects.toBe(err);
+    await expect(ensure()).resolves.toBeUndefined();
+    expect(execute).toHaveBeenCalledTimes(4);
   });
 
   it('does not run for the explicit owner fallback (dev/test without DATABASE_URL_APP)', async () => {
@@ -126,6 +306,94 @@ describe('tenantGuard — the lib/env.ts checks on the raw pool', () => {
     expect(tenantGuardRequired({ NODE_ENV: 'development', DATABASE_URL_APP: 'postgres://a@h/d' } as NodeJS.ProcessEnv)).toBe(true);
     expect(tenantGuardRequired({ NODE_ENV: 'development', ALLOW_OWNER_DB: '1' } as NodeJS.ProcessEnv)).toBe(false);
     expect(tenantGuardRequired({ NODE_ENV: 'test' } as NodeJS.ProcessEnv)).toBe(false);
+  });
+});
+
+describe('warmUpTenantGuard — the boot hook reports, and never rejects', () => {
+  let warn: MockInstance<typeof console.warn>;
+  let error: MockInstance<typeof console.error>;
+  beforeEach(() => {
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    error = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('waits for the attempt itself (no tenant-query deadline); a pass reports nothing', async () => {
+    const ensure = vi.fn(async () => {});
+    const capture = vi.fn();
+    await expect(warmUpTenantGuard(ensure, capture)).resolves.toBeUndefined();
+    expect(ensure).toHaveBeenCalledWith({ deadlineMs: null });
+    expect(warn).not.toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
+    expect(capture).not.toHaveBeenCalled();
+  });
+
+  it('a verdict: console.error and captureException(verdict: true), no warning', async () => {
+    const err = verdict();
+    const capture = vi.fn();
+    await expect(warmUpTenantGuard(() => Promise.reject(err), capture)).resolves.toBeUndefined();
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(String(error.mock.calls[0]![0])).toMatch(
+      /^\[boot\] tenant guard FAILED — tenant DB access is blocked on this instance: .*BYPASSES RLS/,
+    );
+    expect(warn).not.toHaveBeenCalled();
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(capture).toHaveBeenCalledWith(err, { stage: 'tenant-guard-warmup', verdict: true });
+  });
+
+  it.each<[string, () => unknown]>([
+    ['CONNECT_TIMEOUT', transient],
+    ['ENOTFOUND', () => withCode('getaddrinfo ENOTFOUND pooler', 'ENOTFOUND')],
+    ['a guard still pending', () => new TenantGuardPendingError(10)],
+  ])('%s (not checked yet): console.warn and captureException(verdict: false), no console.error', async (_l, make) => {
+    const err = make();
+    const capture = vi.fn();
+    await expect(warmUpTenantGuard(() => Promise.reject(err), capture)).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]![0])).toMatch(/^\[boot\] tenant guard not checked yet \(.+\); .*runs it again$/);
+    expect(error).not.toHaveBeenCalled();
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(capture).toHaveBeenCalledWith(err, { stage: 'tenant-guard-warmup', verdict: false });
+  });
+
+  it('never rejects and leaves no unhandled rejection, even when logging and captureException throw', async () => {
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      const broken = () => {
+        throw new Error('console is broken');
+      };
+      error.mockImplementation(broken);
+      warn.mockImplementation(broken);
+      const capture = vi.fn(() => {
+        throw new Error('sentry is broken');
+      });
+      // An Error whose message getter throws, too.
+      const hostile = Object.create(Error.prototype, {
+        message: {
+          get() {
+            throw new Error('hostile message');
+          },
+        },
+      }) as Error;
+      const outcomes = await Promise.allSettled([
+        warmUpTenantGuard(() => Promise.reject(verdict()), capture),
+        warmUpTenantGuard(() => Promise.reject(transient()), capture),
+        warmUpTenantGuard(() => Promise.reject(hostile), capture),
+        warmUpTenantGuard(() => {
+          throw transient(); // a synchronous throw from ensure()
+        }, capture),
+      ]);
+      expect(outcomes.map((o) => o.status)).toEqual(['fulfilled', 'fulfilled', 'fulfilled', 'fulfilled']);
+      // captureException still ran when the console threw.
+      expect(capture).toHaveBeenCalledTimes(4);
+      await new Promise((r) => setTimeout(r, 20));
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off('unhandledRejection', unhandled);
+    }
   });
 });
 
