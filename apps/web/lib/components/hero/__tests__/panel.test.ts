@@ -65,10 +65,15 @@ describe('heroSplitForm — the bar only when both parts are worth printing (v2 
     expect(heroSplitForm([{ agorot: 30866 }, { agorot: 46111 }])).toEqual({ kind: 'bar', first: 30866, second: 46111 });
     expect(heroSplitForm([{ agorot: SPLIT_MIN_AGOROT }, { agorot: SPLIT_MIN_AGOROT }]).kind).toBe('bar');
   });
-  it('a part under ₪0.50 (it would print "₪0") → one line about the other part', () => {
+  it('both parts above ₪0 but one under ₪0.50 (a sliver, "₪0" at whole shekels) → the two values, no bar', () => {
+    expect(heroSplitForm([{ agorot: 49 }, { agorot: 76928 }])).toEqual({ kind: 'values' });
+    expect(heroSplitForm([{ agorot: 76928 }, { agorot: 1 }])).toEqual({ kind: 'values' });
+    expect(heroSplitForm([{ agorot: 30 }, { agorot: 20 }])).toEqual({ kind: 'values' });
+  });
+  it('one line only when the other part is exactly ₪0 ("all of it" must be true)', () => {
     expect(heroSplitForm([{ agorot: 76977 }, { agorot: 0 }])).toEqual({ kind: 'single', index: 0 });
-    expect(heroSplitForm([{ agorot: 49 }, { agorot: 76928 }])).toEqual({ kind: 'single', index: 1 });
-    expect(heroSplitForm([{ agorot: 30 }, { agorot: 20 }])).toEqual({ kind: 'single', index: 0 });
+    expect(heroSplitForm([{ agorot: 0 }, { agorot: 76977 }])).toEqual({ kind: 'single', index: 1 });
+    expect(heroSplitForm([{ agorot: 0 }, { agorot: 0 }])).toEqual({ kind: 'single', index: 0 });
   });
   it('strings without agorot (the showcase) → the legend alone; nothing → none', () => {
     expect(heroSplitForm([{}, {}])).toEqual({ kind: 'legend' });

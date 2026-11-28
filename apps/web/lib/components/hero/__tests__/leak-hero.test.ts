@@ -110,13 +110,14 @@ describe('leak state (SPEC §10.1)', () => {
     expect(markup).toMatch(/<\/h2><span[^>]*data-testid="leak-hero-period"[^>]*>מתחילת נובמבר<\/span>/);
   });
 
-  it('the number: <Money context="hero"> inside the count wrapper, the drill link, the G-16 markers', () => {
+  it('the number: <Money context="display"> (DS3-01’s money-hero role) inside the count wrapper, the drill link, the G-16 markers', () => {
     const amount = tagOf(markup, 'leak-hero-amount');
     expect(amount).toMatch(/^<a /);
     expect(amount).toContain('href="/dashboard/leaks/breakdown"');
     expect(amount).toContain('data-money-agorot="76977"');
     expect(amount).toContain('data-money-sum-of="hero-split"');
-    expect(markup).toMatch(/data-testid="leak-hero-amount"[^>]*><span data-entry-part="count"[^>]*><span data-money-figure=""[^>]*text-metric-hero/);
+    expect(markup).toMatch(/data-testid="leak-hero-amount"[^>]*><span data-entry-part="count"[^>]*><span data-money-figure=""[^>]*text-money-hero/);
+    expect(markup).not.toContain('text-metric-hero');
     expect(markup).toContain('<span class="money-glyph">₪</span>');
     // No count overlay on the server: it mounts only from the island's effect, beside the link.
     expect(markup).not.toContain('data-hero-count');
@@ -131,6 +132,23 @@ describe('leak state (SPEC §10.1)', () => {
     expect(markup).toMatch(/data-testid="leak-hero-pct"[^>]*><b class="font-semibold text-fg">1\.9%<\/b> מהרכש שנבדק<span data-testid="leak-hero-base">, מתוך ₪41,526 לפני מע״מ<\/span><\/p>/);
     // A base without punctuation (the showcase's) is joined with a space.
     expect(html(SHOWCASE)).toMatch(/1\.8% מהקניות שנבדקו <span data-testid="leak-hero-base">מתוך ₪42,263 לפני מע״מ<\/span>/);
+  });
+
+  it('the secondary lines take tabular figures; the label and the period each keep one line', () => {
+    expect(tagOf(markup, 'leak-hero-pct')).toContain('tabular-nums');
+    expect(tagOf(markup, 'leak-hero-delta')).toContain('tabular-nums');
+    expect(markup).toMatch(/<span class="[^"]*tabular-nums[^"]*"><span data-testid="leak-hero-completeness"/);
+    expect(markup).toMatch(/<div class="relative flex flex-wrap items-center[^"]*"><span aria-hidden="true" data-dot="leak"/);
+    expect(markup).toMatch(/<h2 id="leak-hero-label" class="whitespace-nowrap /);
+    expect(tagOf(markup, 'leak-hero-period')).toContain('whitespace-nowrap');
+  });
+
+  it('the change line never leaves its arrow alone on a line: one row that does not wrap, the words take the rest', () => {
+    const delta = markup.match(/<p[^>]*data-testid="leak-hero-delta"[^>]*>([\s\S]*?)<\/p>/)!;
+    expect(delta[0]).toMatch(/class="mt-1\.5 flex items-start /);
+    expect(delta[0]).not.toContain('flex-wrap');
+    expect(delta[1]).toMatch(/^<svg[^>]*class="[^"]*shrink-0[^"]*"/);
+    expect(delta[1]).toMatch(/<span class="min-w-0 flex-1">עלייה של ₪152 \(25%\) לעומת אותם ימים באוקטובר<\/span>$/);
   });
 
   it('the change in words: up keeps ink, only the arrow takes the leak indicator (a money figure is never red)', () => {
@@ -197,8 +215,8 @@ describe('entry motion, once (v4 H1)', () => {
   });
 });
 
-describe('the one-line split: (almost) all of it on one side (v2 C2, v4 H7)', () => {
-  it('paid part under ₪0.50 → the unpaid sentence and its honest link, no bar, no sum markers', () => {
+describe('the one-line split: all of it on one side, the other part exactly ₪0 (v2 C2, v4 H7)', () => {
+  it('nothing on paid invoices → the unpaid sentence and its honest link, no bar, no sum markers', () => {
     const markup = html({ ...LEAK, amountIls: 769.77, parts: [{ ...UNPAID, agorot: 76977 }, { ...PAID, agorot: 0 }] });
     const single = tagOf(markup, 'hero-split-single');
     expect(single).toMatch(/^<p /);
@@ -209,9 +227,30 @@ describe('the one-line split: (almost) all of it on one side (v2 C2, v4 H7)', ()
     expect(markup).not.toContain('data-money-sum-of');
     expect(markup).not.toContain('data-money-row-of');
   });
-  it('unpaid part under ₪0.50 → the paid sentence and the credit requests', () => {
-    const markup = html({ ...LEAK, parts: [{ ...UNPAID, agorot: 49 }, { ...PAID, agorot: 76928 }] });
+  it('nothing on unpaid invoices → the paid sentence and the credit requests', () => {
+    const markup = html({ ...LEAK, parts: [{ ...UNPAID, agorot: 0 }, { ...PAID, agorot: 76977 }] });
     expect(markup).toMatch(/data-testid="hero-split-single"[^>]*><span>כל הסכום על חשבוניות ששולמו<\/span>/);
+    expect(tagOf(markup, 'hero-paid-link')).toContain('href="/dashboard/leaks/claims"');
+  });
+});
+
+describe('a part above ₪0 but under ₪0.50: never "all of it" — the two values to the agora, no bar', () => {
+  const markup = html({ ...LEAK, parts: [{ ...UNPAID, agorot: 49 }, { ...PAID, agorot: 76928 }] });
+  it('the legend with both values, their G-16 markers and the sum on the number; no bar, no one-line form', () => {
+    expect(markup).not.toContain('data-split-bar');
+    expect(markup).not.toContain('data-testid="hero-split-single"');
+    expect(markup).not.toContain('--split-cols');
+    expect(markup).toMatch(/role="group" aria-label="הדליפה מתחלקת לשניים"/);
+    const rows = [...markup.matchAll(/data-money-row-of="hero-split" data-money-agorot="(\d+)"/g)].map((m) => Number(m[1]));
+    expect(rows).toEqual([49, 76928]);
+    expect(rows.reduce((a, b) => a + b, 0)).toBe(76977);
+    expect(tagOf(markup, 'leak-hero-amount')).toContain('data-money-sum-of="hero-split"');
+  });
+  it('the values carry their agorot (a part under ₪0.50 never reads "₪0"), and each its link', () => {
+    const unpaid = markup.slice(markup.indexOf('data-testid="hero-unpaid"'), markup.indexOf('data-testid="hero-paid"'));
+    expect(unpaid.replace(/<[^>]+>/g, '')).toMatch(/0\.49/);
+    expect(unpaid).toMatch(/>לחשבוניות שלא שולמו<\/a>/);
+    expect(tagOf(markup, 'hero-unpaid-link')).toContain('href="/dashboard/leaks/breakdown#group-unpaid"');
     expect(tagOf(markup, 'hero-paid-link')).toContain('href="/dashboard/leaks/claims"');
   });
 });
@@ -287,9 +326,10 @@ describe('the islands, server side', () => {
     expect(markup).not.toContain('data-explain');
     expect(markup).not.toContain(' hidden=""');
   });
-  it('PacePlaceholder: the shared box ratio, decorative', () => {
+  it('PacePlaceholder: the shared box ratio and the legend’s one caption line (held open, never 0 px), decorative', () => {
     const markup = renderToStaticMarkup(h(PacePlaceholder, {}));
     expect(markup).toContain('viewBox="-2 -6 250 78"');
     expect(markup).toContain('aria-hidden="true"');
+    expect(markup).toMatch(/<div class="mt-1 flex text-caption"><span class="inline-flex whitespace-nowrap">\u00a0<\/span><\/div>/);
   });
 });

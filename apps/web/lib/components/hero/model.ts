@@ -129,9 +129,9 @@ export function agorotOf(ils: number): number {
 /* ─────────────────────────── DS3 · the split ─────────────────────────── */
 
 /**
- * The two-part bar and its legend need both parts at ₪0.50 or more: a smaller part would print
- * as "₪0" beside a visible segment (Money inline rounds to the shekel), so the hero says the
- * whole sum sits on one side instead (v2 C2).
+ * The two-part bar needs both parts at ₪0.50 or more: a smaller part would be a sliver beside a
+ * figure that rounds to "₪0" (Money inline rounds to the shekel), so it is drawn without the bar
+ * (v2 C2). The one-line form ("כל הסכום על …") is true only when the other part is exactly ₪0.
  */
 export const SPLIT_MIN_AGOROT = 50;
 
@@ -142,7 +142,9 @@ export type HeroSplitForm =
   | { kind: 'legend' }
   /** Both parts at ₪0.50 or more: the bar and the legend, sized by the agorot. */
   | { kind: 'bar'; first: number; second: number }
-  /** (Almost) all of the sum on one side: one line about part `index`. */
+  /** Both parts above ₪0, one under ₪0.50: the legend's two values (to the agora) and their links, no bar. */
+  | { kind: 'values' }
+  /** The whole sum on one side (the other part is exactly ₪0): one line about part `index`. */
   | { kind: 'single'; index: 0 | 1 };
 
 /** Which form the hero's split takes, from the parts' exact agorot (when they carry them). */
@@ -153,6 +155,7 @@ export function heroSplitForm(parts: ReadonlyArray<{ agorot?: number | null }> |
   const a = parts[0]!.agorot as number;
   const b = parts[1]!.agorot as number;
   if (a >= SPLIT_MIN_AGOROT && b >= SPLIT_MIN_AGOROT) return { kind: 'bar', first: a, second: b };
+  if (a > 0 && b > 0) return { kind: 'values' };
   return { kind: 'single', index: b > a ? 1 : 0 };
 }
 

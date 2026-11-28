@@ -38,8 +38,8 @@ export interface LeakHeroPart {
   linkLabel?: string;
   linkTestId?: string;
   /**
-   * The one-line form, when this part carries (almost) all of the leak (the other part is under
-   * ₪0.50): the sentence ("כל הסכום על חשבוניות ששולמו") and the words of its link to `href`.
+   * The one-line form, when this part carries all of the leak (the other part is exactly ₪0): the
+   * sentence ("כל הסכום על חשבוניות ששולמו") and the words of its link to `href`.
    */
   whole?: { text: string; linkLabel?: string; linkTestId?: string } | null;
 }
@@ -93,7 +93,7 @@ export interface LeakHeroProps {
 
   /**
    * The exact leak in ₪ as the procedure returned it (2 dp): the number goes through
-   * <Money context="hero"> in the HeroAmount island (the count-up on entry) and carries the G-16
+   * <Money context="display"> in the HeroAmount island (the count-up on entry) and carries the G-16
    * markers. Without it `amount` is shown as given.
    */
   amountIls?: number;
@@ -129,6 +129,8 @@ export function LeakHero(p: LeakHeroProps) {
   // A checked month tells its figure, its scale and its change.
   const told = p.state === 'leak' || p.state === 'clean';
   const split = leaked ? heroSplitForm(p.parts) : ({ kind: 'none' } as const);
+  // G-16: the number is the sum of the legend only while the legend shows both exact values.
+  const splitSum = split.kind === 'bar' || split.kind === 'values';
   const exact = typeof p.amountIls === 'number' && Number.isFinite(p.amountIls);
   const entry = Boolean(p.entry) && leaked && exact;
   const fold = p.why && p.state !== 'noData' ? p.why : null;
@@ -151,14 +153,15 @@ export function LeakHero(p: LeakHeroProps) {
       {entry ? <style>{HERO_ENTRY_CSS}</style> : null}
       {p.eyebrow ? <p className="mb-1 text-caption text-fg-tertiary">{p.eyebrow}</p> : null}
 
-      {/* The ⓘ note anchors to this row, capped to its width so a phone never clips it. */}
-      <div className="relative flex items-center gap-2.5">
+      {/* The ⓘ note anchors to this row, capped to its width so a phone never clips it. The label and
+          the period each keep one line; when both do not fit, the period moves under the label whole. */}
+      <div className="relative flex flex-wrap items-center gap-x-2.5 gap-y-0.5">
         {leaked ? <StatusDot tone="leak" /> : null}
-        <h2 id="leak-hero-label" className="text-body font-medium text-fg">
+        <h2 id="leak-hero-label" className="whitespace-nowrap text-body font-medium text-fg">
           {p.label}
         </h2>
         {p.period ? (
-          <span className="text-body-sm text-fg-tertiary" data-testid="leak-hero-period">
+          <span className="whitespace-nowrap text-body-sm text-fg-tertiary" data-testid="leak-hero-period">
             {p.period}
           </span>
         ) : null}
@@ -174,7 +177,7 @@ export function LeakHero(p: LeakHeroProps) {
               —
             </p>
           ) : exact ? (
-            <HeroAmount value={p.amountIls!} locale={p.locale} href={p.amountHref} sumOf={split.kind === 'bar' ? 'hero-split' : undefined} />
+            <HeroAmount value={p.amountIls!} locale={p.locale} href={p.amountHref} sumOf={splitSum ? 'hero-split' : undefined} />
           ) : (
             <p className="text-metric-hero tabular-nums text-fg">
               {p.amountHref ? (
@@ -191,7 +194,7 @@ export function LeakHero(p: LeakHeroProps) {
       </div>
 
       {told && (p.pct || p.pctLine || p.baseLine) ? (
-        <p data-testid="leak-hero-pct" className="mt-1 text-body text-fg-secondary">
+        <p data-testid="leak-hero-pct" className="mt-1 text-body tabular-nums text-fg-secondary">
           {p.pct ? <b className="font-semibold text-fg">{p.pct}</b> : null}
           {p.pct && p.pctLine ? ' ' : null}
           {p.pctLine}
@@ -242,7 +245,10 @@ export function LeakHero(p: LeakHeroProps) {
       ) : null}
 
       {split.kind === 'bar' ? (
-        <HeroSplit parts={p.parts!} bar={split} label={p.splitAria ?? p.splitLabel} locale={p.locale} />
+        <HeroSplit parts={p.parts!} bar={split} marked label={p.splitAria ?? p.splitLabel} locale={p.locale} />
+      ) : split.kind === 'values' ? (
+        // A part under ₪0.50 would round to "₪0": both values to the agora, no bar.
+        <HeroSplit parts={p.parts!} bar={null} marked decimals={2} label={p.splitAria ?? p.splitLabel} locale={p.locale} />
       ) : split.kind === 'legend' ? (
         <HeroSplit parts={p.parts!} bar={null} label={p.splitAria ?? p.splitLabel} locale={p.locale} />
       ) : split.kind === 'single' ? (
@@ -301,7 +307,7 @@ export function HeroNote({ children, testId }: { children: React.ReactNode; test
 
 function HeroFootLine({ completeness, tertiary }: { completeness?: LeakHeroProps['completeness']; tertiary?: LeakHeroLink | null }) {
   return (
-    <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-0.5">
+    <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-0.5 tabular-nums">
       {completeness ? (
         completeness.href ? (
           <Link
@@ -332,7 +338,7 @@ function HeroFootLine({ completeness, tertiary }: { completeness?: LeakHeroProps
 function HeroDeltaLine({ delta }: { delta: NonNullable<LeakHeroProps['delta']> }) {
   if ('none' in delta) {
     return (
-      <p className="mt-1.5 text-caption text-fg-tertiary" data-testid="leak-hero-delta" data-direction="none">
+      <p className="mt-1.5 text-caption tabular-nums text-fg-tertiary" data-testid="leak-hero-delta" data-direction="none">
         {delta.none}
       </p>
     );
@@ -340,16 +346,17 @@ function HeroDeltaLine({ delta }: { delta: NonNullable<LeakHeroProps['delta']> }
   const up = delta.direction === 'up';
   const down = delta.direction === 'down';
   return (
+    // One row that never wraps: the arrow stays at the start of the words' first line on a phone.
     <p
       className={cn(
-        'mt-1.5 flex flex-wrap items-center gap-x-1.5 text-body-sm',
+        'mt-1.5 flex items-start gap-x-1.5 text-body-sm tabular-nums',
         down ? 'font-medium text-primary' : up ? 'font-medium text-fg' : 'font-normal text-fg-secondary',
       )}
       data-testid="leak-hero-delta"
       data-direction={delta.direction}
     >
-      <Icon as={up ? TrendingUp : down ? TrendingDown : Minus} size="body-sm" className={up ? 'stroke-danger-dot' : undefined} />
-      <span>
+      <Icon as={up ? TrendingUp : down ? TrendingDown : Minus} size="body-sm" className={cn('mt-0.5', up && 'stroke-danger-dot')} />
+      <span className="min-w-0 flex-1">
         {delta.word}
         {delta.word && delta.text ? ' ' : null}
         {delta.text}
@@ -362,15 +369,21 @@ function HeroDeltaLine({ delta }: { delta: NonNullable<LeakHeroProps['delta']> }
  * The split (SPEC §10.1): the shared two-part bar (unpaid solid, paid hatched; decorative) and the
  * legend under it — a figure, what it is, and a link — each column under its segment at the desk,
  * two equal columns on a phone. Without exact agorot (the showcase) the legend stands alone.
+ * `marked`: the legend's values are the rows the hero sums (G-16), drawn with or without the bar.
  */
 function HeroSplit({
   parts,
   bar,
+  marked = false,
+  decimals,
   label,
   locale,
 }: {
   parts: LeakHeroPart[];
   bar: { first: number; second: number } | null;
+  marked?: boolean;
+  /** The values' decimals (2 when a part is under ₪0.50, which would round to "₪0"). */
+  decimals?: 0 | 2;
   label?: string;
   locale?: Locale;
 }) {
@@ -383,16 +396,16 @@ function HeroSplit({
         style={bar ? ({ '--split-cols': `${bar.first}fr ${bar.second}fr` } as React.CSSProperties) : undefined}
       >
         {parts.map((part, i) => (
-          <HeroPart key={part.testId ?? i} part={part} locale={locale} rowOf={bar ? 'hero-split' : undefined} />
+          <HeroPart key={part.testId ?? i} part={part} locale={locale} decimals={decimals} rowOf={marked ? 'hero-split' : undefined} />
         ))}
       </div>
     </div>
   );
 }
 
-function HeroPart({ part, locale, rowOf }: { part: LeakHeroPart; locale?: Locale; rowOf?: string }) {
+function HeroPart({ part, locale, decimals, rowOf }: { part: LeakHeroPart; locale?: Locale; decimals?: 0 | 2; rowOf?: string }) {
   const exact = typeof part.agorot === 'number' && Number.isFinite(part.agorot);
-  const figure = exact ? <Money agorot={part.agorot} context="inline" split locale={locale} /> : <bdi>{part.value}</bdi>;
+  const figure = exact ? <Money agorot={part.agorot} context="inline" decimals={decimals} split locale={locale} /> : <bdi>{part.value}</bdi>;
   // An older caller's part without link words: the figure itself leads (IA rule 7).
   const figureLink = part.href && !part.linkLabel ? part.href : null;
   return (
@@ -421,7 +434,7 @@ function HeroPart({ part, locale, rowOf }: { part: LeakHeroPart; locale?: Locale
   );
 }
 
-/** (Almost) the whole leak on one side: one sentence and its link, no bar (v2 C2; v4 H7). */
+/** The whole leak on one side (the other part is ₪0): one sentence and its link, no bar (v2 C2; v4 H7). */
 function HeroSplitSingle({ part }: { part: LeakHeroPart }) {
   if (!part.whole) return null;
   return (

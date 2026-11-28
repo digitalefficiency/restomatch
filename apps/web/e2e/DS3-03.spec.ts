@@ -338,11 +338,13 @@ test.describe('owner · desk 1440×900', () => {
     }
 
     // The split (leakSplit's parts, exact agorot): bar + legend when both parts are ≥ ₪0.50, else one sentence.
+    // DS3-03: one sentence only when a part is exactly ₪0; both above ₪0 with one under ₪0.50 → the legend's two values without the bar.
     const unpaid = Math.min(heroAgorot, Math.max(0, agorotOf(figures.caughtBeforePaymentIls)));
     const paid = heroAgorot - unpaid;
-    test.info().annotations.push({ type: 'split', description: `${unpaid >= 50 && paid >= 50 ? 'bar + legend' : 'one sentence'} (unpaid ${unpaid} · paid ${paid} agorot)` });
-    if (unpaid >= 50 && paid >= 50) {
-      await expect(hero.locator('[data-split-bar]')).toHaveCount(1);
+    const form = unpaid >= 50 && paid >= 50 ? 'bar + legend' : unpaid > 0 && paid > 0 ? 'legend without the bar' : 'one sentence';
+    test.info().annotations.push({ type: 'split', description: `${form} (unpaid ${unpaid} · paid ${paid} agorot)` });
+    if (unpaid > 0 && paid > 0) {
+      await expect(hero.locator('[data-split-bar]')).toHaveCount(unpaid >= 50 && paid >= 50 ? 1 : 0);
       await expect(hero.locator('[role="group"]')).toHaveAttribute('aria-label', ovHe.hero.splitAria);
       const value = (id: string) => hero.getByTestId(id).locator('[data-money-row-of="hero-split"]');
       await expect(value('hero-unpaid')).toHaveAttribute('data-money-agorot', String(unpaid));

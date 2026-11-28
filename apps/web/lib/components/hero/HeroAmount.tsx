@@ -10,13 +10,19 @@ import { Money } from '../money/Money';
 import { HERO_HOLD_ANIMATION, agorotOf, cubicBezier, msOf, parseCubicBezier } from './model';
 
 /**
- * When the entry first played in this document. Module scope: it survives client navigation
+ * Whether the entry has played in this document. Module scope: it survives client navigation
  * (Back / Forward restore the page from the router cache, with `data-entry` in the payload), not a
  * reload, so the entry plays on the first view of each load and never again in it (v4 H1).
  */
-let entryPlayedAt: number | null = null;
-/** A remount this soon after the first is the same view: React StrictMode runs effects twice in development. */
-const SAME_VIEW_MS = 1000;
+let entryPlayed = false;
+/**
+ * The hero card the entry played on: a remount on that same element is the same view — React
+ * StrictMode re-runs the effects of a mounted tree in development without touching its DOM (React 19
+ * does it when the commit's passive effects flush, not always in the commit's own task). A later
+ * view (a Back, however fast) renders a new card, so it never replays and never needs a time window.
+ * Weak, so the card of a page left behind is not kept alive.
+ */
+const entryCards = new WeakSet<Element>();
 /** Less hold left than a press lasts (the micro token): a count that short does not read as one. */
 const MIN_COUNT_MS = msOf(motion.duration.micro);
 
@@ -59,7 +65,7 @@ export interface HeroAmountProps {
  * for the long duration; if this island mounts while that hold still runs (and the tab is
  * visible), an aria-hidden, pointer-events-none overlay BESIDE the testid element counts 0 → value
  * in <Money> over the hold's remaining time on the entering curve, then fades out and leaves.
- * Later mounts in the same document and reduced motion remove `data-entry` before paint; after
+ * A later view in the same document (a new card) and reduced motion remove `data-entry` before paint; after
  * the entry its last part removes it. Without a script the hold simply ends and the number shows.
  */
 export function HeroAmount({ value, locale, href, testId = 'leak-hero-amount', sumOf, className }: HeroAmountProps) {
@@ -72,10 +78,12 @@ export function HeroAmount({ value, locale, href, testId = 'leak-hero-amount', s
     const section = wrapRef.current?.closest('section[data-entry]');
     if (!section) return;
     const endEntry = () => section.removeAttribute('data-entry');
-    const now = performance.now();
-    const first = entryPlayedAt === null;
-    const sameView = !first && now - (entryPlayedAt as number) < SAME_VIEW_MS;
-    if (first) entryPlayedAt = now;
+    const first = !entryPlayed;
+    const sameView = !first && entryCards.has(section);
+    if (first) {
+      entryPlayed = true;
+      entryCards.add(section);
+    }
     const reduce = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (reduce || (!first && !sameView)) {
       endEntry();
@@ -141,9 +149,12 @@ export function HeroAmount({ value, locale, href, testId = 'leak-hero-amount', s
   }, [value]);
 
   const marks = { 'data-testid': testId, 'data-money-agorot': agorotOf(value), 'data-money-sum-of': sumOf };
+  // The home's display role (DS3-01 `money-hero`: 84/88 regular, 64/70 on a phone, the raised 0.4 em ₪),
+  // for the number and its count alike: the same box and tabular figures (Money's `.num`), so the
+  // count lands on the final figure's exact width.
   const figure = (
     <span ref={countRef} data-entry-part="count" className="inline-flex">
-      <Money value={value} context="hero" state="leak" locale={locale} />
+      <Money value={value} context="display" state="leak" locale={locale} />
     </span>
   );
   return (
@@ -159,7 +170,7 @@ export function HeroAmount({ value, locale, href, testId = 'leak-hero-amount', s
       )}
       {shown !== null ? (
         <span ref={overlayRef} aria-hidden="true" data-hero-count="" className="pointer-events-none absolute start-0 top-0 inline-flex">
-          <Money value={shown} context="hero" locale={locale} className="text-ink" />
+          <Money value={shown} context="display" locale={locale} className="text-ink" />
         </span>
       ) : null}
     </span>
