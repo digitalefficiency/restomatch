@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "main@9dd26ef9",
+  "generatedFrom": "main@de5cfcf7",
   "about": {
     "what": "The decided partition of the invoices batch (INV-00 to INV-06). One package, one coding session, one branch, one draft pull request. Checked by check-partition.cjs beside this file.",
     "paths": "Relative to the repository root. In a glob only * (inside one path segment), ** (any depth) and ? are special; [ ] ( ) are literal, so [invoiceId] and (register) are written as they are on disk.",
@@ -136,17 +136,17 @@
           "file": "apps/web/e2e/ia/screens.ts",
           "owner": "shared",
           "who": "INV-01",
-          "what": "The row invoice-owner-desk only (line 44, its allowance at line 71 on main@9dd26ef9): lower its numbers to what the new screen measures, never raise one, and leave its adopter."
+          "what": "The row invoice-owner-desk only (line 44, its allowance at line 71 on main@de5cfcf7): lower its numbers to what the new screen measures, never raise one, and leave its adopter."
         },
         {
           "file": "apps/web/lib/copy/budget.allow.ts",
           "owner": "shared",
           "who": "INV-01",
-          "what": "Delete the lines invoices:correction.* (lines 79 to 97 on main@9dd26ef9) and invoices:status.clean (line 115) whose strings went. There is no invoices:cockpit.* line. Never add a line, never edit a header's count, never run copy:baseline."
+          "what": "Delete the lines invoices:correction.* (lines 79 to 97 on main@de5cfcf7) and invoices:status.clean (line 115) whose strings went. There is no invoices:cockpit.* line. Never add a line, never edit a header's count, never run copy:baseline."
         }
       ],
       "dependsOn": ["INV-00"],
-      "dependsOnOutside": ["DS3-00 (pull request 346)", "DS3-01 (pull request 345), with current main merged into its branch"]
+      "dependsOnOutside": ["DS3-00 (pull request 346)", "DS3-01 (pull request 345); the session merges claude/ds3-01-components itself, and nobody merges main into that branch (WORKPLAN.md, S10)"]
     },
     {
       "id": "INV-02",
@@ -196,29 +196,29 @@
           "file": "apps/web/e2e/W2-02.spec.ts",
           "owner": "INV-01",
           "who": "INV-02",
-          "what": "Only the three tests whose title starts with \"register\" (lines 118, 223 and 316 on main@9dd26ef9). The helpers at lines 1 to 117, the inbox tests and the chef test are nobody's to change."
+          "what": "Only the three tests whose title starts with \"register\" (lines 118, 223 and 316 on main@de5cfcf7). The helpers at lines 1 to 117, the inbox tests and the chef test are nobody's to change."
         },
         {
           "file": "apps/web/lib/copy/screens.ts",
           "owner": "shared",
           "who": "INV-02",
-          "what": "One new row for the list (owner, 1440), measured, placed directly after the suppliers row (line 66 on main@9dd26ef9)."
+          "what": "One new row for the list (owner, 1440), measured, placed directly after the suppliers row (line 66 on main@de5cfcf7)."
         },
         {
           "file": "apps/web/e2e/ia/screens.ts",
           "owner": "shared",
           "who": "INV-02",
-          "what": "One new row for the list, which is two entries: a row in BASE directly after the inbox-bookkeeper-desk row (line 41 on main@9dd26ef9) and its entry in BASELINE_0711 directly after 'team-owner-desk' (line 77). apps/web/test/ia-density.test.ts:154 needs both. The adopter must match the pattern at ia-density.test.ts:147: write adopter 'W2-02', never 'INV-02'."
+          "what": "One new row for the list, which is two entries: a row in BASE directly after the inbox-bookkeeper-desk row (line 41 on main@de5cfcf7) and its entry in BASELINE_0711 directly after 'team-owner-desk' (line 77). apps/web/test/ia-density.test.ts:154 needs both. The adopter must match the pattern at ia-density.test.ts:147: write adopter 'W2-02', never 'INV-02'."
         },
         {
           "file": "apps/web/lib/copy/budget.allow.ts",
           "owner": "shared",
           "who": "INV-02",
-          "what": "Delete invoices:needsLines.subtitle (line 114 on main@9dd26ef9) if its string went. The lines invoices:needsLines.held.* (98 to 113) stay: their strings are frozen. There is no invoices:register.* line. Never add a line, never edit a header's count, never run copy:baseline."
+          "what": "Delete invoices:needsLines.subtitle (line 114 on main@de5cfcf7) if its string went. The lines invoices:needsLines.held.* (98 to 113) stay: their strings are frozen. There is no invoices:register.* line. Never add a line, never edit a header's count, never run copy:baseline."
         }
       ],
       "dependsOn": ["INV-00"],
-      "dependsOnOutside": ["DS3-00 (pull request 346)", "DS3-01 (pull request 345), with current main merged into its branch"]
+      "dependsOnOutside": ["DS3-00 (pull request 346)", "DS3-01 (pull request 345); the session merges claude/ds3-01-components itself, and nobody merges main into that branch (WORKPLAN.md, S10)"]
     },
     {
       "id": "INV-03",
@@ -255,7 +255,7 @@
           "file": "apps/web/lib/copy/screens.ts",
           "owner": "shared",
           "who": "INV-03",
-          "what": "The row pay-run only (line 68 on main@9dd26ef9): lower it to what the new screen measures."
+          "what": "The row pay-run only (line 68 on main@de5cfcf7): lower it to what the new screen measures."
         },
         {
           "file": "apps/web/e2e/ia/screens.ts",
@@ -267,11 +267,11 @@
           "file": "apps/web/lib/copy/budget.allow.ts",
           "owner": "shared",
           "who": "INV-03",
-          "what": "Delete the payRun:* lines whose strings went (lines 118 to 122 on main@9dd26ef9). Never add a line."
+          "what": "Delete the payRun:* lines whose strings went (lines 118 to 122 on main@de5cfcf7). Never add a line."
         }
       ],
       "dependsOn": ["INV-00"],
-      "dependsOnOutside": ["DS3-00 (pull request 346)", "DS3-01 (pull request 345), with current main merged into its branch"]
+      "dependsOnOutside": ["DS3-00 (pull request 346)", "DS3-01 (pull request 345); the session merges claude/ds3-01-components itself, and nobody merges main into that branch (WORKPLAN.md, S10)"]
     },
     {
       "id": "INV-04",
@@ -336,7 +336,7 @@
           "file": "apps/web/lib/copy/screens.ts",
           "owner": "shared",
           "who": "INV-04",
-          "what": "The rows approvals and manager-approvals only (lines 63 and 58 on main@9dd26ef9): lower, never raise."
+          "what": "The rows approvals and manager-approvals only (lines 63 and 58 on main@de5cfcf7): lower, never raise."
         },
         {
           "file": "apps/web/e2e/ia/screens.ts",
@@ -348,11 +348,11 @@
           "file": "apps/web/lib/copy/budget.allow.ts",
           "owner": "shared",
           "who": "INV-04",
-          "what": "Delete the approvals:* lines whose strings went (lines 124 to 133 on main@9dd26ef9). Never add a line."
+          "what": "Delete the approvals:* lines whose strings went (lines 124 to 133 on main@de5cfcf7). Never add a line."
         }
       ],
       "dependsOn": ["INV-00"],
-      "dependsOnOutside": ["DS3-04 (pull request 347, finished at be22850e), with current main merged into its branch or merged by this package in its own branch"]
+      "dependsOnOutside": ["DS3-04 (pull request 347, finished at a6be4080); this package merges current main in its own branch as its slice 0 (WORKPLAN.md, S10)"]
     },
     {
       "id": "INV-05",
@@ -394,7 +394,7 @@
           "file": "apps/web/e2e/W2-02.spec.ts",
           "owner": "INV-01",
           "who": "INV-05",
-          "what": "Only the cockpit-decide assertions inside the test that starts at line 150 on main@9dd26ef9."
+          "what": "Only the cockpit-decide assertions inside the test that starts at line 150 on main@de5cfcf7."
         },
         {
           "file": "apps/web/e2e/ia/screens.ts",
@@ -406,7 +406,7 @@
           "file": "packages/api/src/lib/features.ts",
           "owner": "shared",
           "who": "INV-05",
-          "what": "The switch-off key decideOnInvoice, on by default: the key in FEATURE_KEYS and in DEFAULT_ON_FEATURES, on its own line. Dropped if the lead decides against the key."
+          "what": "The switch-off key decideOnInvoice, on by default: the key in FEATURE_KEYS and in DEFAULT_ON_FEATURES, on its own line."
         },
         {
           "file": "packages/db/scripts/pilot-setup.ts",

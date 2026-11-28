@@ -13,9 +13,9 @@ component.
 - **Read `KNOWN-ISSUES.md` beside this file.** It lists where the mock-ups are looser than the product's rules
   or than the code allows. Where the two disagree, `KNOWN-ISSUES.md` wins; where the code and a mock-up
   disagree, the code wins.
-- **Citations.** A file and line is from `main@9dd26ef9` unless it is marked "DS3-04:", which means the
-  finished desk branch `claude/ds3-04-approvals-desk` at `be22850e`. `main` moves: confirm a line before you
-  rely on it.
+- **Citations.** A file and line is from `main@de5cfcf7` (`main` on 28.11.2026) unless it is marked
+  "DS3-04:", which means the finished desk branch `claude/ds3-04-approvals-desk` at `a6be4080`. `main` moves:
+  confirm a line before you rely on it.
 - **Server fields** are named as `WORKPLAN.md` (`INV-00`, "The contract") names them. `INV-00` pushes the exact
   types first; where its pushed contract and this file differ in a name, the contract wins.
 
@@ -393,7 +393,7 @@ menus, the paging, "להשלמת שורות" (`?view=lines`) and "נכנסות" 
 **Purpose.** One invoice: the supplier's document itself, large enough to read, beside what the product read
 in it and found. The gap first, with whom it is and why; then the payment; then the lines by the three
 documents; then what happened. Owner, manager and bookkeeper. (`invoices.detail` also answers the receiver,
-`packages/api/src/trpc.ts:186-188`, so every new field is null without the right to see money, and the queue
+`packages/api/src/trpc.ts:216-218`, so every new field is null without the right to see money, and the queue
 is asked only for a finance role.)
 
 **Step one only.** Open the mock-up with the switch "המסמך" on **"בלי סימון"** or **"בלי קובץ"**. The state "עם
@@ -435,7 +435,7 @@ decision buttons, it shows one button "להחלטה" that opens the desk on this
 | An image (JPEG, PNG, WebP) | The viewer of section 4.4; the toolbar says "תמונה". |
 | A PDF | In `INV-01`: today's sandboxed frame of the browser inside the new pane (`apps/web/lib/components/invoice/InvoiceScanViewer.tsx:88`), with "PDF · עמוד 1 מתוך N" when the scan row has a page count, and "פתחו את המקור". On a phone, where a frame may not draw a PDF, the window shows one calm line and the same link. Drawing a PDF in the same viewer is `INV-06`, optional. |
 | No file | The line above; no viewer, no window, no divider. |
-| Being read, or no lines | As today: the screen opens in the reading correction (`[invoiceId]/page.tsx:205-207`); who may correct is unchanged (`:86-87`). |
+| Being read, or no lines | As today: the screen opens in the reading correction (`[invoiceId]/page.tsx:206-208`); who may correct is unchanged (`:87-88`). |
 | An open gap the viewer may decide | The card with the 2 px outline when it is the viewer's own; `INV-01`: "להחלטה"; `INV-05`: the two buttons. The payment block says "בהשהיה". |
 | An open gap the viewer may not decide | The same card and evidence; "ההחלטה אצל הבעלים, ואין צורך בפעולה מצדכם." in place of the action. |
 | The owner on another role's gap | The note "גם אתם רשאים להחליט" beside the action. |
@@ -445,7 +445,7 @@ decision buttons, it shows one button "להחלטה" that opens the desk on this
 
 ### 4.3 Header and stepping
 
-- Back link by where the person came from (five origins, kept: `[invoiceId]/page.tsx:44`); from the list it
+- Back link by where the person came from (five origins, kept: `[invoiceId]/page.tsx:45`); from the list it
   reads "לרשימת החשבוניות".
 - "חשבונית 1 מתוך 4 שנמצא בהן פער" with two icon buttons, "החשבונית הקודמת" and "החשבונית הבאה", disabled at
   the ends. `[` and `]` do the same; they walk the place the person came from (`from`, `month`, `view`), in
@@ -544,15 +544,14 @@ Heading "התשלום", in the pay run's own words, from `invoices.detail.paymen
 - "ההחלטה על הפער תשחרר את החשבונית לתשלום." **only when an open gap is the only thing that holds the
   invoice.** With no open gap and nothing else holding: "אין פער פתוח, והחשבונית בין אלה שניתן לשלם." Held for
   another reason: that reason, in today's words (the block takes in today's held-reasons note and VAT note,
-  `[invoiceId]/page.tsx:209-249`, and keeps their test ids).
+  `[invoiceId]/page.tsx:210-250`, and keeps their test ids).
 - "לתשלום עד" · "לפני מע״מ" · "מע״מ" · "כולל מע״מ".
 - The check: "השורות מסתכמות בסכום שלפני מע״מ, והמע״מ תואם." with **no percentage** (today's string prints the
   rate, also on an invoice with no VAT: `messages/invoices/he.ts:211`).
 - The allocation line, one of three: "מספר הקצאה לא נדרש בסכום הזה."; the number itself; or that it is missing.
-  The block ends with one named wrapper for the allocation field (`[invoiceId]/allocation-field.tsx`). On
-  `main@9dd26ef9` nothing mounts that file; pull request 341, merged after it, mounts it in
-  `[invoiceId]/page.tsx`. `INV-01` keeps that one mount, inside the wrapper, adds none of its own and never
-  edits the file.
+  The block ends with one named wrapper for the allocation field (`[invoiceId]/allocation-field.tsx`),
+  which is mounted on `main` (pull request 341; `[invoiceId]/page.tsx:252-257`). `INV-01` moves that one
+  mount into the wrapper, unchanged, adds none of its own and never edits the file.
 
 ### 4.7 The lines
 
@@ -597,19 +596,19 @@ On a phone the chain "המסמכים שנבדקו" stands above it: הזמנה �
 | PDF | a sandboxed frame, 70dvh, no tools (`InvoiceScanViewer.tsx:88`) | kept in `INV-01`; in the same viewer only by `INV-06` | |
 | "פתחו את המקור" | `InvoiceScanViewer.tsx:78-83` | exists, kept | `INV-01` |
 | No file | `cockpit.tsx:297`, `messages/invoices/he.ts:187` | exists | `INV-01` |
-| "חפשו במסמך" | none | new | `INV-01` · the item from `invoices.detail`; the SKU from `receiving.getInvoice`, which the page already loads (`[invoiceId]/page.tsx:91`) |
-| Back link by origin | `[invoiceId]/page.tsx:44`, `:124` | exists, kept | `INV-01` |
+| "חפשו במסמך" | none | new | `INV-01` · the item from `invoices.detail`; the SKU from `receiving.getInvoice`, which the page already loads (`[invoiceId]/page.tsx:92`) |
+| Back link by origin | `[invoiceId]/page.tsx:45`, `:125` | exists, kept | `INV-01` |
 | Place and previous / next | two text links, only from the list, no place (`cockpit.tsx:363-364`); the keys (`:125-145`) | differs | `INV-01` · `invoices.list` rows `place`; `places.ts` |
 | State pill | `STATE_TONE` imported from the list (`cockpit.tsx:20`) | differs | `INV-01` · `lib/invoices/state.ts`; the worst open level in `holding` |
 | Three facts | the total without its basis; the due date is returned and not shown | differs | `INV-01` · `invoices.detail` `payBy` (the pay run's own date; no remainder when it is null) |
 | Gap card | chips under a flagged line | new | `INV-01` · `invoices.detail` `holding`, per-finding routing and decision; `approvals.myQueue({ scope: 'all', invoiceIds: [id] })` for the open rows |
 | Count of open gaps | `openCount` counts the ₪0 twin (`routers/invoices.ts:480`) | differs | `INV-00` (`queueOpenCount`), `INV-01` |
 | The action | one sticky link to the desk (`cockpit.tsx:416-417`, test id `cockpit-decide`) | `INV-01`: one button to the desk, or the sentence. `INV-05`: the decision of section 2.7 | `approvals.*`, unchanged |
-| Payment block | a held-reasons note and a VAT note beside the screen (`[invoiceId]/page.tsx:209-249`) | differs | `INV-01` · `invoices.detail` `payment`, `allocation`, `payBy` |
+| Payment block | a held-reasons note and a VAT note beside the screen (`[invoiceId]/page.tsx:210-250`) | differs | `INV-01` · `invoices.detail` `payment`, `allocation`, `payBy` |
 | Check line | prints the VAT rate (`messages/invoices/he.ts:211`) | differs | `INV-01` |
 | Lines by three documents | a flat table (`cockpit.tsx:210-262`), cards on a phone (`:265-`) | differs | `INV-01` · already returned (`routers/invoices.ts:454-477`); the order's sent date is new |
 | History | none on this screen | new | `INV-00` (`invoices.history`), `INV-01` |
-| Reading correction ("ערכו נתוני סריקה"), the consolidated panel, dock-price notes, the partial-load banner, the duplicate notice | `cockpit.tsx:334`, `[invoiceId]/page.tsx:182`, `:253` | exist, kept with their test ids | `INV-01` mounts them and edits none |
+| Reading correction ("ערכו נתוני סריקה"), the consolidated panel, dock-price notes, the partial-load banner, the duplicate notice | `cockpit.tsx:334`, `[invoiceId]/page.tsx:183`, `:260` | exist, kept with their test ids | `INV-01` mounts them and edits none |
 
 ## 5. Screen 3 · approvals by role (`INV-04`)
 
@@ -709,7 +708,7 @@ focus stays inside and returns to the link. Its numbers come from `settings.effe
 
 | Element | On `main` today · DS3-04 | State | Built by · from |
 | --- | --- | --- | --- |
-| Every open gap as a row | the server has `scope: 'all'` (`routers/approvals.ts:241`, `:323`); the desk asks for the viewer's own (DS3-04: `use-desk.ts:274`, `:411`) | differs | `INV-04` |
+| Every open gap as a row | the server has `scope: 'all'` (`routers/approvals.ts:241`, `:323`); the desk asks for the viewer's own (DS3-04: `use-desk.ts:283`, `:420`) | differs | `INV-04` |
 | Groups by who decides | by invoice on `main`; by level on DS3-04 ("חוסמים תשלום", "אזהרות") | differs | `INV-04` · `waitingOn`, `canAct` on each row |
 | "ממתין לאחרים" | a count box (`messages/approvals/he.ts:29`; DS3-04: `queue.tsx:327`) | goes | `INV-04` |
 | The "why" line | the rule id is on every row; nothing prints it, and the stored rule strings use the retired word "הפרש" (`messages/approvals/he.ts:278-281`) | new | `INV-00` (`reason`, `passedOn` on the row; the words), `INV-04` |
@@ -725,7 +724,7 @@ focus stays inside and returns to the link. Its numbers come from `settings.effe
 | "הפרש" in three labels the desk shows | `summary.vat`, `amountLabel.vat`, `amountLabel.other` (`messages/approvals/he.ts:26`, `:124`, `:128`; DS3-04: `:28`, `:310`, `:314`) | becomes "פער", keys unchanged | `INV-04` |
 | Undo, the keys by physical key, the phone's one gap at a time | exist (DS3-04) | exist, kept | |
 | "הכול מטופל" | whenever the viewer's own queue is empty (DS3-04: `empty.tsx`) | differs | `INV-04` |
-| The decision as something a second screen mounts | a queue controller that writes `?sel=` on its page (DS3-04: `use-desk.ts:141-144`) | new | `INV-04`, slice 1 |
+| The decision as something a second screen mounts | a queue controller that writes `?sel=` on its page (DS3-04: `use-desk.ts:150-153`) | new | `INV-04`, slice 1 |
 
 Kept although the mock-up does not draw them: the bulk selection and "approve the whole invoice" on rows the
 viewer may decide, the filters, saved views and the CSV, the branch strip, the link to the pay run, and the
@@ -885,3 +884,12 @@ touched".
     "כי …". The approved pass-on phrase names the manager; `INV-00` proposes the bookkeeper's.
 19. **The button to the next gap when it is the bookkeeper's:** "לפער הבא, אצל הנהלת החשבונות" is five words
     and a button holds four. `INV-05` proposes a shorter label and does not ship the five-word one.
+20. **Two panes or one column, by the window's width.** The invoice screen is one column when the window is
+    narrower than 1024 px, so it is two panes at 1024 and at 1280 with the side menu open (section 4.1). If he
+    means the width of the content instead, section 4.1 and `INV-01`'s acceptance 1 change.
+21. **The pay run's five due sections go as headings.** Held invoices are grouped by who holds them, payable
+    ones are one table by due date, and each row keeps its due date and its notices (section 6.1). If he
+    wants the sections kept, section 6.1 and `INV-03`'s slices 6 and 9 change.
+22. **The percent in the price phrase.** He read "עליית מחיר של 10% ומעלה חוסמת תשלום" with 10. The packages
+    print the restaurant's own `tolerances.blockPricePercent` in its place, and only when the gap's own
+    percent is at or above it (section 2.2).

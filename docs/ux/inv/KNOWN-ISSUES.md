@@ -7,21 +7,22 @@ server field. **Where this file and the reference disagree, this file wins. Wher
 `SPEC.md` and the reference disagree, the code or the spec wins.** The list is not complete: check your own
 screen as you map it, and add what you find to your pull request.
 
-File and line citations are from `main@9dd26ef9`; "DS3-04:" means the finished desk branch at `be22850e`.
-Three things were run to write this folder: the partition check, a type check of the two merged bases and a
-trial of the empty message groups ("Not determined", at the end). Behaviour is read from the code.
+File and line citations are from `main@de5cfcf7` (`main` on 28.11.2026); "DS3-04:" means the finished desk
+branch at `a6be4080`. Three things were run to write this folder: the partition check, the gates of the merged
+bases and a trial of the empty message groups ("Not determined", at the end). Behaviour is read from the
+code.
 
 ## `main` moved after the proposal was drawn
 
 The proposal's "היום" pictures and sentences describe `main` at `9dc0b934`. The code maps were read at
-`83bda7d7`, and `main` was at `9dd26ef9` (135 commits later) when the folder was written. Inside this area
-`main` gained, among others: an allocation-number field for the invoice screen, a file that nothing mounted
-at `9dd26ef9` (`apps/web/app/dashboard/invoices/[invoiceId]/allocation-field.tsx`; pull request 341, merged
-after that commit, mounts it),
-"לא נספר" on a line whose receipt was closed without a count (`packages/api/src/routers/invoices.ts:469`), a
-helper for the desk's summary refresh (`apps/web/app/dashboard/approvals/summaryRefresh.ts`), and more payment
-methods in the pay run's selection. The approvals desk was rebuilt by DS3-04 on its own branch and is not on
-`main`. Start from current `main`, map your screen first, and build the difference only.
+`83bda7d7`, and this folder describes `main` at `de5cfcf7`, 181 commits later. Inside this area `main` gained,
+among others: an allocation-number field on the invoice screen
+(`apps/web/app/dashboard/invoices/[invoiceId]/allocation-field.tsx`, mounted in `[invoiceId]/page.tsx` by pull
+request 341), "לא נספר" on a line whose receipt was closed without a count
+(`packages/api/src/routers/invoices.ts:469`), a helper for the desk's summary refresh
+(`apps/web/app/dashboard/approvals/summaryRefresh.ts`), and more payment methods in the pay run's selection.
+The approvals desk was rebuilt by DS3-04 on its own branch and is not on `main`. Start from current `main`,
+map your screen first, and build the difference only.
 
 ## Every mock-up: demo shortcuts
 
@@ -177,9 +178,9 @@ methods in the pay run's selection. The approvals desk was rebuilt by DS3-04 on 
 - **Kept and not drawn:** the reading correction ("ערכו נתוני סריקה") and its automatic re-match, "לבדיקה",
   "לא נספר", "פתחו את המקור", the consolidated panel, the dock-price notes, the partial-load banner, the
   duplicate notice, the findings that sit on no line, the five origins of the back link. Where each sits in
-  the new screen is the first slice of `INV-01`. The allocation field is a case of its own: nothing mounted
-  it at `9dd26ef9`, pull request 341 mounts it and merged after that commit, and `INV-01` keeps that one
-  mount inside the payment block, adds none and never edits the file.
+  the new screen is the first slice of `INV-01`. The allocation field is a case of its own: it is mounted
+  on `main` (pull request 341), and `INV-01` moves that one mount into the payment block, unchanged, adds
+  none and never edits the file.
 - **Two things were left as they are in the reference, on purpose.** For about 60 px of scrolling the pinned
   amount lies over the card's buttons. And the whole-screen document covers the message with "ביטול" when it
   is opened inside its ten seconds: in the product the message must stay reachable for its whole window.
@@ -272,11 +273,11 @@ methods in the pay run's selection. The approvals desk was rebuilt by DS3-04 on 
 - **The export in the mock-up answers "בהדמיה לא נוצר קובץ".** The product's export stays, and nothing shows
   a history of exports.
 - **The home's "to pay" figure and this screen disagree** for an invoice that is held only for a missing
-  allocation number: the month's total behind the home never reads that hold
-  (`routers/payRun.ts:863-959`), and this screen's list does (`:707-709`). The fix is in a file no package of
-  this batch writes. Do not "fix" it on the screen, and do not compare the two figures in a spec. An
-  existing spec does compare them (`apps/web/e2e/W1-05.spec.ts:344-352`): it is not `INV-03`'s to change;
-  keep the payable total printed on the screen.
+  allocation number: the month's total behind the home never reads that hold (`routers/payRun.ts:863-959`),
+  and this screen's list does (`:707-709`). The fix is in a file no package of this batch writes, and it has a
+  pull request of its own, draft 384. Do not "fix" it on the screen, and do not compare the two figures in a
+  spec. An existing spec does compare them (`apps/web/e2e/W1-05.spec.ts:344-352`): it is not `INV-03`'s to
+  change; keep the payable total printed on the screen.
 - **No route-level loading file.** It was removed on purpose (`apps/web/scripts/check-soft-nav.mjs:193-196`).
 
 ## Limits of the data, to state and not to hide
@@ -293,14 +294,19 @@ methods in the pay run's selection. The approvals desk was rebuilt by DS3-04 on 
 
 ## Not determined
 
-- Whether the two merged bases pass the lint, the build and the suites. What was run, on 28.11.2026:
-  `main@9dd26ef9` merged with the components branch (`daec849e`) type-checks, and so does `main` merged with
-  the desk's branch (`be22850e`) with DS3-04's `approvals/list.tsx` kept (all 17 packages, and
-  `tsc --noEmit` of `apps/web`). Nothing else was run on either tree.
+- Whether `main` merged with the desk's branch passes the lint, the build and the suites. What was run, on
+  28.11.2026 (`WORKPLAN.md`, S10): `main@de5cfcf7` merged with the components branch (`daec849e`) passed the
+  install, the database migrate, the RLS provisioning and check, the type checks, the web lint, the test
+  suites except the worker's, and the web build, each with exit code 0; the worker's tests, the e2e specs, the
+  worker image and the dependency audit were not run on it. `main@9dd26ef9` merged with the desk's branch at
+  `be22850e`, with DS3-04's `approvals/list.tsx` kept, type-checks (all 17 packages, and `tsc --noEmit` of
+  `apps/web`); nothing else was run on that tree, and `INV-04` runs the desk's suites on its own merge
+  first.
 - The licence of any PDF library, and whether the real storage lets a script read a file.
 - Settled: empty message groups composed as `WORKPLAN.md`, S3, says pass the type check, the parity test, the
-  copy budget and the copy gate (tried on `main@9dd26ef9`).
-- The name of the switch-off key for deciding from the invoice screen (`decideOnInvoice` in `WORKPLAN.md`)
-  and whether the lead keeps the key; `INV-01` does not depend on either.
+  copy budget and the copy gate (tried on `main@9dd26ef9` merged with the components branch;
+  `messages/invoices/` and the tests the trial ran are unchanged at `de5cfcf7`).
+- Settled: the switch-off key for deciding from the invoice screen stays, named `decideOnInvoice` and on by
+  default (`WORKPLAN.md`, `INV-05`); `INV-01` does not depend on it.
 - Whether the home's pay-run figure makes an e2e spec red at month end: the cause is in the code; the spec was
-  not run.
+  not run. The fix is draft pull request 384, outside this batch.

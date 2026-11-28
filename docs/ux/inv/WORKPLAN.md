@@ -10,11 +10,13 @@ seams, the files given to nobody, the immutable list. `check-partition.cjs` chec
 this file and `packages.json` ever differ on an id, a branch, a base or a path, report the difference in your
 pull request; do not pick one.
 
-Paths are relative to the repository root. A file and line is from `main` at `9dd26ef9` (28.11.2026) unless it
-is marked "DS3-04:", which means the finished desk branch `claude/ds3-04-approvals-desk` at `be22850e`. Lines
-move; the names beside them do not. Three things behind this plan were run: the partition check, a type check
-of the two merged bases (S10) and a trial of the empty message groups (S3). Everything else is read from the
-code.
+Paths are relative to the repository root. A file and line is from `main` at `de5cfcf7` (`main` on
+28.11.2026) unless it is marked "DS3-04:", which means the finished desk branch
+`claude/ds3-04-approvals-desk` at `a6be4080`. Lines move; the names beside them do not. What was run behind
+this plan: the partition check; the gates of the merged bases and the trial of the desk's merge that S10
+lists; a trial of the empty message groups (S3); the product's copy guard on the one sentence two screens
+share ("Rules of the partition"); and the suites with and without the lab's environment (`README.md`, step
+6). Everything else is read from the code.
 
 ## The batch (opened 28.11.2026)
 
@@ -28,8 +30,12 @@ code.
 | `INV-05` | Deciding from the invoice screen | 3 | `claude/inv-05-decide-on-invoice` | `main` · `claude/inv-04-approvals-by-role`, `claude/inv-01-invoice-screen` | `claude/inv-04-approvals-by-role` |
 | `INV-06` | Optional: a PDF in the same viewer (opened only if the owner asks and a person can do the storage check) | 3, not opened by default | `claude/inv-06-pdf-viewer` | `main` · `claude/inv-01-invoice-screen` | `claude/inv-01-invoice-screen` |
 
-Owning agent of every package (`AGENTS.md`, "Ownership map"): `web-feature-engineer`. One seam lies outside
-that agent's paths, `packages/db/scripts/pilot-setup.ts`; `INV-05`'s section says why it is edited. Gates, as
+Owning agent of every package (`AGENTS.md`, "Ownership map"): `web-feature-engineer`. Test files, the
+coverage fragment and `INV-00`'s attack file follow the product's own rule for a package
+(`packages/api/src/__tests__/coverage/README.md`: a package writes its fragment and its own
+`*.attack.test.ts`); `test-sentinel` and `tenant-security-warden`, whose paths they are in the map, review
+them as gates. One seam lies outside that agent's paths, `packages/db/scripts/pilot-setup.ts`; `INV-05`'s
+section says why it is edited. Gates, as
 `packages.json` lists them: `test-sentinel` and `icp-keeper` on every package; `tenant-security-warden` on
 `INV-00` (routers), `INV-05` (a second screen that sends money decisions) and `INV-06` (a supplier's file
 parsed in the product's own origin); `money-format-marshal` on `INV-00` (its words module prints ₪ inside a
@@ -37,19 +43,21 @@ phrase) and on `INV-01` to `INV-05`; `rtl-design-steward` on `INV-01` to `INV-06
 
 ### The waves
 
-- **Wave 1: `INV-00`, then `INV-01`.** `INV-00` pushes its contract first (its slice 0: the types, the
-  shapes, the S3 commit and the role words). The lead opens `INV-01` once that commit is on
-  `claude/inv-00-server-reads`, so that `INV-01` compiles against the branch from its first hour. `INV-01`
-  never creates `apps/web/lib/i18n/messages/invoices/screen.ts` and never edits
+- **Wave 1: `INV-00`, then `INV-01`.** `INV-00` opens first, alone, and pushes its contract first (its
+  slice 0: the new procedures and fields registered with their final types, the types module, the signatures
+  of the shared modules, the S3 commit and the role words). The lead opens `INV-01` once that commit
+  is on `claude/inv-00-server-reads`, so that `INV-01` compiles against the branch from its first hour.
+  `INV-01` never creates `apps/web/lib/i18n/messages/invoices/screen.ts` and never edits
   `apps/web/lib/i18n/messages/invoices/index.ts`; its section says what it does if it was opened before the
   commit exists.
-- **Wave 2: `INV-02`, `INV-03`, `INV-04`.** The lead opens it. What the code needs is that `INV-00` has pushed
-  its contract. `INV-04` sits on DS3-04, which is finished (`be22850e`, 28.11.2026 08:26 UTC). Its slices 0
-  and 1 need nothing from `INV-00`, and its slice 2 needs only the role words of the contract commit; the lead
-  may open it with wave 1, which brings `INV-05` forward.
+- **Wave 2: `INV-02`, `INV-03`, `INV-04`.** The lead opens `INV-04` together with `INV-01`, on `INV-00`'s
+  contract commit. It is brought forward on purpose: DS3-04 is finished (`a6be4080`, 28.11.2026),
+  `INV-04`'s slices 0 and 1 need nothing from `INV-00`, its slice 2 needs only the role words of the contract
+  commit, and its slice 1 is what `INV-05` waits for. `INV-02` and `INV-03` open when `INV-00` has pushed the
+  reads they need; each section names them.
 - **Wave 3: `INV-05`** opens when slice 1 of `INV-04` is pushed and `INV-01`'s branch has the gap card and
-  `gap-actions.tsx` with the interface S7 fixes. **`INV-06`** is not opened unless the owner asks for it and
-  a person can do its third check.
+  `gap-actions.tsx` with the interface S7 fixes. **`INV-06`** is not opened; it would need the owner to ask
+  for it and a person who can do its third check.
 
 **One change against the plan the owner was told.** The owner was told two waves: the server reads and the
 invoice screen, then the list, the pay run and approvals by role. That stands. One part moves: the decision
@@ -58,8 +66,8 @@ in the code. On `main` the desk's decisions, reasons and undo are inside one cli
 (`apps/web/app/dashboard/approvals/list.tsx`: `UNDO_MS` at `:72`, the six mutations at `:163-168`); a second
 screen cannot mount it, and a copy would be a second implementation of a money decision. On the finished desk
 they are separate files, but the controller is a queue controller: it reads `approvals.myQueue` with no
-`scope`, so only the viewer's own queue (DS3-04: `use-desk.ts:274`, `:411`; `page.tsx:68`), it writes `?sel=`
-on the page that mounts it (DS3-04: `use-desk.ts:141-144`), and the bar has no read-only form (DS3-04:
+`scope`, so only the viewer's own queue (DS3-04: `use-desk.ts:283`, `:420`; `page.tsx:68`), it writes `?sel=`
+on the page that mounts it (DS3-04: `use-desk.ts:150-153`), and the bar has no read-only form (DS3-04:
 `decision-bar.tsx:48`). Those gaps are what approvals by role builds. Until `INV-05` lands, the invoice screen
 keeps what it has today: one button that opens the desk on this invoice
 (`apps/web/app/dashboard/invoices/[invoiceId]/cockpit.tsx:415-417`, test id `cockpit-decide`).
@@ -76,7 +84,7 @@ keeps what it has today: one button that opens the desk on this invoice
 | 6 · any open gap holds the invoice | No change: it is so today (`packages/api/src/routers/payRun.ts:197-204`). `INV-03` says it in words |
 | 7 · step one: the document beside the data, and "חפשו במסמך" | `INV-01`. Step two is not in this batch |
 | Small: no colour for an old gap | Nobody adds one |
-| Small: the percent base stated on the settings screen | In no boundary: the settings screen is DS3-06's (pull request 353). `INV-04` states the base in the card "מי מחליט על מה". The sentence on the settings screen is a request to DS3-06, sent by the lead when wave 2 opens, with the card's own sentence: "הסכומים לפני מע״מ, והאחוז מסכום החשבונית כולל מע״מ." If 353 merges without it, one follow-up pull request adds it (`README.md`, "Needs a human change") |
+| Small: the percent base stated on the settings screen | In no boundary: the settings screen is DS3-06's (pull request 353). `INV-04` states the base in the card "מי מחליט על מה". The sentence on the settings screen is a request to DS3-06, sent by the lead when `INV-02` and `INV-03` open, with the card's own sentence: "הסכומים לפני מע״מ, והאחוז מסכום החשבונית כולל מע״מ." It is printed from the key `INV-04` adds in `messages/approvals`, never written a second time: the copy guard fails the same text in two keys. If 353 merges without it, one follow-up pull request adds it (`README.md`, "Needs a human change") |
 | Kept | "בקשת זיכוי · ₪amount" (`INV-04`, `INV-05`), the solid pill "חוסם תשלום" and the tinted row (`INV-01`, `INV-02`, `INV-04`) |
 
 ### Rules of the partition
@@ -104,8 +112,8 @@ keeps what it has today: one button that opens the desk on this invoice
   its pull request under "Requests to other packages". Every router change brings the tenant-security gate; a
   new procedure comes with its line in the coverage fragment and its attack case in the same commit.
 - **`packages/api/src/routers/payRun.ts` has no writer in this batch.** Decision 6 needs no change there, and
-  pull requests 369, 374, 190 and 380 are open on it. What the pay run screen lacks comes from a new read in
-  `routers/invoices.ts`.
+  pull requests 369, 374, 190, 380 and 384 are open on it. What the pay run screen lacks comes from a new read
+  in `routers/invoices.ts`.
 - **One decision.** The actions, the reasons, the undo and their timing exist once, in the approvals folder.
   `INV-05` mounts them and copies none. A decision from the invoice screen calls the same procedure with the
   same input as the desk. Who may decide what is answered by the server and by `canAct` on the queue row
@@ -113,7 +121,13 @@ keeps what it has today: one button that opens the desk on this invoice
 - **Facts and words come from `INV-00`.** A screen does not compute who holds an invoice, since when, why,
   whether it can be paid, or which place it is in, and does not write its own role words or rule phrases. The
   copy guard fails the same text in two keys (`apps/web/lib/copy/guard.ts:86-97`), so a rule's phrase cannot
-  be written once per screen.
+  be written once per screen. The guard compares every text of six words or more, punctuation aside
+  (`guard.ts:28`, `:60-66`; `apps/web/lib/copy/words.ts:87-89`), across all message areas, and it runs in the
+  blocking web unit suite (`apps/web/lib/copy/__tests__/copy-budget.test.ts:101-112`). So **a sentence of six
+  words or more that two screens print is `INV-00`'s**, one key in `gap.ts`: written once per screen, each
+  pull request is green alone and the second one to land turns `main` red. The one such sentence in the
+  reference is "השיוך לתעודות המשלוח עוד לא פעיל" (the list's cell and the pay run's note; `INV-00`,
+  `words.ts`). A screen that finds another asks `INV-00` for the key.
 - **Messages and languages.** Hebrew and English in the same commit, for every key. The areas of this batch
   (`invoices`, `payRun`, `approvals`) have no receiver-language overlays, so nothing is needed in ar, ru, th
   or ti; no string of the batch is added to an area receivers see. No new message area
@@ -121,8 +135,8 @@ keeps what it has today: one button that opens the desk on this invoice
   both languages, composed once (seam S3). In `messages/approvals` the groups `types`, `severity`,
   `resolution`, `decision`, `rules` and `tolerance` and the exports of
   `apps/web/app/dashboard/approvals/vocab.ts` keep their keys: about twenty files outside the area read them
-  (21 on `main@9dd26ef9`, test files aside), among them the invoice screen
-  (`apps/web/app/dashboard/invoices/[invoiceId]/page.tsx:18`, `:175-177`). Role words are "בעלים", "ניהול",
+  (21 on `main` at `de5cfcf7`, test files aside), among them the invoice screen
+  (`apps/web/app/dashboard/invoices/[invoiceId]/page.tsx:18`, `:176-178`). Role words are "בעלים", "ניהול",
   "הנהלת חשבונות", taken from the message files, never from `apps/web/lib/roles.ts`. The copy guard and the
   allow-list stay as they are: meet them, do not loosen them.
 - **Shared guard files** (`apps/web/lib/copy/screens.ts`, `apps/web/e2e/ia/screens.ts`,
@@ -167,7 +181,8 @@ keeps what it has today: one button that opens the desk on this invoice
 - **No new page, so no nav registry line.** The four screens are routes that exist.
 - **e2e specs.** One spec per screen package, `apps/web/e2e/INV-0N.spec.ts` (and `INV-0N-*.spec.ts` where
   `packages.json` lists it), with its own axe run; `INV-00` has none. Evidence screenshots go to
-  `apps/web/e2e/__screenshots__/INV-0N/`.
+  `apps/web/e2e/__screenshots__/INV-0N/`, `INV-00`'s too: it changes no screen and shows that with before
+  and after pictures.
   - **One database, one run.** The suite is one database, seeded once, and one run in file-name order
     (`apps/web/playwright.config.ts:44-47`; `apps/web/e2e/run-sharded.mjs:18-21`): `INV-0N.spec.ts` runs
     after the `AU-*`, `DS3-*`, `G-*` and `IA-*` specs and before every `W*` spec, `demo-path`, `pilot*` and
@@ -201,14 +216,14 @@ keeps what it has today: one button that opens the desk on this invoice
   merged; a screen package stays a draft stacked on the components branch, and nobody merges it into that
   branch (it would put invoices work into the components pull request). `INV-04` and `INV-05` stay stacked on
   347.
-- **Start from current main.** `main` moved 135 commits past the snapshot the area was mapped on. Inside the
-  boundaries it added `[invoiceId]/allocation-field.tsx` (pull request 306; a file that nothing mounts yet),
-  "לא נספר" in `cockpit.tsx` and `routers/invoices.ts` (371), `approvals/summaryRefresh.ts` and a changed
-  `approvals/list.tsx` (360), a line in `pay-run/selection.tsx` and `messages/payRun` (355). A session that
-  starts from an older commit merges `main` before its first slice. `main` kept moving while this folder was
-  corrected: at `de5cfcf7` (28.11.2026, 10:18 UTC) it also holds pull request 341, which mounts the allocation
-  field in `[invoiceId]/page.tsx` and adds the spec `apps/web/e2e/AU-08-cockpit.spec.ts`, and pull request
-  364, the re-match when a draft order is sent. The partition check passes on that commit too.
+- **Start from current main.** This folder describes `main` at `de5cfcf7` (28.11.2026), 181 commits past
+  the snapshot the area was mapped on (`83bda7d7`). Since that snapshot `main` added, inside the boundaries:
+  `[invoiceId]/allocation-field.tsx` (pull request 306) and its mount in `[invoiceId]/page.tsx`, with the
+  spec `apps/web/e2e/AU-08-cockpit.spec.ts` (341); "לא נספר" in `cockpit.tsx` and `routers/invoices.ts`
+  (371); `approvals/summaryRefresh.ts` and a changed `approvals/list.tsx` (360); a line in
+  `pay-run/selection.tsx` and `messages/payRun` (355). Outside them it added the re-match when a draft order
+  is sent (364). The partition check passes on `de5cfcf7`. A session starts from `main` as it is on its day;
+  one that starts from an older commit merges `main` before its first slice.
 - **Nothing of step two**: no stored position, no mark, no link between a row and a place on the document,
   and never the mock-up's state "עם סימון".
 - **Files given to nobody** (`packages.json`, `nobody`): among them `routers/payRun.ts`,
@@ -241,9 +256,12 @@ keeps what it has today: one button that opens the desk on this invoice
 and `:294`, and the first line of the returned object at `:341`. The two merge without a conflict today.
 `INV-00` adds no select field to `myQueue`: its two row facts
 (`reason`, `passedOn`) are loaded by its own helper from the row ids and added after `waitingOn` (`:346`),
-five lines below DS3-04's changed line. Its summary fields go into the return of `computeQueueSummary`
-(`:1301-1315`). Its new procedure goes after `history` (`:606-634`). It leaves `claimsByRow` (`:1167`,
-rewritten by pull request 369) alone. Whoever lands second has at most a mechanical merge.
+five lines below DS3-04's changed line. Its summary fields go at the end of the object `computeQueueSummary`
+returns (`:1301-1315`). Its new procedure goes after `history` (`:606-634`). It leaves `claimsByRow` (`:1167`,
+rewritten by pull request 369) alone. Two open drafts edit the same two objects: 369 rewrites `claimable`
+and `claimAgorot` (`:342-343`) and adds `claimed` before `canAct`, and 190 adds `pageHeld` after `toReview`
+(`:1309`). Neither touches the lines `INV-00` adds after, so whoever lands second has at most a mechanical
+merge.
 
 **S2 · the shared words.** New folder `apps/web/lib/invoices/**` and new file
 `apps/web/lib/i18n/messages/invoices/gap.ts`, both `INV-00`'s. Pure functions, no component, no DS3 import.
@@ -256,8 +274,9 @@ languages (`dsHe`, `dsEn`) under one group key.
   `gap.ts`), `screen` (`screen.ts`), `list` (`list.ts`), `decide` (`decide.ts`). It creates the last three
   with an empty Hebrew and an empty English object (`screenHe`, `screenEn`; `listHe`, `listEn`; `decideHe`,
   `decideEn`) and never opens them again. Nobody edits `index.ts` after that commit. Empty groups composed
-  this way pass the type check, the parity test, the copy budget and the copy gate (tried on
-  `main@9dd26ef9`, 28.11.2026).
+  this way pass the type check, the parity test, the copy budget and the copy gate (tried on 28.11.2026 on
+  `main@9dd26ef9` merged with the components branch; `messages/invoices/` and the tests the trial ran are
+  unchanged at `de5cfcf7`).
 - `screen.ts`: owner `INV-01`. `list.ts`: owner `INV-02`. `decide.ts`: owner `INV-05`. Each is created by
   `INV-00` and by nobody else: an owner whose base does not hold the file yet fetches and merges
   `claude/inv-00-server-reads` before its first string, and never creates the file itself.
@@ -271,7 +290,7 @@ languages (`dsHe`, `dsEn`) under one group key.
     `apps/web/lib/invoices/state.ts` reads the key and holds no word;
   - the key `cockpit.backToInvoice` (read by `apps/web/app/scans/[invoiceId]/page.tsx:63`);
   - in `needsLines`: `heldTitle`, `heldTitleReadOnly`, `supplierDetails` (`he.ts:112-114`) and `held.*`
-    (`he.ts:92-111`). The invoice screen draws them (`[invoiceId]/page.tsx:213`, `:217`, `:228`) and the list
+    (`he.ts:92-111`). The invoice screen draws them (`[invoiceId]/page.tsx:214`, `:218`, `:229`) and the list
     draws `held.*` too (`(register)/page.tsx:116`); their Hebrew is pinned by
     `apps/web/e2e/pilot-unread-invoices.spec.ts:102`, `:106-107`, `:117` and by
     `apps/web/app/dashboard/invoices/__tests__/hold-reasons.test.ts:34-36`. The keys are type-checked
@@ -287,7 +306,7 @@ Three parts, one owner each:
 - the rows: `INV-00` keeps `tab`, `hasAllocation`, `state` and `counts` as they are and adds `place` per row;
 - the places, their order and the list the keys walk: `apps/web/lib/invoices/places.ts` (`INV-00`), one module
   used by the list and by the invoice screen;
-- the address: `from` (five origins, `[invoiceId]/page.tsx:44`), `month`, and **one** parameter `view`. `view`
+- the address: `from` (five origins, `[invoiceId]/page.tsx:45`), `month`, and **one** parameter `view`. `view`
   takes a place id or one of today's tab ids (`review`, `lines`, `awaiting`, `matched`, `held`, `paid`,
   `noAllocation`, `intake`); the module resolves an old id to the places it covered. `INV-01` owns the reader
   on the invoice screen and builds it in wave 1; `INV-02` writes place ids on its links in wave 2. The old
@@ -302,43 +321,98 @@ hold `INV-01`'s change.
 **S6 · `apps/web/e2e/W2-02.spec.ts`.** One serial file (`:20`): three list tests (`:118`, `:223`, `:316`),
 three invoice-screen tests (`:150`, `:171`, `:190`), two inbox tests (`:245`, `:281`), one chef test (`:304`).
 Owner `INV-01`, the first package that changes it on purpose. `INV-02` may change only the three tests whose
-title starts with "register"; `INV-05` only the `cockpit-decide` assertions inside the test at `:150`. Nobody
-changes the helpers at `:1-117`, the inbox tests or the chef test.
+title starts with "register"; `INV-05` only the assertions on `cockpit-decide` in the invoice-screen test
+`INV-01` leaves (it starts at `:150` on `main`, and `INV-01` rewrites it first, so neither the line nor the
+assertion's text is the one of `main`). Nobody changes the helpers at `:1-117`, the inbox tests or the chef
+test. The list test at `:118` ends on the invoice screen and reads the test ids `cockpit-title` and
+`cockpit-back` there (`:144-145`): `INV-01` keeps both test ids and does not edit that test, which is
+`INV-02`'s to rewrite.
+
+**`apps/web/e2e/INV-01.spec.ts`** is `INV-01`'s, and it asserts the screen of wave 1: a button to the desk
+and no decision control (`INV-01`, acceptance 14). `INV-05`'s key is on by default, and a default-on key is
+on for every restaurant that has not stored `false` (`packages/api/src/lib/features.ts:84`), so on
+`INV-05`'s branch and on `main` after it those assertions would be red. `INV-05` has a seam there, and
+nowhere else in the file: the tests that expect the button to the desk, no decision
+control, or the copy numbers of the screen without the decision run with the restaurant's
+`features.decideOnInvoice` stored `false` (set with `e2eSql()` before them and put back after them, in that
+file), or are updated to the decision; each is named in the pull request. `INV-01` keeps those assertions in
+`INV-01.spec.ts` itself, not in an `INV-01-*.spec.ts` file, so that the seam finds them.
 
 **S7 · `apps/web/app/dashboard/invoices/[invoiceId]/gap-actions.tsx`** (new). Owner `INV-01`: one small
-client component, mounted for each gap of the screen in each of its four places: the card, the phone's dock,
-the foot of the whole-screen dialog, and the button of the pinned amount bar. In `INV-01` it renders the
-button "להחלטה" (to the desk, S8) for a role that may decide. For a role that may not, it renders the full
-sentence "ההחלטה אצל הבעלים, ואין צורך בפעולה מצדכם." (with the role's word) in the card and the short form
-"ההחלטה אצל הבעלים." at the foot of the whole-screen dialog; the phone's dock is absent for that role. In the
-pinned bar it renders, in `INV-01`, the quiet button "לפרטי הפער" for every role, which takes the pane to its
-top (`SPEC.md` §2.2, §4.4, §4.5).
+client component behind every place where the screen acts on a gap. It has five slots:
+- `card`: mounted once in every gap card, a decided gap's included;
+- `dock` (the phone's dock), `dialog` (the foot of the whole-screen dialog) and `bar` (the button of the
+  pinned amount bar): each exists once per screen, so each is mounted once, for the screen's **current gap**:
+  the invoice's `holding.decideGapId` when it is not `null`, else its leading gap, else (no gap is open) its
+  last decided gap (`SPEC.md` §8, point 11);
+- `message`: mounted for no gap, where a message about a decision stands (below).
 
-**Its interface is fixed in wave 1, because it is the only file of the screen `INV-05` changes.** A
-restaurant's features are read on the server only (`apps/web/lib/ingest/features.ts:1`, read at
-`[invoiceId]/page.tsx:89`), and this is a client component inside the client `Cockpit`
-(`[invoiceId]/cockpit.tsx:1`), so everything `INV-05` needs reaches it as props. `INV-01` builds these, under
-these names, and threads them from `[invoiceId]/page.tsx` through `Cockpit` to every mount:
+In `INV-01` it renders the button "להחלטה" (to the desk, S8) for a role that may decide. For a role that may
+not, it renders the full sentence "ההחלטה אצל הבעלים, ואין צורך בפעולה מצדכם." (with the role's word) in the
+card and the short form "ההחלטה אצל הבעלים." at the foot of the whole-screen dialog; the phone's dock is
+absent for that role. In the pinned bar it renders, in `INV-01`, the quiet button "לפרטי הפער" for every
+role, which takes the pane to its top (`SPEC.md` §2.2, §4.4, §4.5). For a decided gap it renders nothing in
+`card` and `dialog` in `INV-01` (the card and the dialog's foot draw the result themselves), and in `message`
+it renders an empty element.
+
+**Its interface is fixed in wave 1, because it is the only file of the screen `INV-05` changes.** It is a
+client component inside the client `Cockpit` (`[invoiceId]/cockpit.tsx:1`), and what `INV-05` needs from the
+screen reaches it as five props. `INV-01` builds these, under these names, and threads them from
+`[invoiceId]/page.tsx` through `Cockpit` to every mount:
 
 | Prop | What it carries |
 | --- | --- |
-| `gap` | The gap's row of `approvals.myQueue({ scope: 'all', invoiceIds })`, or `null` once the gap is decided |
-| `decided` | The decided finding's result from `invoices.detail`, or `null` while the gap is open |
-| `slot` | `'card'`, `'dock'`, `'dialog'` or `'bar'` (the button of the pinned amount bar) |
-| `features` | The array `enabledFeatures()` returns at `[invoiceId]/page.tsx:89`, passed down as plain strings |
-| `screen` | `{ closeDialog(), toTop(), refresh(), holdStep(on) }`: close the whole-screen dialog; take the data pane to its top and put the focus on a control in sight; read the card, the history and the payment block again; hold and release the stepping between invoices |
+| `gap` | The gap's row of `approvals.myQueue({ scope: 'all', invoiceIds })`; `null` once the gap is decided, and in the slot `message` |
+| `decided` | The decided finding's result from `invoices.detail`; `null` while the gap is open, and in the slot `message` |
+| `slot` | `'card'`, `'dock'`, `'dialog'`, `'bar'` or `'message'` |
+| `features` | The array `enabledFeatures()` returns at `[invoiceId]/page.tsx:90`, passed down as plain strings (the function itself is server-only, `apps/web/lib/ingest/features.ts:1`) |
+| `screen` | `{ closeDialog(), toTop(focus?), refresh(), holdStep(on), hideDock(on), say(text) }`, each described below |
 
-`INV-01` mounts the component for every gap of the screen, a decided one included (in the card, the dock and
-the dialog it renders nothing there in `INV-01`), keeps one empty, named place for a message above the
-phone's dock, and makes its `[` / `]` handler and its previous and next buttons do nothing while
-`holdStep(true)` is in force. `INV-01` passes all five props and itself reads only `gap`, `decided` and
-`slot`.
+The members of `screen`:
+- `closeDialog()` closes the whole-screen dialog.
+- `toTop(focus?)` takes the data pane to its top and puts the focus on the element it is given, or on the
+  current gap's card when it is given none.
+- `refresh()` reads the cards, the history, the state word and the payment block again. It returns a promise
+  that settles when they are drawn. Every call starts a request of its own: it cancels one in flight and
+  never joins it, and only the last call's answer is shown (the two rules of `main`'s
+  `apps/web/app/dashboard/approvals/summaryRefresh.ts:1-12`, the lesson of pull request 360).
+- `holdStep(on)` holds and releases the stepping between invoices: while it is on, the `[` / `]` handler and
+  the previous and next buttons do nothing.
+- `hideDock(on)` removes the phone's dock with its caption, and puts it back. The dock and its caption are
+  `INV-01`'s, and the reasons question, during which the dock is absent (`SPEC.md` §4.5), is `INV-05`'s.
+- `say(text)` speaks a line through the screen's one announcer (`SPEC.md` §2.6), which is `INV-01`'s.
 
-Seam for `INV-05`: one import and one branch in that file. The branch mounts, from `[invoiceId]/decide/`, the
-decision in place of the button, the button to the next gap on a decided gap, the undo message, and in the
-pinned bar the button "להחלטה" (named "להחלטה על הפער") for a gap the viewer may decide. It reads the
-switch-off key `decideOnInvoice` from the `features` prop: with the key absent, the button to the desk stays.
-`INV-05` changes no other file of the screen; something missing in the interface is a request to `INV-01`.
+**The viewer's role is not a prop.** A client component under `/dashboard` reads it with `useNavViewer()`
+(`apps/web/lib/nav/NavProvider.tsx:28`; `role` and `features`, `apps/web/lib/nav/types.ts:86-92`; the
+dashboard layout provides it, `apps/web/app/dashboard/layout.tsx:154`, `:169`). The hook is read, never
+edited: `apps/web/lib/nav/**` is nobody's. `INV-05` hands the role to the exported decision (S9).
+
+**The slot `message`** gives `INV-05` a place for the undo message and the pass-on sheet, which belong to no
+one card and must outlive the dock and the dialog. `INV-01` mounts it, with `gap` and `decided` both `null`,
+in three places: on a phone directly above the dock (above the bottom bar when there is no dock); at a desk
+at the foot of the data pane; and inside the whole-screen dialog, above its foot. The first two are the same
+place in two layouts, so one of them is mounted at a time; the third is mounted while the dialog is open.
+
+**Test ids, fixed in wave 1.** The component's root carries `data-testid="gap-actions"`, `data-slot` and,
+for a gap, `data-gap` with the gap's id. The button to the desk keeps today's `cockpit-decide`
+(`[invoiceId]/cockpit.tsx:417`) in the slot `card`, one per card, and is `cockpit-decide-dock` and
+`cockpit-decide-dialog` in those two slots. The read-only sentence is `gap-readonly`, and the bar's button
+`gap-bar-button`. An invoice with several gaps the viewer may decide has several `cockpit-decide`: a spec
+picks one by its card. The assertions on `cockpit-decide` in `apps/web/e2e/W2-02.spec.ts` (`:156-158` on
+`main`) and `INV-05`'s seam there (S6) keep their subject.
+
+`INV-01` passes all five props to every mount and itself reads only `gap`, `decided` and `slot`. Its unit
+test mounts the component in each slot and proves each member of `screen`.
+
+Seam for `INV-05`: one import and one branch in that file. The branch asks `[invoiceId]/decide/` whether it
+takes the mount (the key is on, and the slot and the gap are ones it draws) and, when it does, returns
+`INV-05`'s component with the five props unchanged; otherwise `INV-01`'s rendering stays. `INV-05` draws: in
+`card`, `dock` and `dialog` the decision in place of the button to the desk, for a gap the viewer may decide;
+in `card` the button to the next gap on a decided gap; in `bar` the button "להחלטה" (named "להחלטה על הפער")
+for a gap the viewer may decide; in `message` the undo message and the pass-on sheet. It reads the
+switch-off key `decideOnInvoice` from the `features` prop: with the key absent, the button to the desk stays
+everywhere. `INV-05` changes no other file of the screen; something missing in the interface is a request to
+`INV-01`.
 
 **S8 · the desk's address.** `/dashboard/approvals?invoice=<invoiceId>&sel=<gapId>`. `?invoice=` narrows the
 queue to one invoice today (`apps/web/app/dashboard/approvals/page.tsx:45-47`); `?sel=` picks one gap (`main`:
@@ -358,47 +432,88 @@ decided the desk shows the filtered note (DS3-04: `approvals/page.tsx:156-157`),
 are open elsewhere.
 
 **S9 · what `INV-04` exports for `INV-05`.** One entry file,
-`apps/web/app/dashboard/approvals/gap-decision/index.ts`, inside `INV-04`'s boundary: a controller for one gap
-on the desk's own pure builders (DS3-04: `desk-state.ts:317-337` `approveInput`, `rejectInput`,
-`escalateInput`; `:360-369` `decisionCall`; `:377-383` `reopenCall`; `failureOutcome`) and the windows of
-`undo-window.ts`; the two buttons in a layout that sits inside a card and in a docked bar; the reasons
-question; the pass-on sheet; the undo message; the read-only sentence; the `blocked` state pull request 190
-needs. It reads `scope: 'all'` and writes nothing to the address of the page that mounts it. `INV-05` imports
-from this file only.
+`apps/web/app/dashboard/approvals/gap-decision/index.ts`, inside `INV-04`'s boundary. `INV-05` imports from
+this file only.
+- **Slice 1 exports the working parts:** a controller for one gap on the desk's own pure builders (DS3-04:
+  `desk-state.ts:317-337` `approveInput`, `rejectInput`, `escalateInput`; `:360-369` `decisionCall`;
+  `:377-383` `reopenCall`; `failureOutcome`) and the windows of `undo-window.ts`; the two buttons in a layout
+  that sits inside a card and in a docked bar; the reasons question; the pass-on sheet; the undo message; the
+  `blocked` state pull request 190 needs; and the order of "the next gap the viewer may decide" as one pure
+  function (own routing first, blocking before warning, the longest wait first), the one the desk itself
+  uses after a decision. `INV-05` opens on slice 1.
+- **The read-only sentence joins the same entry file in slice 3,** from `INV-00`'s words (`INV-00`'s slice
+  4). The invoice screen does not wait for it: `INV-01`'s `gap-actions.tsx` prints that sentence itself (S7).
+- **Inputs.** The gap's queue row, given and never fetched: the invoice screen passes the `gap` prop of S7,
+  and the desk's single-invoice route passes the rows its page reads with `scope: 'all'`. The viewer's role.
+  The host's callbacks `onDecided`, `onUndone`, `onFailed` and `onAsk(open)`.
+- **One state for several views.** The state of one gap's decision (in flight, asking, the undo, a refusal)
+  lives outside the views, keyed by the gap's id, so that the buttons in a card, in a dock and at a dialog's
+  foot and the undo message, mounted in separate places, show one state: a press of "שלמו כפי שחויב" in the
+  dock opens the question in the card, and the undo outlives the dock and the dialog. The desk's controller
+  holds all of it in one hook today (DS3-04: `use-desk.ts:92-93`), which a mount per place would multiply.
+- **Nothing in it reads or writes the host's page:** not the address (the desk's controller writes `?sel=`,
+  DS3-04: `use-desk.ts:150-153`), not the queue's paging (`:283`, `:420`), not `queueSummary` (`:113-123`,
+  `:192`, `:239`).
+- **The message's words** are the desk's own, "{verb} · {amount} {basis}" (DS3-04:
+  `messages/approvals/he.ts:284`). The desk's line after an undo, "ההחלטה בוטלה · הפער חזר לתור" (`:370`),
+  names the queue: the export gives a host that has no queue the line without "הפער חזר לתור"
+  (`KNOWN-ISSUES.md`, "Approvals by role").
 
 **S10 · the bases.**
-- `claude/ds3-01-components` (`daec849e`) merges with current `main` without a textual conflict. **Asked of
-  the DS3-01 session, or done by the lead, before wave 1 opens: merge current `main` into
-  `claude/ds3-01-components`** and run the three blocking jobs on the merged tree. The merged tree
-  type-checks (all 17 packages, and `tsc --noEmit` of `apps/web`, 28.11.2026); the lint, the build and the
-  suites were not run on it. Then a stacked pull request shows `INV-00`'s files and its own. If it is not
-  done, the screen session's own merge of `main` makes its pull request also show `main` since `9dc0b934`;
-  its first line says so.
-- `claude/ds3-04-approvals-desk` (`be22850e`) has one conflict with current `main`:
+- **The clean finish.** `claude/ds3-01-components` (`daec849e`) merges with `main` at `de5cfcf7` without a
+  conflict (`git merge-tree`, 28.11.2026). The DS3-00 and DS3-01 sessions are finished, and their pull
+  requests (346, 345) wait for the owner's merge. Nobody merges `main` into `claude/ds3-01-components` for
+  this batch, and no `INV` session pushes to it. So every `INV` session that needs the clean finish starts
+  from `main` and merges `origin/claude/ds3-01-components` itself. Three things follow for every stacked
+  package:
+  - **The diff.** Until pull requests 346 and 345 are merged, the diff view of a stacked `INV` pull request
+    also shows what `main` gained since `9dc0b934`, the commit the components branch left `main` at. The
+    first line of the pull request says so. The session's own files are the ones
+    `check-partition.cjs --changed INV-0N` prints.
+  - **What was run on the merged tree** (`main` with the components branch), 28.11.2026. At `main@9dd26ef9`:
+    the type check of all 17 packages and `tsc --noEmit` of `apps/web`. At `main@de5cfcf7`, in a local trial
+    of the lead on a scratch database, each step with exit code 0: the install, the database migrate, the RLS
+    provisioning and the RLS check, the type check of the packages, the web lint, the test suites
+    (`pnpm turbo run test --concurrency=1 --filter='!@restomatch/worker'`), the web type check and the web
+    build. Not run on it: the worker's tests, the e2e specs, the worker image and the dependency audit.
+  - **A red gate that comes from the merge of the two bases,** and not from the package's own files, is
+    reported in the pull request and under "Requests to other packages". The session does not fix a file
+    outside its boundary to make it green.
+- **The desk.** `claude/ds3-04-approvals-desk` (`a6be4080`) has one conflict with `main` at `de5cfcf7`:
   `apps/web/app/dashboard/approvals/list.tsx` (pull request 360 changed 24 lines of the file DS3-04 cut to 76
-  lines). **Asked of the DS3-04 session before `INV-04` opens: merge current `main` and resolve it.** The
-  resolution is known: keep DS3-04's `list.tsx`; keep `main`'s `approvals/summaryRefresh.ts` and its test; use
-  `makeSummaryRefresher` in DS3-04's `use-desk.ts:105-114`, where the same sequence guard still lives without
-  the cancel, and keep `holdSummary` working. With DS3-04's `list.tsx` kept, the merged tree type-checks (the
-  same two checks, 28.11.2026); the suites were not run on it. If it is not done when `INV-04` opens, `INV-04`
-  does this merge in its own branch as its first step (every file involved is inside its boundary) and says
-  so in the first line of its pull request. **Exactly one of the two happens, and the lead says which before
-  `INV-04` opens.** Once `INV-04` has done the merge, nobody merges `main` into `claude/ds3-04-approvals-desk`
-  before `INV-04` is merged, unless that merge repeats `INV-04`'s resolution of `list.tsx` and `use-desk.ts`
-  line for line; the lead tells the DS3-04 session. Otherwise `INV-04`'s next merge of its base conflicts
-  with its own earlier work.
+  lines). The DS3-04 session is finished and does not merge `main` into its branch. **`INV-04` does that
+  merge in its own branch, as its slice 0** (every file involved is inside its boundary), and says so in the
+  first line of its pull request. The resolution: keep DS3-04's `list.tsx`; keep `main`'s
+  `approvals/summaryRefresh.ts` and its test, both unchanged; and in `use-desk.ts` build the refresher once
+  (`useMemo` on `utils` and `filters`) with `makeSummaryRefresher({ cancel, fetch, apply })`, in place of the
+  block at DS3-04's `use-desk.ts:113-123`. On `a6be4080` that block already holds both rules of `main`'s
+  helper, written out in place: the sequence guard, and the cancel of the request in flight (DS3-04:
+  `use-desk.ts:117`). The comment above it (DS3-04: `use-desk.ts:102-112`) names the replacement and says
+  that `holdSummary` (DS3-04: `:127-129`) moves "a seq the refresher shares", and it ends with "see the PR",
+  which is not in this folder. `main`'s helper keeps its sequence inside a closure and hands none out
+  (`summaryRefresh.ts:22-34`), so `holdSummary` cannot move it. It moves a counter of the controller's own
+  instead: the refresher's `cancel` notes the counter when a refresh starts, and `apply` drops the result
+  when the counter has moved since. Tried that way on 28.11.2026, at `main@de5cfcf7` with the desk at
+  `a6be4080`: the merge has the one conflict named here; the type check of the 17 packages and of
+  `apps/web`, the web lint and `guards` exit 0; the web unit suite passes (226 files, 2,562 tests); the
+  desk's own unit tests pass (14 files, 317 tests), and so do `approvals-router`, `approvals-queue-fields`
+  and `approvals-scope` (64 tests). The full server suites, the web build and the e2e specs were not run on
+  that tree, so `INV-04` runs the desk's suites on its merge before anything else (its slice 0 names them).
+  Nobody merges `main` into `claude/ds3-04-approvals-desk` before `INV-04` is merged: `INV-04`'s next merge
+  of its base would conflict with its own earlier work.
 
 Everything else two packages need:
 
 | File | Owner | Seam |
 | --- | --- | --- |
-| `apps/web/app/dashboard/invoices/hold-reasons.ts` and its test | `INV-02` | `INV-01` imports `holdReasonKeys` (`[invoiceId]/page.tsx:26`) and does not edit; the exports are frozen |
+| `apps/web/app/dashboard/invoices/hold-reasons.ts` and its test | `INV-02` | `INV-01` imports `holdReasonKeys` (`[invoiceId]/page.tsx:27`) and does not edit; the exports are frozen |
 | `apps/web/lib/components/invoice/InvoiceScanViewer.tsx` | `INV-01` | `INV-06`: one lazy mount; the frame stays as the fallback |
-| `apps/web/e2e/pilot-unread-invoices.spec.ts` | nobody | Both screens keep what it reads. The list: `?view=lines` (`:49`, `:100`) and the test ids `register-lines-row` and `register-lines-reasons` (`:56`, `:101-103`). The invoice screen: the test ids `invoice-held-reasons` and `invoice-held-supplier-link` (`[invoiceId]/page.tsx:211`, `:225`), which `INV-01` keeps inside the payment block. The strings it pins are frozen (S3) |
-| `apps/web/e2e/W1-05.spec.ts` | nobody | `INV-04` has the seam (the desk's assertions). The test at `:277` reads the pay run at `:344-352`: `INV-03` keeps the payable total printed and edits nothing there |
+| `apps/web/e2e/pilot-unread-invoices.spec.ts` | nobody | Both screens keep what it reads. The list: `?view=lines` (`:49`, `:100`) and the test ids `register-lines-row` and `register-lines-reasons` (`:56`, `:101-103`). The invoice screen: the test ids `invoice-held-reasons` and `invoice-held-supplier-link` (`[invoiceId]/page.tsx:212`, `:226`), which `INV-01` keeps inside the payment block. The strings it pins are frozen (S3) |
+| `apps/web/e2e/W1-05.spec.ts` | nobody | `INV-04` has the seam (the desk's assertions). The test at `:277` reads the pay run at `:344-352` (`:346-354` once the desk's branch is merged in: it changed two lines above them): `INV-03` keeps the payable total printed and edits nothing there. The fix of the figure it compares is draft pull request 384 ("Not in this batch") |
+| `apps/web/e2e/INV-01.spec.ts` | `INV-01` | `INV-05`: only the tests that expect the button to the desk, no decision control, or the copy numbers of the screen without the decision (S6) |
 | `packages/api/src/index.ts` | nobody | `INV-00` adds no export there; the web derives the new types (`INV-00`, "The contract") |
 | `packages/api/src/routers/payRun.ts` | nobody | The pay run screen reads `invoices.holding`; the invoice screen reads `invoices.detail.payment` |
-| `packages/api/src/lib/features.ts`, `packages/db/scripts/pilot-setup.ts` | nobody | `INV-05`: the key `decideOnInvoice` in each, if the lead keeps the switch-off |
+| `packages/api/src/lib/features.ts`, `packages/db/scripts/pilot-setup.ts` | nobody | `INV-05`: the switch-off key `decideOnInvoice` in each, on by default |
 | `apps/web/package.json`, `pnpm-lock.yaml` | nobody | `INV-06` only |
 | `apps/web/lib/copy/screens.ts`, `apps/web/e2e/ia/screens.ts`, `apps/web/lib/copy/budget.allow.ts` | nobody | Each package its own rows, as "Shared guard files" says. `INV-01` and `INV-05` have no seam in `apps/web/lib/copy/screens.ts` |
 
@@ -438,6 +553,8 @@ reads them its new fields are unused. **Downstream: everyone.** Push the contrac
   id the pattern accepts and nobody uses will do, and the pull request says which.
 - new `apps/web/lib/invoices/**` (pure modules and their tests)
 - `apps/web/lib/i18n/messages/invoices/index.ts`; new `apps/web/lib/i18n/messages/invoices/gap.ts`
+- new `apps/web/e2e/__screenshots__/INV-00/**` (the before and after pictures of the four screens: this
+  package has no e2e spec, and its evidence still goes where `README.md`, step 7, puts it)
 
 **Reserved (beside the boundary, not yours).** `packages/api/src/routers/payRun.ts` ·
 `packages/api/src/invoices/state.ts` · `packages/api/src/approvals/**` · `packages/api/src/lib/roles.ts` ·
@@ -449,7 +566,9 @@ reads them its new fields are unused. **Downstream: everyone.** Push the contrac
 `apps/web/lib/i18n/messages/invoices/decide.ts` (owner `INV-05`), each with an empty Hebrew and an empty
 English object, and compose them in `index.ts`. Never opened again by `INV-00`.
 
-**Not yours.** `routers/payRun.ts`. `invoices/state.ts` (pull request 369 changes one line of it).
+**Not yours.** `routers/payRun.ts` and `invoices/state.ts`: pull requests 369, 190 and 384 edit both. 384
+(draft, `claude/w2-03-month-vat-hold`) is the fix of the home's pay-run total, which no package of this batch
+fixes ("Not in this batch").
 `approvals/{engine,awaiting,bulkPolicy,rebind,payApproval}.ts`: read and call `evaluateApproval`,
 `buildRules`, `resolveApprovalThresholds`, `awaitingDecisionDetail`; `engine.ts` is immutable. `match/**`,
 `vat/**`, `lifecycle/**`, `lib/{roles,claims,dueDate}.ts`. `__tests__/fixtures.ts` (pull request 237 edits it:
@@ -462,8 +581,11 @@ the retired word "הפרש" (`packages/api/src/approvals/engine.ts:195`, `:204`)
 their VAT basis kept apart.
 - `invoices.list`: per row `holding`, `lastDecision` (result, when, by which role, in whose place, amount,
   reason code, "it was you"; a gap the system closed is never one), `place`, `allocationMissing`, `payBy`;
-  per response `places[]` for the caller's role (count, Σ including VAT, Σ of open gaps before VAT), and a
-  new count of `allocationMissing` beside the old counts.
+  per response `places[]` for the caller's role (count, Σ including VAT, Σ of open gaps by VAT basis, as in
+  `holding`: a duplicate's amount includes VAT and a VAT mismatch is the VAT itself, so one "before VAT"
+  figure would be wrong for the place "אצל הנהלת החשבונות"), and a new count of `allocationMissing` beside
+  the old counts. That count is of the row flag; the card "חסר מספר הקצאה" is the place, which is narrower
+  (`INV-02`, slice 2).
 - **`holding`**, the same object wherever it is returned: the role, `mine`, `canAct`, `since`, the leading
   gap's id, `decideGapId`, the worst open severity, the count and ₪ of the open gaps by VAT basis, the
   reason, the pass-on.
@@ -492,13 +614,14 @@ their VAT basis kept apart.
   whether an open gap is the only thing holding it), `allocation` (required, the number, valid, missing, the
   VAT at risk), `payBy`, the order's sent date, and per finding its routing, its rule and since when for an
   undecided gap, and the result, when, the role, in whose place and the reason for a decided one.
-- New `invoices.holding({ invoiceIds })` (at most 200 ids): per id that is the caller's
-  `{ holding, lastDecision, consolidated }`; a foreign id is simply absent.
+- New `invoices.holding({ invoiceIds })` (at most 200 ids a call; the pay run, whose list has no upper
+  bound, asks in chunks): per id that is the caller's `{ holding, lastDecision, consolidated }`; a foreign id
+  is simply absent.
 - New `invoices.history({ invoiceId })`; a foreign id is NOT_FOUND.
 - `approvals.myQueue` rows gain `reason` and `passedOn`. `approvals.queueSummary` gains `byRouting` and
   `invoices`. New `approvals.decided({ period })`.
 - Every new field is null or absent for a caller without `money.view`: `invoices.detail` is open to the
-  receiver (`packages/api/src/trpc.ts:186-188`).
+  receiver (`packages/api/src/trpc.ts:216-218`).
 - Every existing field keeps its value: `invoices.list.tab`, `counts`, `counts.noAllocation`, `gapAgorot`,
   `hasAllocation`, `allocationRequired`, `allocationNumber`, `dueDate`; `invoices.detail.openCount`,
   `openGapAgorot`; the queue row's keys (the mobile app and `approvals-scope.test.ts` read them); the
@@ -511,19 +634,25 @@ their VAT basis kept apart.
   `buildRules` and `evaluateApproval` are already exported from the root (`packages/api/src/index.ts:132-133`),
   so the tests of the words need no new export.
 - **Not added:** `supplierSku` on the detail lines. The invoice page already loads `receiving.getInvoice`
-  (`[invoiceId]/page.tsx:91`), whose lines carry `id` and `supplierSku`
-  (`packages/api/src/routers/receiving.ts:635-639`).
+  (`[invoiceId]/page.tsx:92`), whose lines carry `id` and `supplierSku`
+  (`packages/api/src/routers/receiving.ts:636-640`).
 
 The web half, `apps/web/lib/invoices/**`, all pure:
 - `words.ts`: "אצלכם" / "אצל הבעלים" / "אצל הניהול" / "אצל הנהלת החשבונות"; the wait ("יום אחד", "יומיים",
   "N ימים", "מהיום" after a pass-on); the phrase of a rule; the full line (for example "אצלכם 10 ימים, כי חיוב
   על יותר ממה שהתקבל חוסם תשלום."); the result of a decision ("נוסף לבקשת הזיכוי", "שולם כפי שחויב"); "החלטתם
   במקום הניהול"; "ההחלטה אצל הבעלים, ואין צורך בפעולה מצדכם."; the role words in their three forms (בעלים ·
-  הבעלים · לבעלים). Every ₪ inside a phrase goes through the shared money format, never a hand-made one.
+  הבעלים · לבעלים); and the two lines of an invoice that waits to be linked, "מחכה לשיוך להזמנה" and, for a
+  consolidated invoice, "השיוך לתעודות המשלוח עוד לא פעיל" (one key each in `gap.ts`, with no full stop: the
+  list's cell and the pay run's note both print them, and the second is six words, which the copy guard
+  fails in two keys). Every ₪ inside a phrase goes through the shared money format, never a hand-made one.
 - `places.ts`: the place ids (the reference's are `r-owner`, `r-manager`, `r-bookkeeper`, `wait`, `alloc`,
-  `ok`, `paid`), the aliases of today's `view` values, the order of rows (the viewer's gaps, then others',
-  blocking before warning, the longest wait first; then waiting, clear, paid; newest first inside each), and
-  the list the keys `[` and `]` walk.
+  `ok`, `paid`; the place of a copy held as a duplicate has none there, and the contract commit names it),
+  the order of the places (the viewer's; the other roles'; `wait`; the held duplicate's, only when it holds
+  an invoice; `alloc`; `ok`; `paid`), the aliases of today's `view` values, the order of rows (the viewer's
+  gaps, then others', blocking before warning, the longest wait first; then waiting; then a copy held as a
+  duplicate; then missing an allocation number; then clear; then paid; newest first inside each), and the
+  list the keys `[` and `]` walk.
 - `state.ts`: the dot and word of an invoice's state, colour only when money waits for a person (`INV.pill`),
   and `ddmmyyyy`.
 
@@ -549,7 +678,7 @@ batch; each is named in the pull request under "Owner decisions touched").
 - Numbers in a phrase are printed only when they are provably the ones that routed the gap. The 10% of the
   price phrase is one of them: it is the restaurant's own `tolerances.blockPricePercent` (default 0.1,
   `packages/matching/src/tolerances.ts:9`; a setting, `packages/api/src/routers/settings.ts:58`), never a
-  literal.
+  literal. The owner read the phrase with 10 (`SPEC.md` §8, point 22).
 - An invoice being read (`in_ocr`) or waiting for the count (`awaiting_count`) is in the place `wait`, as the
   mock-up has it (`reference/src/inv-core.js:218`); today the first is in the tab `awaiting` and the second
   in `held` (`routers/invoices.ts:65-75`). The card keeps the name "ממתינות לשיוך" (`SPEC.md` §8, point 17).
@@ -558,12 +687,33 @@ batch; each is named in the pull request under "Owner decisions touched").
   (`apps/web/lib/i18n/messages/approvals/he.ts:38`), which uses a retired role word. The pull request says
   what the module returns for it.
 
-**Slices, in build order.** A slice that adds a procedure adds its line in the fragment and its attack case
-in the same commit, or the coverage test fails.
-0. **The contract, pushed first**: the types (`apps/web/lib/invoices/types.ts`, as "The contract" says), the
-   shapes of the new procedures and fields, the S3 commit, and in `gap.ts` the role words in their three
-   forms and the "with whom" strings of `SPEC.md` §2.2, which `INV-04` needs for its slice 2. `INV-01` is
-   opened on this commit.
+**Slices, in build order.** The three new procedures are registered in slice 0, with their lines in the
+fragment and their first attack cases in the same commit, or the coverage test fails; later slices fill
+their bodies.
+0. **The contract, pushed first.** It fixes every name the documents leave in prose (the fields of
+   `lastDecision`, `payment` and `allocation`, the id of the held duplicate's place, the values of `period`).
+   After it nothing is renamed or retyped; an addition is listed in the pull request under "Contract". It
+   holds four things:
+   - **The server.** `invoices.holding`, `invoices.history` and `approvals.decided` are registered with their
+     final input and output types, behind their final role gate and tenant check, and answer the empty
+     value: no entry from `invoices.holding`, NOT_FOUND from `invoices.history` for a foreign invoice and an
+     empty story for the caller's own, an empty list from `approvals.decided`. The new fields of
+     `invoices.list`, `invoices.detail`, the queue row and `queueSummary` are returned under their final
+     names and types, `null` or empty. The web's types are derived from the router ("The contract"), so
+     they exist only once the procedures and the fields do.
+   - **The fragment and the attack file.** `coverage/IA-04.ts` declares the three procedures, and
+     `invoice-area.attack.test.ts` holds their first cases (receiver and chef FORBIDDEN, a foreign id). The
+     coverage test fails on a procedure with no line, and a line may not name a test file that does not
+     exist (`packages/api/src/__tests__/coverage/README.md`, rule 4).
+   - **The web.** `apps/web/lib/invoices/types.ts` names each shape, derived from the router. `words.ts`,
+     `places.ts` and `state.ts` export their final function names and parameter types; slice 4 fills the
+     bodies and changes no signature.
+   - **The messages.** The S3 commit, and in `gap.ts` the role words in their three forms and the "with
+     whom" strings of `SPEC.md` §2.2, which `INV-04` needs for its slice 2.
+
+   The slice may be several commits, the S3 commit first. The one that closes it has the subject
+   `ux(INV-00): contract (slice 0)`, and `INV-01` and `INV-04` are opened on that commit (`README.md`, "The
+   pushes another session is opened on").
 1. **Who, since when, why** (`invoices/holding.ts`). The row set is the queue's own: open or escalated,
    without the ₪0 twin (`routers/approvals.ts:321-322`), so every screen counts what the desk counts. The
    open ₪ comes from `awaitingDecisionDetail` (`packages/api/src/approvals/awaiting.ts:191`), never from a
@@ -576,30 +726,33 @@ in the same commit, or the coverage test fails.
    otherwise no "כי". A pass-on comes from the latest `discrepancy.escalated` audit row of the gap
    (`routers/approvals.ts:830`; a re-match writes a carried one, `packages/api/src/match/persist.ts:464-482`),
    behind one function (pull request 237, a person's, adds a column that would replace that source).
-2. **`invoices.detail`**: the fields above. `payment` is built from the canonical state, whose parity with
-   the pay run is pinned (`packages/api/src/invoices/state.ts:27-30`), and from `vatAtRisk()` for the
+2. **`invoices.detail`**: the fields above, filled. `payment` is built from the canonical state, whose parity
+   with the pay run is pinned (`packages/api/src/invoices/state.ts:27-30`), and from `vatAtRisk()` for the
    allocation number, the function the pay run itself reads (`routers/payRun.ts:707-709`).
-3. **`invoices.history`**: the order, the receipt, the reading, each check, the routing with its rule, each
-   pass-on, decision and undo. Roles only: no user id, no name, no e-mail anywhere in the payload, and "it
-   was you" as a flag.
-4. **The words, the places and the state tone** (web), with unit tests for every rule id of the engine,
-   every role pair, 0 / 1 / 2 / many days, passed on, decided, decided in another role's place.
-5. **`invoices.list` and `invoices.holding`**.
-6. **`approvals.myQueue`, `approvals.queueSummary`, `approvals.decided`**: a person's decisions only, by the
-   restaurant's day, with the role, "in place of" and the reason; an undone decision leaves the list. The
-   read takes the period; the screens of this batch ask for today.
+3. **`invoices.history`**: fills the body. The order, the receipt, the reading, each check, the routing with
+   its rule, each pass-on, decision and undo. Roles only: no user id, no name, no e-mail anywhere in the
+   payload, and "it was you" as a flag.
+4. **The words, the places and the state tone** (web): fills the bodies under the signatures of slice 0,
+   with unit tests for every rule id of the engine, every role pair, 0 / 1 / 2 / many days, passed on,
+   decided, decided in another role's place. Push it under the subject `ux(INV-00): slice 4 …`.
+5. **`invoices.list` and `invoices.holding`**: fills the new fields of the list and the body of the read.
+   Push it under the subject `ux(INV-00): slice 5 …`: `INV-02` and `INV-03` are opened on slices 4 and 5.
+6. **`approvals.myQueue`, `approvals.queueSummary`, `approvals.decided`**: fills the row's and the summary's
+   new fields and the body of `decided`. A person's decisions only, by the restaurant's day, with the role,
+   "in place of" and the reason; an undone decision leaves the list. The read takes the period; the screens
+   of this batch ask for today.
 7. **Isolation.** The attack file complete; assertions that another restaurant's gaps, audit rows and
    pass-ons never change the caller's `holding`, `passedOn`, `byRouting`, `places`, history or decided list.
    The tenant-security gate reviews.
 
 **Known limits, to state in the pull request and not to mend here.** A re-match deletes the gaps and writes
-new ones (`packages/api/src/routers/match.ts:184-193`), so "since when" restarts, and pull request 364 (merged
-after `9dd26ef9`) makes that more frequent. A decision is carried onto the new gap row and a carried pass-on
-gets a new audit row (`match/persist.ts:455-482`), but the audit rows of the old gap ids can no longer be
-joined to the invoice, so the history loses the undo pairs, the decider's recorded role and reason code of a
-carried decision, and the time of a carried pass-on. `vatAtRisk()` reads the 2,000 newest invoices
-(`packages/api/src/vat/vatAtRisk.ts:137`). "שולמו" is `invoices.status = 'paid'`, which nothing writes for a
-real restaurant.
+new ones (`packages/api/src/routers/match.ts:184-193`), so "since when" restarts, and the re-match when a
+draft order is sent (pull request 364, on `main`) makes that more frequent. A decision is carried onto the new
+gap row and a carried pass-on gets a new audit row (`match/persist.ts:455-482`), but the audit rows of the old
+gap ids can no longer be joined to the invoice, so the history loses the undo pairs, the decider's recorded
+role and reason code of a carried decision, and the time of a carried pass-on. `vatAtRisk()` reads the 2,000
+newest invoices (`packages/api/src/vat/vatAtRisk.ts:137`). "שולמו" is `invoices.status = 'paid'`, which
+nothing writes for a real restaurant.
 
 **Acceptance.**
 - For one invoice, `invoices.list`, `invoices.detail`, `invoices.holding` and
@@ -624,21 +777,30 @@ real restaurant.
   receiver.
 - Every existing field listed under "The contract" keeps its value; the existing cases of
   `invoices-register.test.ts`, `invoices-detail.test.ts` and `approvals-scope.test.ts` pass unchanged.
-- The demo's case, in a unit test that passes 25.10.2026 as "now": the words module prints the reference's
-  own lines for the four open invoices.
+- The demo's case, twice, each passing 25.10.2026 as "now". A pure test in
+  `apps/web/lib/invoices/__tests__/`, over four fixture rows typed by the contract, which CI runs: the words
+  module prints the reference's own lines for the four open invoices. And a case in
+  `invoice-holding.test.ts` that reads the seeded lab database, as the precedent does
+  (`packages/api/src/__tests__/invoice-state.test.ts:128-129`, `:142`: `describe.skipIf(!LAB)`): it runs
+  only where `LAB_DATABASE_URL` is set, so CI skips it, and the pull request says that it ran and on which
+  commit.
 - `decideGapId` is a gap the caller may decide, or `null`; for a manager on an invoice with a blocking gap at
   the owner and a warning of the manager's, `mine` is true and `decideGapId` is the warning.
-- Gates: `pnpm --filter @restomatch/db migrate`, then `pnpm turbo run test --concurrency=1`; the coverage
-  manifest test green with the fragment and no diff in the manifest file; type check of `packages/api` and of
-  `apps/web`; the web unit suite (parity, copy guard). The pull request says "no file of the immutability
-  list changed".
+- Gates, with the lab's environment loaded (`README.md`, step 6): `pnpm --filter @restomatch/db migrate`,
+  then `pnpm turbo run test --concurrency=1 --filter='!@restomatch/worker'`; the coverage manifest test
+  green with the fragment and no diff in the manifest file; type check of `packages/api` and of `apps/web`;
+  the web unit suite (parity, copy guard); the web lint and the web build (CI blocks on both,
+  `.github/workflows/ci.yml:250-256`, and you write under `apps/web/lib/`). The pull request says "no file
+  of the immutability list changed".
 
-**Open pull requests to watch.** `OPEN-PRS.md` has the files. 347 (S1). 369 (`claimsByRow`, one line of
-`invoices/state.ts`, `payRun.ts`: no shared hunk if `INV-00` keeps to S1; it grew from 15 to 24 files after
-its list was read, so read it again first). 190 (`routers/approvals.ts` +33: `pageQuestion` on queue rows).
-374 (`lib/claims.ts`). 364 (merged after `9dd26ef9`: a re-match when an order is sent, so "since when"
-restarts more often). 237 (a person's: `escalated_from_role`, `__tests__/fixtures.ts`). 359 (a person's: one
-rule's wording). 380 (a person's proposal on `payRun.markPaid`).
+**Open pull requests to watch.** `OPEN-PRS.md` has the files. 347 (S1). 369 (58 files on 28.11.2026; in
+`routers/approvals.ts` it rewrites `claimsByRow` and two fields of the queue row and adds `claimed`; also
+`approvals/awaiting.ts`, `lib/claims.ts`, `invoices/state.ts`, `payRun.ts`: no shared hunk if `INV-00` keeps
+to S1). 190 (`routers/approvals.ts` +36: `pageQuestion` on queue rows and `pageHeld` in the summary;
+`routers/invoices.ts` +9 −5: a tenth invoice state, `included`, shown and never summed). 374
+(`lib/claims.ts`). 237 (a person's: `escalated_from_role`, `__tests__/fixtures.ts`). 359 (a person's: one
+rule's wording). 380 (a person's proposal on `payRun.markPaid`). 384 (the home's pay-run total: not
+yours).
 
 ## INV-01 · The invoice screen: the document beside the data (reads only; the button still opens the desk)
 
@@ -649,15 +811,32 @@ decision is written from this screen in this package.
 
 **Upstream and base.** Wave 1. Starts from `main`; merges `claude/ds3-01-components` and
 `claude/inv-00-server-reads`. Pull request base `claude/ds3-01-components`. Branch
-`claude/inv-01-invoice-screen`. Outside this batch it depends on DS3-00 (pull request 346) and DS3-01 (345),
-with current `main` merged into the components branch (S10). The frame, the divider, the viewer, the dialog,
-the phone and the lines need nothing from `INV-00`; the "why" line, the payment block and the history do.
+`claude/inv-01-invoice-screen`. Outside this batch it depends on DS3-00 (pull request 346) and DS3-01 (345);
+S10 says what the stacking on the components branch means for your pull request. The frame, the divider, the
+viewer, the dialog, the phone and the lines need nothing from `INV-00`; the "why" line, the payment block and
+the history do.
 
 The lead opens this package once `INV-00`'s first commit (its slice 0, with S3) is on
 `claude/inv-00-server-reads`. You never create `apps/web/lib/i18n/messages/invoices/screen.ts` and never edit
 `apps/web/lib/i18n/messages/invoices/index.ts`. If the branch or that commit is missing when you start, do
 slice 1 and the layout of slices 2 to 4 with no new string, fetch again, and merge it before your first
 string.
+
+What you read from `INV-00`, by its slice. The contract commit gives you every name and type, with empty
+answers; the values arrive later:
+- the state's dot and word, `ddmmyyyy`, the places and the list `[` and `]` walk: its slice 4 (your slice 7,
+  and S5);
+- `place` on the rows of `invoices.list`: its slice 5 (your slice 7);
+- `holding`, each finding's routing and decision, `payment`, `allocation`, `payBy` and the order's sent
+  date on `invoices.detail`: its slice 2 (your slices 7 to 10);
+- the words: its slice 4 (your slice 8);
+- `reason` and `passedOn` on the queue row: its slice 6 (your slice 8);
+- `invoices.history`: its slice 3 (your slice 11).
+
+Fetch `claude/inv-00-server-reads` and merge it before each of these slices. If the read is not filled yet,
+build the slice against the contract's types with fixtures in your unit tests, go on, and do its acceptance
+on the demo after the next merge. Never copy a word, a phrase or a rule into your boundary, and never stub
+the server.
 
 **Reference.** `reference/reference.html#invoice` (mock-up 2, `id="inv-page"`), with the switch "המסמך" on
 "בלי סימון" and on "בלי קובץ", never "עם סימון" (that is step two); `reference/src/inv-invoice.js`,
@@ -682,15 +861,13 @@ string.
 package's: `apps/web/app/dashboard/invoices/[invoiceId]/decide/**` (`INV-05`),
 `apps/web/lib/components/invoice/pdf/**` (`INV-06`).
 
-**The allocation field,** `apps/web/app/dashboard/invoices/[invoiceId]/allocation-field.tsx`: never edited,
-and never mounted by you. On `main@9dd26ef9` it is a file that nothing imports (pull request 306 added it,
-commit `ec26137f`, "UI slice, unmounted"). Pull request 341 mounts it with seven lines in
-`[invoiceId]/page.tsx` and merged after that commit (`834d609b`; on `main@de5cfcf7` the mount is at
-`page.tsx:252-257`, behind the feature `vatAtRisk`, for the finance roles). It is a control that writes, and
-this package reads only: you add no mount of your own. The payment block ends with one named wrapper for it,
-and 341's one mount moves into that wrapper, unchanged, when your branch holds it. Its spec,
-`apps/web/e2e/AU-08-cockpit.spec.ts`, reads the test ids `allocation-field` and `invoice-vat-at-risk` on this
-page and is not yours to change.
+**The allocation field,** `apps/web/app/dashboard/invoices/[invoiceId]/allocation-field.tsx`: never edited.
+It is mounted on `main` by pull request 341: one import (`[invoiceId]/page.tsx:23`) and one mount
+(`:252-257`), behind the feature `vatAtRisk`, for the finance roles. It is a control that writes, and this
+package reads only: you add no second mount. The payment block ends with one named wrapper for it, and you
+move that one mount into the wrapper, unchanged. Its spec, `apps/web/e2e/AU-08-cockpit.spec.ts`, reads the
+test ids `allocation-field` and `invoice-vat-at-risk` on this page: keep it green; it is not yours to
+change.
 
 **Seams.**
 - The row `invoice-owner-desk` in `apps/web/e2e/ia/screens.ts` (`:44`, its allowance at `:71`): lower its
@@ -734,24 +911,32 @@ The viewer's evidence comes from one of the three, and the pull request says whi
 **Slices, in build order** (each leaves a screen that works).
 1. Map today's screen against the reference and against current `main`: the five origins of the back link,
    the edit mode and its automatic re-match, every test id other specs read, "לא נספר" in the lines
-   (`routers/invoices.ts:469`), the allocation field and its one mount from pull request 341 ("Reserved"),
+   (`routers/invoices.ts:469`), the allocation field and its one mount from pull request 341 ("The allocation field"),
    and what stays undrawn.
-2. The frame: the data at the start edge, the document at the end edge, the document 58 % by default; each
-   pane scrolls on its own; one column under a 1024 px window; the skeleton in the new shape. The switch is
-   the window's width, as today (`cockpit.tsx:100`), not the content's: at a 1024 px window the content box
-   is 712 px with the side menu open (a 248 px menu, `apps/web/app/dashboard/nav.tsx:203`; 32 px gutters,
+2. The frame: the data at the start edge, the document at the end edge, the document 58 % by default, or
+   its widest stop where the 448 px floor of the data pane is reached first; each pane scrolls on its own;
+   one column under a 1024 px window; the skeleton in the new shape. The switch is the window's width, as
+   today (`cockpit.tsx:100`), not the content's: at a 1024 px window the content box is 712 px with the side
+   menu open (a 248 px menu, `apps/web/app/dashboard/nav.tsx:203`; 32 px gutters,
    `apps/web/app/dashboard/layout.tsx:233`), so the document's pane sits at its 34 % stop and opens at the
-   reading size.
+   reading size; at 1280 the box is 968 px and the floor stops the document at about 51 % (`SPEC.md` §4.1).
 3. The divider: `role="separator"`, arrows, Home, End, Enter and a double press reset it; it stops where the
    data pane would go under 448 px; `aria-valuenow` and `aria-valuetext` stay true; the 32 px grip and the
    tooltip "גררו לשינוי רוחב המסמך".
 4. The viewer for an image: fit to width, 50 to 400 % with the size kept as a fraction, quarter turns that
    re-lay the page, a mouse drags, two fingers and Ctrl + wheel change the size, the keys `+ - 0 R` with the
    focus anywhere in the viewer, the kind of file in the toolbar, "פתחו את המקור" kept. **A PDF keeps today's
-   sandboxed frame** (`apps/web/lib/components/invoice/InvoiceScanViewer.tsx:88`) inside the new pane, with
-   its page count when the scan row has one (`resolveScan` returns `pageCount`,
-   `apps/web/lib/supabase/server.ts:76`). On a phone, where a frame may not draw a PDF, the window shows one
-   calm line and the same link.
+   sandboxed frame** (`apps/web/lib/components/invoice/InvoiceScanViewer.tsx:88`) inside the new pane, and
+   the toolbar says "PDF". No page count reaches this page today: it calls `resolveScan` with the invoice's
+   id (`[invoiceId]/page.tsx:102`), which for a stored file returns through `signTenantPath` with
+   `pageCount: null` (`apps/web/lib/supabase/server.ts:132`, `:106`) and for a local file sets `null` too
+   (`:153`); the scan row's count (`:76`) is read only for a scan id, as on `/scans/<scanId>`; and the page
+   hands the screen only `src` and `mimeType` (`page.tsx:203`). A count here needs
+   `apps/web/lib/supabase/server.ts`, which is nobody's: list it under "Requests to other packages" and do
+   not wait for it. The viewer still takes an optional page count and prints "PDF · עמוד {page} מתוך {count}"
+   when it is given one: the page line is one key with both numbers as placeholders, and the calm line for
+   a file that cannot be drawn is one key, both in `screen.ts`, and `INV-06` reuses both. On a phone, where
+   a frame may not draw a PDF, the window shows that calm line and the same link.
 5. Step one of decision 7: "חפשו במסמך: item, מק״ט sku." under the viewer, in the phone window's caption and
    at the foot of the whole screen; the item alone when a line has no SKU. Nothing on the screen speaks of a
    mark.
@@ -765,17 +950,34 @@ The viewer's evidence comes from one of the three, and the pull request says whi
    (`cockpit.tsx:125`, `:361`).
 8. The gap card, reading part: one card per undecided gap of the queue's row set, the kind and the item, the
    pill "חוסם תשלום" or "אזהרה", the numbers that disagree side by side, the amount with "לפני מע״מ" and its
-   arithmetic, the one line from the shared words, a decided gap calm and still there after a reload, the
-   pinned amount bar (its button reads "לפרטי הפער" for every role in this package), and `gap-actions.tsx`
-   with the whole interface of S7 (S7, S8). The open gaps come from
+   arithmetic, the one line from the shared words, a decided gap calm and still there after a reload (the
+   tick and the result, the stamp, the role and the reason, and the effect line are yours, from
+   `invoices.detail`: `SPEC.md` §4.5), the pinned amount bar (its button reads "לפרטי הפער" for every role in
+   this package), and `gap-actions.tsx` with the whole interface of S7 (S7, S8): its five slots, the
+   screen's current gap for the dock, the dialog's foot and the bar, the three `message` mounts, the six
+   members of `screen`, and the test ids. The open gaps come from
    `approvals.myQueue({ scope: 'all', invoiceIds: [id] })`, called only for a finance role: the receiver may
    read the invoice and is refused the queue (`routers/approvals.ts:251-252`).
 9. The payment block: "בהשהיה" or "ניתן לשלם" with the reason, the due date, before VAT, VAT and including
    VAT, "השורות מסתכמות בסכום שלפני מע״מ, והמע״מ תואם." with no percentage, the allocation line (not required,
    the number itself, or missing). "ההחלטה על הפער תשחרר את החשבונית לתשלום." only when the gap is the only
-   reason. The block takes in today's held-reasons note and the VAT note (`[invoiceId]/page.tsx:209-249`) and
+   reason. The block takes in today's held-reasons note and the VAT note (`[invoiceId]/page.tsx:210-250`) and
    ends with the wrapper for the allocation field: it holds pull request 341's mount, and this package adds
-   none of its own ("Reserved").
+   none of its own ("The allocation field").
+   - **Where the field is mounted** (the feature `vatAtRisk`, a finance role) **the field is the allocation
+     line** for "the number itself" and for "missing": it already prints the number, its state ("חסר",
+     "תקין (פורמט)") and the deadline (`allocation-field.tsx:79-96`, `:167-171`), and it is up to date the
+     moment it saves, which a line from `invoices.detail` is not. The block then prints its own line only for
+     "מספר הקצאה לא נדרש בסכום הזה."; the field's chip still reads "חסר" on such an invoice
+     (`packages/api/src/routers/vat.ts:101`), and the file is not yours: name it in the pull request. Where
+     the field is not mounted the block prints all three forms.
+   - **The block is drawn wherever today's notes are drawn:** also while the screen is in the reading
+     correction, and for an invoice with no lines or no match. Today the three are the `aside` of `Cockpit`
+     (`[invoiceId]/page.tsx:209-269`), drawn outside the edit switch (`cockpit.tsx:379`), and two specs that
+     nobody may edit read them there: `apps/web/e2e/AU-08-cockpit.spec.ts` opens an invoice with no lines
+     (`:98`), so in the correction (`page.tsx:208`), and reads `allocation-field` and `invoice-vat-at-risk`
+     (`:65-69`, `:138`); `apps/web/e2e/pilot-unread-invoices.spec.ts:104-117` reads `invoice-held-reasons`
+     on a held reading.
 10. The lines by the three documents: grouped heads with the order's reference and the two dates; the gap
     lines alone by default with "כל N השורות"; every line and dense rows with ₪ in the heads for the
     bookkeeper at a desk; the sticky head; "לבדיקה" and "לא נספר" kept.
@@ -787,10 +989,11 @@ The viewer's evidence comes from one of the three, and the pull request says whi
 13. The spec, the changed tests of `W2-02`, axe on the page and on the dialog, the evidence.
 
 **Defaults until the owner says otherwise** (`SPEC.md` §8). One card per gap when an invoice has several. The
-payment block is shown where the pay run is switched off too; it states the invoice's own state. (That the pay
-run is off for the pilot restaurant is the owner's statement on the proposal page; no file in the repository
-holds the pilot's flags.) The desk tints one cell and writes "3 ק״ג פחות", and this screen draws the pair and
-writes "חויבו 3 ק״ג יותר": each screen keeps its drawing.
+screen is one column when the window is narrower than 1024 px, the window's width and not the content's (point
+20). The payment block is shown where the pay run is switched off too; it states the invoice's own state.
+(That the pay run is off for the pilot restaurant is the owner's statement on the proposal page; no file in
+the repository holds the pilot's flags.) The desk tints one cell and writes "3 ק״ג פחות", and this screen
+draws the pair and writes "חויבו 3 ק״ג יותר": each screen keeps its drawing.
 
 **Acceptance.** As owner, manager and bookkeeper on the demo restaurant, at 1440, 1280 and 1024 px and at
 390 px, in Hebrew and one more language.
@@ -850,7 +1053,7 @@ writes "חויבו 3 ק״ג יותר": each screen keeps its drawing.
     no serious or critical finding on the page and on the dialog, ₪ left of the digits, reduced motion.
     Existing specs that land on the page stay green and are not yours to change: `pilot-unread-invoices`,
     `invoice-manual-lines`, `pilot/pilot-journey` (`:504-528`), `consolidated`, `W1-03`, `W1-04`, `W1-06`,
-    `W2-08`, `smoke`, and `AU-08-cockpit` (on `main` since pull request 341 merged). What they read on this
+    `W2-08`, `smoke`, and `AU-08-cockpit`. What they read on this
     page are parts you keep: the reading correction with its test ids, the consolidated panel, the
     held-reasons note, the 404 of an unknown invoice. `W2-02` is yours (S6). The copy measurement of "Seams"
     is in the spec and its numbers are in the pull request.
@@ -858,12 +1061,11 @@ writes "חויבו 3 ק״ג יותר": each screen keeps its drawing.
     with its VAT basis beside it or in the column head; one filled button in the viewport; Hebrew and English
     in parity; the copy guard met with no new allow-list line.
 
-**Open pull requests to watch.** 341 (merged after `9dd26ef9`: it mounts the allocation field, `page.tsx` +7,
-and adds a spec of its own on this page; "Reserved" says where its mount goes). 190 (`page.tsx` +18,
-`messages/invoices` +5 just before `needsLines`, `apps/web/lib/supabase/server.ts`; it makes an invoice's file
-a PDF of several pages: the frame shows them through the browser). 373, 374, 120 (`consolidated-panel.tsx`)
-and 363 (`dock-price-notes.tsx`): outside the boundary. 349 (the shell already yields `[` on this route). 353
-(the preferences store: read through `usePrefs()` and `singleKeysEnabled()`).
+**Open pull requests to watch.** 190 (`page.tsx` +18, `messages/invoices` +6: a block just before `needsLines`
+and one word in the frozen group `state`, `apps/web/lib/supabase/server.ts`; it makes an invoice's file a PDF
+of several pages: the frame shows them through the browser). 373, 374, 120 (`consolidated-panel.tsx`) and 363
+(`dock-price-notes.tsx`): outside the boundary. 349 (the shell already yields `[` on this route). 353 (the
+preferences store: read through `usePrefs()` and `singleKeysEnabled()`).
 
 ## INV-02 · The invoices list
 
@@ -873,8 +1075,12 @@ its gap is and why, a read-only summary. Decision 5 lands here. No decision is t
 
 **Upstream and base.** Wave 2. Starts from `main`; merges `claude/ds3-01-components` and
 `claude/inv-00-server-reads`. Pull request base `claude/ds3-01-components`. Branch
-`claude/inv-02-invoices-list`. Outside this batch: DS3-00 (346) and DS3-01 (345), with current `main` merged
-into the components branch.
+`claude/inv-02-invoices-list`. Outside this batch: DS3-00 (346) and DS3-01 (345); S10 says what the stacking
+on the components branch means for your pull request.
+
+The lead opens this package when `INV-00` has pushed the reads it needs: `invoices.list` with `place`,
+`places[]`, `holding`, `lastDecision`, `allocationMissing` and `payBy` (its slice 5), and the words, the
+places and the state tone of `apps/web/lib/invoices/` (its slice 4). `list.ts` is in its contract commit.
 
 **Reference.** `reference/reference.html#register` (mock-up 1, `id="inv-reg"`);
 `reference/src/inv-register.js`, `inv-core.js` (`INV.places`), `inv.css`; `reference/PAGE-TEXT.he.md`,
@@ -985,7 +1191,7 @@ asserts the relations and never these literals. In the lab October is `?month=-1
     links to the invoice screen carry `from=register`, `view=<place id>` and `month`: assert the address. On
     your branch the invoice screen is still `main`'s, which knows tab ids only and walks the whole month for
     a place id (`[invoiceId]/cockpit.tsx:127-133` falls back to all rows); its back link survives a place id
-    (`[invoiceId]/page.tsx:123`). Stepping through the place is `INV-01`'s acceptance 12 and is looked at
+    (`[invoiceId]/page.tsx:124`). Stepping through the place is `INV-01`'s acceptance 12 and is looked at
     once both are merged. The list still serves what `apps/web/e2e/pilot-unread-invoices.spec.ts` reads:
     `?view=lines` and the test ids `register-lines-row` and `register-lines-reasons` (`:56`, `:101-103`).
 13. Tests added. Unit, in `(register)/__tests__/`: the sentence for each role and for 0 / 1 / many gaps;
@@ -999,12 +1205,14 @@ asserts the relations and never these literals. In the lab October is `?month=-1
     states its VAT basis; no ₪0 for an unknown gap and no dash in a money cell; one filled button in the
     viewport.
 
-**Open pull requests to watch.** 190 (`messages/invoices` +5 just before `needsLines`, a textual neighbour of
-your seam in `he.ts` and `en.ts`; `routers/close.ts`). 369 (some invoices move from "לבקשת זיכוי" to "תקינה";
-no file in common). 341 and the merged 306 (an allocation number can be "already asked for": the card's line
-must not contradict it). 348 (one line of `pilot-unread-invoices.spec.ts`). 241, 252, 263, 362, 194 (old
-stacks of people that list the list's files from stale bases; 263 and 194 still carry the page this folder
-replaced: say so, do not fix).
+**Open pull requests to watch.** 190 (inside your boundary on 28.11.2026: `(register)/columns.tsx` +9 −3, one
+line each of `(register)/page.tsx` and `register-client.tsx`, and the columns test, for a tenth invoice state,
+`included`, which is shown and never summed; `messages/invoices` +6, a block just before `needsLines`, a
+textual neighbour of your seam, and one word in the frozen group `state`; `routers/close.ts`). 369 (some
+invoices move from "לבקשת זיכוי" to "תקינה"; no file in common). The merged 341, 306 and 264 (an allocation
+number can be "already asked for": the card's line must not contradict it). 348 (one line of
+`pilot-unread-invoices.spec.ts`). 241, 252, 263, 362, 194 (old stacks of people that list the list's files
+from stale bases; 263 and 194 still carry the page this folder replaced: say so, do not fix).
 
 ## INV-03 · The pay run
 
@@ -1014,7 +1222,12 @@ one "להחלטה" per group; then what can be paid. No control records a paymen
 
 **Upstream and base.** Wave 2. Starts from `main`; merges `claude/ds3-01-components` and
 `claude/inv-00-server-reads`. Pull request base `claude/ds3-01-components`. Branch `claude/inv-03-pay-run`.
-Outside this batch: DS3-00 (346) and DS3-01 (345), with current `main` merged into the components branch.
+Outside this batch: DS3-00 (346) and DS3-01 (345); S10 says what the stacking on the components branch means
+for your pull request.
+
+The lead opens this package when `INV-00` has pushed the reads it needs: `invoices.holding` (its slice 5)
+and the words of `apps/web/lib/invoices/` (its slice 4). If its branch does not hold `invoices.holding` when
+you start, build the grouping module (slice 2) against the pushed types and fetch again.
 
 **Reference.** `reference/reference.html#payrun` (mock-up 4, `id="inv-pay"`); `reference/src/inv-payrun.js`;
 `reference/PAGE-TEXT.he.md`, "ריצת תשלומים: למה כל חשבונית בהשהיה".
@@ -1049,7 +1262,14 @@ wording "אישור ריצת תשלומים" (`apps/web/lib/components/palette/c
 rule words come from `apps/web/lib/invoices/`; none are added to `messages/payRun`.
 `apps/web/e2e/W1-05.spec.ts:344-352` reads this screen: the home's "to pay" figure must appear as digits in
 the page's text. Keep the payable total printed. The assertion is not yours, and it is red when an invoice
-is held only for a missing allocation number ("Not in this batch", the pay-run total).
+is held only for a missing allocation number; the fix is draft pull request 384, not this package ("Not in
+this batch", the pay-run total).
+
+**Pull request 380** (a person's proposal: the owner's pay-approval gate in `payRun.markPaid`) has seven
+files, and three of them are inside your boundary: `pay-run/selection.tsx` (+9 −2: one import, and the
+function `errText` at `:100-101`) and one new key, `batch.ownerOnly`, in `messages/payRun/he.ts` and `en.ts`.
+Only a person merges it. Read it before you start, and keep your own edits to those three files small and
+away from those hunks.
 
 **Slices, in build order.**
 1. Map today's screen against the reference.
@@ -1069,7 +1289,8 @@ is held only for a missing allocation number ("Not in this batch", the pay-run t
 9. The spec; `W2-03` where it pinned the five due sections and the per-row link.
 
 **Kept although the mock-up does not draw them:** the month filter `?m=`, the branch strip, the due-date
-notices on a row (the five due sections themselves go as headings, slice 6), the credit sentence, the reasons
+notices on a row (the five due sections themselves go as headings, slice 6; a default the owner may turn,
+`SPEC.md` §8, point 21), the credit sentence, the reasons
 the mock-up omits (a duplicate copy, waiting for the count, an open question, a held reading, billed twice)
 with their actions, the selection and its export. The rows of those five reasons keep today's sentences in a
 last group; the name of that group needs the owner's word, so the pull request proposes one under "Owner
@@ -1124,7 +1345,8 @@ step 5).
 **Open pull requests to watch.** 355 (in current `main`: `selection.tsx`, `messages/payRun`). 190
 (`pay-run/page.tsx` +26, `messages/payRun` +8, two new hold reasons: whoever lands second re-adds two lines in
 the table of slice 2). 369, 374 (the figure in "פער של ₪X" can move: print what the server returns). 380 (a
-person's proposal on `markPaid`, behind the flag). 353 (the personal density meets "dense rows for the
+person's proposal on `markPaid`: three of its files are yours, "Not yours" above). 384 (the home's pay-run
+total: not yours). 353 (the personal density meets "dense rows for the
 bookkeeper"). 194, 263, 362, 241, 252 (old stacks; not a base).
 
 ## INV-04 · Approvals by role, and the decision a second screen can mount
@@ -1136,11 +1358,11 @@ waits for the manager and the screen says so (decision 3); the history and "כב
 
 **Upstream and base.** Wave 2. Starts from `main`; merges `claude/ds3-04-approvals-desk` and
 `claude/inv-00-server-reads`. Pull request base `claude/ds3-04-approvals-desk`. Branch
-`claude/inv-04-approvals-by-role`. DS3-04 (pull request 347) is finished at `be22850e`, so this package is not
-waiting for it; current `main` is merged into its branch by the DS3-04 session, or by this package in its own
-branch (S10, slice 0): exactly one of the two, and the lead says which before this package opens. Slices 0
-and 1 need nothing from `INV-00`; slice 2 needs the role words and the "with whom" strings, which are in
-`INV-00`'s contract commit (its slice 0).
+`claude/inv-04-approvals-by-role`. DS3-04 (pull request 347) is finished at `a6be4080`, so this package is not
+waiting for it. Nobody merges current `main` into the desk's branch: this package does that merge in its own
+branch, as its slice 0 (S10). The lead opens this package together with `INV-01`, on `INV-00`'s contract
+commit: slices 0 and 1 need nothing from `INV-00`; slice 2 needs the role words and the "with whom" strings,
+which are in that commit (`INV-00`'s slice 0).
 
 **Reference.** `reference/reference.html#roles` and `#approvals` (mock-up 3, `id="inv-desk"`);
 `reference/src/inv-desk.js`; `reference/PAGE-TEXT.he.md`, "מי רואה ומי מחליט" and "אישורים לפי תפקיד: אותם
@@ -1181,8 +1403,8 @@ the card "מי מחליט על מה" and the reasons describe them and follow th
 screen. `apps/web/e2e/__screenshots__/DS3-04/**` (DS3-04's evidence). In `messages/approvals`, the groups
 `types`, `severity`, `resolution`, `decision`, `rules` and `tolerance` keep their keys, and so do the exports
 of `vocab.ts` (`approvals/__tests__/vocab.test.ts:136` pins the decision words): about twenty files outside
-the area read them (21 on `main@9dd26ef9`, test files aside), among them the invoice screen, which reads
-`tolerance` through `toleranceLabel` (`apps/web/app/dashboard/invoices/[invoiceId]/page.tsx:18`, `:175-177`;
+the area read them (21 on `main` at `de5cfcf7`, test files aside), among them the invoice screen, which reads
+`tolerance` through `toleranceLabel` (`apps/web/app/dashboard/invoices/[invoiceId]/page.tsx:18`, `:176-178`;
 `approvals/vocab.ts:62-67`).
 
 `packages/api/src/__tests__/approvals-queue-fields.test.ts` (DS3-04's test of the `myQueue` fields): you are the
@@ -1196,9 +1418,9 @@ purpose (`apps/web/app/dashboard/approvals/pay-run/page.tsx:277-278`), and
 does (`approvals/skeleton.tsx`).
 
 **Slices, in build order.**
-0. **The base.** If `claude/ds3-04-approvals-desk` has not taken current `main` and the lead said the merge
-   is yours, merge `main` and resolve `approvals/list.tsx` as S10 says. Run the desk's suites on the result
-   before anything else. From then on your resolution is the one (S10).
+0. **The base.** Merge `main` into your own branch and resolve `approvals/list.tsx` as S10 says. The merge
+   is yours: nobody merges `main` into `claude/ds3-04-approvals-desk`. Run the desk's suites on the result
+   before anything else, and say the merge in the first line of your pull request.
 1. **The decision for one gap, exported** (S9), taken out of the queue controller and used first by the
    desk's own single-invoice route (`apps/web/app/dashboard/approvals/[invoiceId]/page.tsx`), so the desk is
    its first user. DS3-04's `s3a-inputs.test.ts` stays green. **Push it: `INV-05` opens on it.**
@@ -1288,10 +1510,13 @@ decisions touched".
 **Open pull requests to watch.** 347 (the base). 360 (in current `main`; slice 0). 190 (`messages/approvals`
 +3, `approvals/list.tsx` +12, `pageQuestion` on queue rows, and a decision refused while a page question is
 open: keep DS3-04's three seams, `decisionBlockOf`, `blockText` and the bar's `blocked` form, in the read-only
-variant too; DS3-04: `desk-facts.ts:640`, `evidence.tsx:48`, `:137`, `decision-bar.tsx:45`). 369 (the
+variant too; DS3-04: `desk-facts.ts:640`, `evidence.tsx:48`, `:137`, `decision-bar.tsx:45`). 369 (inside your
+boundary on 28.11.2026: `approvals/vocab.ts` +5 −3, where `decisionActions` takes a third argument, `claimed`,
+which the queue row gains; two lines of `main`'s `approvals/list.tsx`; `vocab.test.ts` +12. The desk calls
+`decisionActions` once (DS3-04: `desk-facts.ts:630`): whoever lands second passes the third argument. And the
 claimable ₪ behind the head's sums: read them from the server, never sum rows). 374 (an undecided gap is "to
 decide", never "אפשר לבקש"). 212 (`vocab.test.ts:136` pins the decision words: do not rename `decision.*`).
-251, 348 (`W1-05.spec.ts`). 349 (`W1-04.spec.ts`, `demo-path.spec.ts`). 350 (`demo-path.spec.ts`). 359 (a
+348 (`W1-05.spec.ts`, `demo-path.spec.ts`). 349 (`W1-04.spec.ts`, `demo-path.spec.ts`). 350 (`demo-path.spec.ts`). 359 (a
 person's: the rules card follows whatever `main` holds when the package ships).
 
 ## INV-05 · Deciding from the invoice screen
@@ -1301,7 +1526,10 @@ messages and undo. The owner on another role's gap reads "גם אתם רשאים
 הניהול". Nothing is implemented twice.
 
 **Upstream and base.** Wave 3. Opens when slice 1 of `INV-04` is pushed and `INV-01`'s branch has the gap card
-and `gap-actions.tsx` with the whole interface of S7. Starts from `main`; merges
+and `gap-actions.tsx` with the whole interface of S7. Check both first
+(`apps/web/app/dashboard/approvals/gap-decision/index.ts` on the first branch, `gap-actions.tsx` with its
+five props on the second). If one is missing you were opened early: map, fetch again, and never build the
+missing half yourself; if it is still missing, say so and stop. Starts from `main`; merges
 `claude/inv-04-approvals-by-role` and `claude/inv-01-invoice-screen`. Pull request base
 `claude/inv-04-approvals-by-role`. Branch `claude/inv-05-decide-on-invoice`. The pull request's first line
 states the merge order; until both upstreams are in its base the diff also shows the one that is not.
@@ -1337,14 +1565,12 @@ there; "שלמו כפי שחויב" keeps a reason that is already typed; the bu
   mounted; the pull request states the numbers before and after. **No row in `apps/web/lib/copy/screens.ts`**
   (`INV-01` adds none): `INV-05.spec.ts` repeats `INV-01.spec.ts`'s copy measurement with the decision
   mounted and states the numbers before and after.
-- The switch-off key `decideOnInvoice`, on by default, if the lead keeps it: the key in `FEATURE_KEYS` and in
+- The switch-off key `decideOnInvoice`, on by default: the key in `FEATURE_KEYS` and in
   `DEFAULT_ON_FEATURES` of `packages/api/src/lib/features.ts` (the precedent is `orderQuestions`, `:49-63`),
   and its mirror in `PILOT_FEATURE_KEYS` of `packages/db/scripts/pilot-setup.ts` (`:61`), each on its own
   line. It is a key in the restaurant's settings, not a schema change; `FEATURES_OFF` switches it off for
   everyone without a deploy of code. One spec sets it `false` and sets it back in `afterAll` (the suite is
-  one database). `INV-01` does not depend on the key or on its name: it only passes `features` down. If the
-  lead renames the key, the name changes here and in S7; if the lead drops it, these two seams go and the
-  pull request says that the only way back is a revert.
+  one database). `INV-01` does not depend on the key or on its name: it only passes `features` down.
   `packages/db/scripts/pilot-setup.ts` is outside `web-feature-engineer`'s paths in `AGENTS.md` (`:125`). It
   is edited because `packages/db/scripts/__tests__/pilot-setup.test.ts:347-348` pins the two key lists equal;
   the one mirrored key follows DS3-05's seam (`docs/ux/ds3/WORKPLAN.md:306-308`) and is named in the pull
@@ -1399,13 +1625,13 @@ are. `gap-actions.tsx` beyond the one branch, and the rest of `INV-01`'s screen.
 10. With the key `false`, the screen is `INV-01`'s: the button to the desk, "לפרטי הפער" in the pinned bar,
     no decision control. No file of `INV-01`'s screen but `gap-actions.tsx` is in the diff.
 11. No file of the desk and no router is in the diff. The tenant-security gate reviews: a second screen
-    sends money decisions, `invoices.detail` is open to the receiver (`packages/api/src/trpc.ts:186-188`) and
+    sends money decisions, `invoices.detail` is open to the receiver (`packages/api/src/trpc.ts:216-218`) and
     the queue is not (`packages/api/src/routers/approvals.ts:251-252`).
 
 **Open pull requests to watch.** 190 (the refusal while a page question is open; it also adds a key to
-`features.ts` and `pilot-setup.ts`: a textual neighbour). 350 (DS3-05 adds its key to the same two lists).
-341 (the allocation field, beside the payment block the decision refreshes). 347 (the desk the decision
-comes from).
+`features.ts` and `pilot-setup.ts`: a textual neighbour). 350 (DS3-05 adds its key to the same two lists). The
+allocation field (on `main`, pull request 341) sits beside the payment block the decision refreshes. 347 (the
+desk the decision comes from).
 
 ## INV-06 · Optional: a PDF in the same viewer (opened only if the owner asks and a person can do the storage check)
 
@@ -1416,7 +1642,8 @@ it. Nothing else depends on it.
 
 **Upstream and base.** Wave 3. Starts from `main`; merges `claude/inv-01-invoice-screen`. Pull request base
 `claude/inv-01-invoice-screen`. Branch `claude/inv-06-pdf-viewer`. Outside this batch it depends on the
-owner's word and on a person for the check against real storage.
+owner's word and on a person for the check against real storage. If the branch does not hold `INV-01`'s new
+viewer when you start, you were opened early: do check 1, fetch again, and never build the viewer yourself.
 
 **Write boundary.** New `apps/web/lib/components/invoice/pdf/**`; new `apps/web/public/pdfjs/**` (the
 library's worker file, served from the product's own origin, only if it cannot be bundled by reference); new
@@ -1455,8 +1682,10 @@ screen, the phone window) work on it as on an image. A PDF that cannot be read s
 violation is reported with `CSP_ENFORCE=1`. `apps/web/lib/securityHeaders.ts` and `apps/web/lib/supabase/**`
 are not in the diff.
 
-**Open pull requests to watch.** 377 (dependabot rewrites `pnpm-lock.yaml`: whoever lands second runs the
-install again). 190 (several photographed pages become one PDF: draw every page).
+**Open pull requests to watch.** 383, 369 and 356 (each adds one dependency line to `apps/web/package.json`
+and its entries to `pnpm-lock.yaml`) and dependabot (377 on the morning of 28.11.2026; its branch was gone
+from the remote at 11:10 UTC): whoever lands second runs the install again. 190 (several photographed pages
+become one PDF: draw every page).
 
 ---
 
@@ -1468,7 +1697,7 @@ line answering the row, the mock-up's state "עם סימון". It needs line pos
 (`packages/ocr`, another agent's) and a check against a real reading with keys only a person enters.
 
 **Needs a human change.** No package improvises any of these. Each is an immutable file, the schema, a
-credential, or a branch that is not an `INV` session's.
+credential, or a branch or a spec that is not an `INV` session's.
 - **Names in the history.** Row security: `packages/db/drizzle/rls/0002_core_tenant_rls.sql:98-101`,
   `packages/db/src/rls.ts`. The batch builds roles only.
 - **A recorded payment, "סמנו כשולם", and a "שולמו" place that means something in a real restaurant.** Payment
@@ -1482,13 +1711,16 @@ credential, or a branch that is not an `INV` session's.
 - **Any change to a routing rule, to who decides what, or to the base of the percentage.**
   `packages/api/src/approvals/engine.ts`.
 - **Check 3 of `INV-06`** (loading from real storage) and the reading of the library's licence.
-- **Current `main` into `claude/ds3-01-components` and into `claude/ds3-04-approvals-desk`** (S10): their own
-  sessions or the lead.
+- **The merge of pull requests 346, 345 and 347** (the clean finish and the desk): the owner's. Nobody
+  merges `main` into `claude/ds3-01-components` or into `claude/ds3-04-approvals-desk` for this batch (S10).
+- **The retired role word in "החשבונית ממתינה לבדיקה של הבעלים או המנהל"** (`needsLines.heldTitleReadOnly`,
+  S3): `apps/web/e2e/pilot-unread-invoices.spec.ts:117` pins the sentence and no package may edit that spec.
+  The string and the spec change together, outside the batch.
 - **The sentence about the percentage's base on the settings screen** (decided 28.11.2026). The folder is
   DS3-06's (pull request 353, a draft that conflicts with current `main`), not an `INV` session's. The lead
-  posts the request on 353 when wave 2 opens, with the card's own sentence: "הסכומים לפני מע״מ, והאחוז מסכום
-  החשבונית כולל מע״מ." If 353 merges without it, one follow-up pull request adds the sentence. `INV-04`'s
-  card states the base inside this area meanwhile.
+  posts the request on 353 when `INV-02` and `INV-03` open, with the card's own sentence: "הסכומים לפני מע״מ,
+  והאחוז מסכום החשבונית כולל מע״מ." If 353 merges without it, one follow-up pull request adds the sentence.
+  `INV-04`'s card states the base inside this area meanwhile.
 
 **Possible without an immutable file, and still left out.**
 - **The pay-run total on the home.** DS3-03's final report says that `tasks.mine`'s pay-run total includes an
@@ -1498,11 +1730,13 @@ credential, or a branch that is not an `INV` session's.
   (`packages/api/src/tasks/sources/index.ts:154-170`); `payRun.list` adds the `missing_allocation` hold and
   counts only rows with no hold as payable (`routers/payRun.ts:707-709`, `:471-473`, `:770-776`). The
   assertion that compares the two is `apps/web/e2e/W1-05.spec.ts:344-352`; whether it is red at month end
-  was not run. The fix is in `routers/payRun.ts`, which has no writer here and
-  four open pull requests on it, and it changes a figure on the home, the task list and the chain, none of
-  them this batch's screens. **Named owner: a follow-up server package on `routers/payRun.ts`, after pull
-  requests 369 and 374 land, the same one that adopts `packages/api/src/invoices/holding.ts` inside
-  `payRun.list`.** `INV-03` does not "fix" it on the screen, and its spec does not compare the two figures.
+  was not run. The fix is in `routers/payRun.ts`, which has no writer here, and it
+  changes a figure on the home, the task list and the chain, none of them this batch's screens. **The fix has
+  a pull request: draft 384** (`claude/w2-03-month-vat-hold`, "home pay-run row == the page it opens"). It
+  edits `packages/api/src/routers/payRun.ts`, `packages/api/src/invoices/state.ts`,
+  `packages/api/src/tasks/sources/index.ts` and ten more files (the chain, the navigation badge, an agent
+  tool, three tests and the demo seed), none of them inside a package of this batch. `INV-03` does not "fix"
+  the number on the screen, and its spec does not compare the two figures.
 - **The invoice id in the audit row of a decision.** Two JSON keys and no column, but a change inside the
   decision transaction, and this batch is reads only. Without it the history thins after a re-match
   (`INV-00`, "Known limits").
