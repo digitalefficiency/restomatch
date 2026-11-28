@@ -138,7 +138,8 @@ describe('leak state (SPEC §10.1)', () => {
     expect(tagOf(markup, 'leak-hero-pct')).toContain('tabular-nums');
     expect(tagOf(markup, 'leak-hero-delta')).toContain('tabular-nums');
     expect(markup).toMatch(/<span class="[^"]*tabular-nums[^"]*"><span data-testid="leak-hero-completeness"/);
-    expect(markup).toMatch(/<div class="relative flex flex-wrap items-center[^"]*"><span aria-hidden="true" data-dot="leak"/);
+    // The label and the period wrap inside their own box, so the ⋯ menu keeps the end of the first line.
+    expect(markup).toMatch(/<div class="relative flex items-center gap-2\.5"><div class="flex min-w-0 flex-1 flex-wrap items-center[^"]*"><span aria-hidden="true" data-dot="leak"/);
     expect(markup).toMatch(/<h2 id="leak-hero-label" class="whitespace-nowrap /);
     expect(tagOf(markup, 'leak-hero-period')).toContain('whitespace-nowrap');
   });
