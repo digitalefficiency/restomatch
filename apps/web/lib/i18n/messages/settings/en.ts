@@ -25,6 +25,7 @@ export const en: Shape<typeof he> = {
     custom: 'Custom',
     approvalsTitle: 'What goes to approval',
     largeInvoiceWithoutPo: 'An invoice without an order above {a} goes to the owner',
+    payApprovalOverAmount: 'From {a}, or a new supplier\'s first invoice: only owner approves payment',
     unorderedItemSignificant: 'An unordered item with a gap above {a} goes to the owner',
     cumulativeLarge: 'Gaps on an invoice above {a} or above {b} of its total go to the owner',
     cumulativeMedium: 'Gaps on an invoice above {a} or above {b} of its total go to the manager',
@@ -137,6 +138,8 @@ export const en: Shape<typeof he> = {
       cumulativeLargePct: 'High cumulative percentage (%)',
       cumulativeMediumAmountMin: 'Medium cumulative amount — min (₪)',
       cumulativeMediumPctMin: 'Medium cumulative percentage — min (%)',
+      payApprovalOverAmount: 'Owner payment approval from (₪)',
+      payApprovalOverAmountHint: 'From this amount with VAT, or new supplier\'s first invoice: owner only.',
     },
   },
   twoFactor: {
