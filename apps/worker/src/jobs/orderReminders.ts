@@ -8,27 +8,24 @@
  *
  * W3-09 / AU-11 (option `preparedOrderDraft`, default off): for a supplier due
  * today, a draft is PREPARED from the order guide and the A5 line is replaced by
- * "טיוטה מוכנה ל<ספק> · N פריטים" (one message per supplier per person, dedupe
- * `au:A16:<rid>:<userId>:<sid>:<day>`). A supplier whose cut-off is before 09:30
- * gets TOMORROW's draft today, when tomorrow is one of its order days. Nothing
- * is sent to a supplier; the draft waits for a person. Then (option `sendRescue`)
- * placed orders whose send failed in the last 48 h are reported to their sender.
+ * "טיוטה מוכנה ל<ספק> · N פריטים" (one message per supplier per person per order
+ * day via notify(), `au:A16:<day>:<rid>:<sid>:<userId>:email`). A supplier whose
+ * cut-off is before 09:30 gets TOMORROW's draft today, when tomorrow is one of its
+ * order days, as an extra message. Nothing is sent to a supplier; the draft waits
+ * for a person. Then (option `sendRescue`) placed orders whose send failed in the
+ * last 48 h are reported to their sender.
  *
  * Runs in the morning after daily-expectations (see cron.ts). Detection only —
  * delivery happens through outbox-dispatch.
  */
 import {
-  autopilotDeepLink,
   autopilotOption,
-  briefDedupeKey,
   briefOptionOn,
-  briefPayload,
-  enqueueNotification,
   findSendRescues,
   newOrderPath,
+  notifyPreparedDraft,
   notifySendRescue,
   orderReminderBrief,
-  ordersAutopilotHe,
   prepareOrderDraft,
   recipientsForRestaurant,
 } from '@restomatch/api';
@@ -54,6 +51,7 @@ import {
   startOfIlDay,
 } from '../lib/notifyHelpers';
 import { jobDb } from '../db';
+import { sendBrief } from '../lib/briefSend';
 import { ilMinuteOfDay, parseCutoff } from './orderCutoff';
 
 export interface OrderRemindersJob {
@@ -284,7 +282,9 @@ export async function processOrderReminders(job: WorkerJob<OrderRemindersJob>) {
     const recipients = await recipientsForRestaurant(db, restaurant.id, [...ORDER_REMINDER_ROLES]);
     if (recipients.length === 0) continue;
 
-    // Deploy-day guard (see legacyOrderReminderKey): today's old-format keys.
+    // Deploy-day guard (see legacyOrderReminderKey): today's keys in either earlier
+    // format — `supplier:<sid>:order-reminder:<day>:<email>` (before #269) and
+    // `au:A5:<rid>:<userId>:<sid>:<day>` (#269, before notify()).
     const legacyToday = new Set(
       (
         await db
@@ -293,65 +293,64 @@ export async function processOrderReminders(job: WorkerJob<OrderRemindersJob>) {
           .where(
             and(
               eq(notificationsOutbox.restaurantId, restaurant.id),
-              sql`${notificationsOutbox.dedupeKey} like ${`supplier:%:order-reminder:${todayKey}:%`}`,
+              sql`(${notificationsOutbox.dedupeKey} like ${`supplier:%:order-reminder:${todayKey}:%`}
+                   or ${notificationsOutbox.dedupeKey} like ${`au:A5:${restaurant.id}:%:${todayKey}`})`,
             ),
           )
       ).map((r) => r.key),
     );
 
-    // AU-11 a · one prepared-draft message per supplier per person; it REPLACES
-    // that supplier's A5 line (never both). No ₪, even though the chef may see it on screen.
+    // AU-11 a · one prepared-draft message per supplier per person per order day; it
+    // REPLACES that supplier's A5 line (never both). No ₪, even though the chef may see it on screen.
     for (const [supplierId, p] of [...preparedBySupplier, ...preparedTomorrow]) {
-      const name = supplierRows.find((x) => x.id === supplierId)?.name ?? '';
-      const link = `${appBaseUrl()}${autopilotDeepLink(restaurant.id, p.poId)}`;
-      for (const recipient of recipients) {
-        const t = ordersAutopilotHe; // the reminder is Hebrew, like AU-04's A5 line
-        const title = p.tomorrow ? t.preparedTomorrowTitle(name, p.lines, p.cutoff) : t.preparedTitle(name, p.lines, p.cutoff);
-        const { deduped } = await enqueueNotification(db, {
-          restaurantId: restaurant.id,
-          channel: 'email',
-          target: recipient.email,
-          subject: title,
-          body: `${title}\n${t.preparedCta}: ${link}`,
-          payload: { userId: recipient.userId, event: 'au:A16', poId: p.poId, deepLink: link },
-          relatedEntityType: 'purchase_order',
-          relatedEntityId: p.poId,
-          dedupeKey: `au:A16:${restaurant.id}:${recipient.userId}:${supplierId}:${p.tomorrow ? tomorrowKey : todayKey}`,
-        });
-        if (!deduped) enqueued += 1;
-      }
+      const res = await notifyPreparedDraft(db, {
+        restaurantId: restaurant.id,
+        userIds: recipients.map((r) => r.userId),
+        supplierId,
+        supplierName: supplierRows.find((x) => x.id === supplierId)?.name ?? '',
+        poId: p.poId,
+        lines: p.lines,
+        cutoff: p.cutoff,
+        orderDay: p.tomorrow ? tomorrowKey : todayKey,
+        tomorrow: p.tomorrow,
+        baseUrl: appBaseUrl(),
+        now,
+      });
+      enqueued += res.enqueued;
     }
 
     for (const s of missing) {
       if (preparedBySupplier.has(s.id)) continue; // the prepared message replaced the A5 line
       const window = s.orderSchedule?.windows?.find((w) => w.orderDays.includes(weekday));
-      const msg = orderReminderBrief({
+      const told = (r: { userId: string; email: string }) =>
+        legacyToday.has(legacyOrderReminderKey(s.id, todayKey, r.email)) ||
+        legacyToday.has(`au:A5:${restaurant.id}:${r.userId}:${s.id}:${todayKey}`);
+      const userIds = recipients.filter((r) => !told(r)).map((r) => r.userId);
+      if (userIds.length === 0) continue;
+      // G-06 notify(): quiet hours / Shabbat / ≤6 a day; perishable (a 09:00 reminder
+      // after noon is noise). Key = au:A5:<IL day>:<rid>:<sid>:<userId>:email.
+      const res = await sendBrief(db, {
         restaurantId: restaurant.id,
-        baseUrl: appBaseUrl(),
-        ilDate: todayKey,
-        supplierId: s.id,
-        supplierName: s.name,
-        orderDayLabel: weekdayLabel,
-        cutoffLabel: window?.cutoff,
-        draftPoId: draftBySupplier.get(s.id) ?? null,
+        now,
+        event: `au:A5:${todayKey}`,
+        audience: { userIds },
+        entity: { type: 'supplier', id: s.id },
+        perishable: true,
+        payload: { automationId: 'A5' },
+        build: ({ locale }) =>
+          orderReminderBrief({
+            restaurantId: restaurant.id,
+            baseUrl: appBaseUrl(),
+            locale,
+            ilDate: todayKey,
+            supplierId: s.id,
+            supplierName: s.name,
+            orderDayLabel: weekdayLabel,
+            cutoffLabel: window?.cutoff,
+            draftPoId: draftBySupplier.get(s.id) ?? null,
+          }),
       });
-      for (const recipient of recipients) {
-        if (legacyToday.has(legacyOrderReminderKey(s.id, todayKey, recipient.email))) continue;
-        // One call site: it becomes G-06 `notify()` (quiet hours, Shabbat, ≤6/day) when G-06 merges.
-        const { deduped } = await enqueueNotification(db, {
-          restaurantId: restaurant.id,
-          channel: 'email',
-          target: recipient.email,
-          subject: msg.subject,
-          body: msg.text,
-          html: msg.html,
-          payload: briefPayload(msg),
-          relatedEntityType: 'supplier',
-          relatedEntityId: s.id,
-          dedupeKey: briefDedupeKey(msg, restaurant.id, recipient.userId),
-        });
-        if (!deduped) enqueued += 1;
-      }
+      enqueued += res.enqueued;
     }
   }
 

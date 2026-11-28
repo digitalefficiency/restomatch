@@ -53,6 +53,8 @@ import { estimateTotal } from './totals';
 import { ordersAutopilotHe } from './messages/he';
 import { ordersAutopilotEn } from './messages/en';
 import { notify, type Rendered, type RenderInput } from '../notifications/notify';
+import { staffAlertWindow } from '../notifications/sendWindow';
+import { isPerishableSkip } from '../briefs/perishable';
 import { SKIPPED_NO_PROVIDER } from '../notifications/delivery';
 import { poRefOf } from './supplierMessage';
 import { automationOption } from '../automations/options';
@@ -687,4 +689,59 @@ export async function notifySendRescue(
     ),
     now: args.now,
   });
+}
+
+/**
+ * The 09:00 "טיוטה מוכנה ל<ספק>" message (A16a), through G-06 `notify()` like
+ * AU-04's A5 line: e-mail, quiet hours / Shabbat / ≤6 a day, and PERISHABLE —
+ * past 12:00 of the same Israel day it is skipped, never queued. One per
+ * supplier per person per order day: `au:A16:<orderDay>:<rid>:<sid>:<userId>:email`.
+ * No ₪. Owner / manager / chef only.
+ */
+export async function notifyPreparedDraft(
+  db: Database,
+  args: {
+    restaurantId: string;
+    userIds: readonly string[];
+    supplierId: string;
+    supplierName: string;
+    poId: string;
+    lines: number;
+    cutoff: string | null;
+    orderDay: string;
+    tomorrow: boolean;
+    baseUrl: string;
+    now: Date;
+  },
+): Promise<{ enqueued: number; skipped: 'quiet' | null }> {
+  const window = staffAlertWindow(args.now);
+  if (isPerishableSkip(args.now, window.open ? args.now : window.nextAllowedAt)) return { enqueued: 0, skipped: 'quiet' };
+  const link = `${args.baseUrl}${autopilotDeepLink(args.restaurantId, args.poId)}`;
+  const res = await notify(db, {
+    restaurantId: args.restaurantId,
+    event: `au:A16:${args.orderDay}`,
+    audience: { userIds: args.userIds },
+    template: 'brief:A16',
+    entity: { type: 'supplier', id: args.supplierId },
+    channels: ['email'],
+    now: args.now,
+    payload: { automationId: 'A16', poId: args.poId },
+    render: ({ role, locale, channel }) => {
+      if (channel !== 'email' || !(AUTOPILOT_ROLES as readonly string[]).includes(role)) return null;
+      const t = locale === 'en' ? ordersAutopilotEn : ordersAutopilotHe;
+      const title = args.tomorrow
+        ? t.preparedTomorrowTitle(args.supplierName, args.lines, args.cutoff)
+        : t.preparedTitle(args.supplierName, args.lines, args.cutoff);
+      return { subject: title, body: `${title}\n${t.preparedCta}: ${link}` };
+    },
+  });
+  // A perishable row the daily cap pushed past noon is cancelled, as sendBrief does.
+  const stale = res.rows.filter((r) => r.id && !r.deduped && r.scheduledAt && isPerishableSkip(args.now, r.scheduledAt)).map((r) => r.id!);
+  if (stale.length > 0) {
+    await db
+      .update(notificationsOutbox)
+      .set({ status: 'cancelled' })
+      .where(and(eq(notificationsOutbox.restaurantId, args.restaurantId), eq(notificationsOutbox.status, 'queued'), inArray(notificationsOutbox.id, stale)));
+  }
+  return { enqueued: res.enqueued - stale.length, skipped: null };
 }

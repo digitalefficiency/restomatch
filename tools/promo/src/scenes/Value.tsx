@@ -1,6 +1,6 @@
 import React from 'react';
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
-import { COPY, FACTS, ilsText, Locale } from '../copy';
+import { COPY, ilsText, Locale, SAMPLE } from '../copy';
 import { C, EASE_IN, FONT, prog } from '../theme';
 import { CountUp, FadeUp, RiseLine } from '../components/primitives';
 import { safeBox } from '../layout';
@@ -21,9 +21,9 @@ export const Value: React.FC<{ locale: Locale; duration?: number }> = ({ locale,
   const exit = prog(f, duration - 16, duration, EASE_IN);
 
   const stats = [
-    { label: t.leak, value: FACTS.leak, note: `${FACTS.leakPct} ${t.leakNote.replace('{spend}', ilsText(FACTS.spend, locale))}`, color: C.danger },
-    { label: t.caught, value: FACTS.caught, note: t.caughtNote, color: C.gold },
-    { label: t.claimed, value: FACTS.claimed, note: t.claimedNote, color: C.primary },
+    { label: t.leak, value: SAMPLE.leak, note: `${SAMPLE.leakPct}% ${t.leakNote.replace('{spend}', ilsText(SAMPLE.purchasing, locale))}`, color: C.danger },
+    { label: t.caught, value: SAMPLE.unpaid, note: t.caughtNote, color: C.gold },
+    { label: t.claimed, value: SAMPLE.credit.amount, note: t.claimedNote, color: C.warn }, // T2: to send
   ];
 
   return (
@@ -50,7 +50,8 @@ export const Value: React.FC<{ locale: Locale; duration?: number }> = ({ locale,
                     <div style={{ fontSize: 36, fontWeight: 600, color: C.muted }}>{s.label}</div>
                     <div
                       style={{
-                        fontSize: 150,
+                        fontSize: 132,
+                        whiteSpace: 'nowrap',
                         fontWeight: 800,
                         color: s.color,
                         lineHeight: 1.1,

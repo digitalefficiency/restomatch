@@ -185,7 +185,7 @@ describe('early cut-off, daily supplier (review fixes)', () => {
     const msgs = (await rows()).filter((o) => o.dedupe_key.includes(dailySid));
     const kinds = msgs.map((o) => o.dedupe_key.split(':')[1]).sort();
     expect(kinds).toEqual(['A16', 'A16', 'A16', 'A5', 'A5', 'A5']);
-    expect(msgs.filter((o) => o.dedupe_key.startsWith('au:A16:')).every((o) => o.dedupe_key.endsWith(':2026-10-26'))).toBe(true);
+    expect(msgs.filter((o) => o.dedupe_key.startsWith('au:A16:')).every((o) => o.dedupe_key.startsWith('au:A16:2026-10-26:'))).toBe(true);
     const drafts = await sql<{ source_ref: string }[]>`
       select source_ref from purchase_orders where restaurant_id = ${rid} and supplier_id = ${dailySid} and status = 'draft'`;
     expect(drafts.map((d) => d.source_ref)).toEqual([`au:A16:${dailySid}:2026-10-26`]);

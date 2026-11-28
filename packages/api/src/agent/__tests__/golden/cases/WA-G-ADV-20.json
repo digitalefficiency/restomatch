@@ -1,0 +1,42 @@
+{
+  "id": "WA-G-ADV-20",
+  "role": "owner",
+  "adversarial": true,
+  "flow": "ADV",
+  "title": "Decision alert at 23:30 → held, nothing sent",
+  "neverList": [
+    14
+  ],
+  "ownerRules": [
+    "quiet-hours"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "system",
+      "trigger": "rm_decision_needed",
+      "at": "23:30"
+    }
+  ],
+  "expect": {
+    "intent": null,
+    "tools": [],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": true,
+    "state": {
+      "proactiveSent": 0
+    }
+  }
+}

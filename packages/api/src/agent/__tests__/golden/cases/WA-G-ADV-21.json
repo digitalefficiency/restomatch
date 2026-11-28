@@ -1,0 +1,54 @@
+{
+  "id": "WA-G-ADV-21",
+  "role": "owner",
+  "adversarial": true,
+  "flow": "ADV",
+  "title": "Owner writes at 23:40: the reply is fine (WD4), no proactive follow-up",
+  "neverList": [
+    14
+  ],
+  "ownerRules": [
+    "quiet-hours"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "יש משהו חדש?",
+      "at": "23:40"
+    },
+    {
+      "from": "system",
+      "trigger": "rm_owner_brief",
+      "at": "23:55"
+    }
+  ],
+  "expect": {
+    "intent": "queue.mine",
+    "tools": [
+      {
+        "name": "approvals.queueSummary",
+        "args": {}
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [
+      "להחלטות עכשיו"
+    ],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "proactiveSent": 0
+    }
+  }
+}

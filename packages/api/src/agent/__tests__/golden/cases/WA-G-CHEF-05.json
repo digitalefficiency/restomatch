@@ -1,0 +1,56 @@
+{
+  "id": "WA-G-CHEF-05",
+  "role": "chef",
+  "adversarial": false,
+  "flow": "C2",
+  "title": "Cut-off reminder template (no ₪)",
+  "neverList": [],
+  "ownerRules": [
+    "chef-ils-orders-only"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "system",
+      "trigger": "rm_order_cutoff",
+      "at": "09:00"
+    }
+  ],
+  "expect": {
+    "intent": "order.cutoff",
+    "tools": [
+      {
+        "name": "orders.list",
+        "args": {
+          "status": "draft"
+        }
+      }
+    ],
+    "forbiddenFields": [
+      "leak|claim|decision|discrepanc"
+    ],
+    "forbiddenText": [
+      "₪"
+    ],
+    "buttons": [
+      "פתח טיוטה",
+      "שלח עכשיו",
+      "לא צריך השבוע"
+    ],
+    "noButtons": [],
+    "template": "rm_order_cutoff",
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "proactiveSent": 1
+    }
+  }
+}

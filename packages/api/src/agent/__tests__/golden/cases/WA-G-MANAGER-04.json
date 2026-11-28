@@ -1,0 +1,58 @@
+{
+  "id": "WA-G-MANAGER-04",
+  "role": "manager",
+  "adversarial": false,
+  "flow": "M2",
+  "title": "Late-truck template, no ₪, ask the supplier from my own phone",
+  "neverList": [],
+  "ownerRules": [
+    "no-supplier-send"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "system",
+      "trigger": "rm_delivery_late",
+      "at": "10:15"
+    }
+  ],
+  "expect": {
+    "intent": "delivery.late",
+    "tools": [
+      {
+        "name": "receiving.todayExpectations",
+        "args": {}
+      },
+      {
+        "name": "orders.sendStatus",
+        "args": {
+          "orderId": "po-1043"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [
+      "₪"
+    ],
+    "buttons": [
+      "הגיע, אעדכן",
+      "דחה למחר"
+    ],
+    "noButtons": [],
+    "template": "rm_delivery_late",
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "proactiveSent": 1,
+      "supplierOutboundRows": 0
+    }
+  }
+}

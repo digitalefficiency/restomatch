@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
@@ -49,6 +49,7 @@ import {
   type DecisionAction,
   type WaiveReason,
 } from './vocab';
+import { makeSummaryRefresher } from './summaryRefresh';
 
 type QueueItem = inferRouterOutputs<AppRouter>['approvals']['myQueue'][number];
 export type QueueSummary = inferRouterOutputs<AppRouter>['approvals']['queueSummary'];
@@ -183,16 +184,17 @@ function ApprovalsListInner({
   /** Server totals after a decision settles (counts only — page 1 is never refetched). */
   // Overlapping refreshes (two quick decisions): only the newest request may
   // land, so an older, slower response never overwrites fresher tiles.
-  const summarySeq = useRef(0);
-  const refreshSummary = useCallback(async () => {
-    const seq = ++summarySeq.current;
-    try {
-      const fresh = await utils.approvals.queueSummary.fetch(filters, { staleTime: 0 });
-      if (seq === summarySeq.current) setSummary(fresh);
-    } catch {
-      /* the optimistic numbers stay; the next decision retries */
-    }
-  }, [utils, filters]);
+  // Each refresh also cancels the one in flight, so react-query cannot dedup an
+  // undo's refresh onto the approve's stale request (summaryRefresh.ts).
+  const refreshSummary = useMemo(
+    () =>
+      makeSummaryRefresher({
+        cancel: () => utils.approvals.queueSummary.cancel(filters),
+        fetch: () => utils.approvals.queueSummary.fetch(filters, { staleTime: 0 }),
+        apply: setSummary,
+      }),
+    [utils, filters],
+  );
 
   function adjustSummary(d: QueueItem, sign: 1 | -1) {
     setSummary((s) => ({

@@ -51,6 +51,7 @@ export interface ComputeOwnerKpisOptions {
  *  • monthPotentialLossIls — sum of unresolved discrepancy delta amounts
  *    (warn+block severity) in the current month.
  *  • monthSavingsCapturedIls — sum of resolved discrepancy delta amounts
+ *    (a person's accept/resolve; system auto-accepts excluded, G-15 Q8)
  *    (resolved or accepted) in the current month.
  *  • pendingApprovalsCount — discrepancies awaiting decision (open or escalated).
  *  • weekCleanMatchPct — % of match_runs in the last 7 days whose
@@ -91,6 +92,10 @@ export async function computeOwnerKpis(
       and(
         eq(discrepancies.restaurantId, restaurantId),
         inArray(discrepancies.resolutionStatus, ['accepted', 'resolved']),
+        // G-15 Q8 (leak-economist condition): a SYSTEM auto-accept
+        // (non-leak-acknowledge / minor-info: status 'accepted', no resolved_at) is
+        // routing bookkeeping, never savings. A person's accept stamps resolved_at.
+        sql`NOT (${discrepancies.resolutionStatus} = 'accepted' AND ${discrepancies.resolvedAt} IS NULL)`,
         gte(discrepancies.createdAt, startOfMonth),
       ),
     );
