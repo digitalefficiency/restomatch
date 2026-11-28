@@ -121,15 +121,16 @@ export function ocrJobDeadlineMs(env: NodeJS.ProcessEnv = process.env): number {
   return ocrJobHeadroomMs(env) - OCR_PERSIST_MARGIN_MS;
 }
 
-/** What one enqueue did: a new row, a duplicate of a live dedupe key, or nothing (no queue DB). */
+/** What one enqueue did: a new row, a duplicate of an existing (queued, running or finished, not yet pruned) dedupe key, or nothing (no queue DB). */
 export type EnqueueOutcome = 'queued' | 'duplicate' | 'no_queue';
 
 /**
  * Insert a job with a hard deadline. Returns false when no queue database is
  * configured (dev/test without DATABASE_URL); throws QueueUnavailableError on
  * any database error or timeout. (A timed-out INSERT may still commit later:
- * consumers must be idempotent, as they were under BullMQ.) A duplicate of a
- * live dedupe key also returns true; use enqueueOutcome to tell them apart.
+ * consumers must be idempotent, as they were under BullMQ.) A duplicate of an
+ * existing dedupe key also returns true — finished rows keep blocking their key
+ * until they are pruned; use enqueueOutcome to tell them apart.
  */
 export async function enqueue(
   queue: string,

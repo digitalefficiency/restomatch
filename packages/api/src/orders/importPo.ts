@@ -201,12 +201,16 @@ export async function importPurchaseOrder(
     }
     poId = existing.id;
     created = false;
+    // G-04 Q4: a draft promoted to 'sent' is a new send — stamp it, so its
+    // re-match dedupe key differs from any earlier send of this PO.
+    const promotes = existing.status === 'draft' && status === 'sent';
     await db
       .update(purchaseOrders)
       .set({
         supplierId,
         expectedDeliveryAt,
         status,
+        ...(promotes ? { sentAt: new Date() } : {}),
         totalEstimated,
         vatRate: vatRateStr,
         customerRef,

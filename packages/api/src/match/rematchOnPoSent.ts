@@ -61,8 +61,10 @@ export async function invoicesAwaitingPo(db: Database, restaurantId: string, poI
 
 /**
  * The dedupe key of the one re-match a send queues for an invoice. `sendStamp`
- * is the committed send (sent_at, else updated_at for an import), so a later,
- * different send of the same PO is never swallowed by an older key.
+ * is the committed send (sent_at — every draft exit stamps it, an import's
+ * promotion included — else updated_at), so a later, different send of the
+ * same PO is never swallowed by an older key (finished jobs keep their key
+ * until pruned).
  */
 export const poSentRematchKey = (poId: string, sendStamp: string, invoiceId: string) =>
   `rematch:po-sent:${poId}:${sendStamp}:${invoiceId}`;

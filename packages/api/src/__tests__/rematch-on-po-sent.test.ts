@@ -1,6 +1,7 @@
 import { testDbUrl } from '@restomatch/db';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDb, discrepancies, eq, invoices, matchRuns, purchaseOrders, sql, suppliers } from '@restomatch/db';
+import type { NormalizedPurchaseOrder } from '@restomatch/types';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 
@@ -28,6 +29,7 @@ vi.mock('@restomatch/queue', async (orig) => {
 });
 const { appRouter } = await import('../index');
 const { invoicesAwaitingPo, rematchOnPoSent } = await import('../match/rematchOnPoSent');
+const { importPurchaseOrder } = await import('../orders/importPo');
 
 const db = createDb(testDbUrl());
 let A: Tenant;
@@ -225,6 +227,41 @@ describe('G-04 Q4: sending a draft order re-matches the invoices pinned to it', 
     expect(replay).toMatchObject({ replayed: true });
     expect((await queued()).map((j) => j.invoiceId)).toEqual([pinned]);
     expect(probe.statusAtEnqueue).toEqual(['sent']);
+  });
+
+  it('an imported PO sent, demoted by a failed re-import and promoted again re-matches a second time', async () => {
+    const order = (totalEstimated: number): NormalizedPurchaseOrder => ({
+      externalId: 'zestt-q4',
+      platform: 'zestt',
+      supplierExternalId: A.supplierName,
+      supplierName: A.supplierName,
+      expectedDeliveryAt: new Date().toISOString(),
+      status: 'sent',
+      currency: 'ILS',
+      lines: [{ sku: '1', rawDescription: 'עגבניות', qty: 4, unit: 'ק״ג', unitPrice: 6.5, lineTotal: 26 }],
+      totalEstimated,
+      metadata: {},
+    });
+    const imp = (total: number) =>
+      importPurchaseOrder(db, { restaurantId: A.restaurantId, normalized: order(total), createdBy: A.ownerUserId });
+
+    const draft = await imp(999); // failed checksum → draft for review
+    expect(draft.status).toBe('draft');
+    const poId = draft.poId;
+    const pinned = await invoice(A, { last: { poId } });
+
+    await caller(A).orders.placeOrder({ poId, channel: 'none' }); // 1st send
+    expect((await queued()).map((j) => j.invoiceId)).toEqual([pinned]);
+
+    expect(await imp(999)).toMatchObject({ status: 'draft' }); // a failed re-import demotes it
+    const promoted = await imp(26); // a clean re-import promotes it again
+    expect(promoted).toMatchObject({ status: 'sent', promotedFromDraft: true });
+    // What orders.importPo schedules after its commit:
+    expect(await rematchOnPoSent(db, A.restaurantId, poId)).toMatchObject({ requeued: 1, failed: 0 });
+
+    const jobs = await queued();
+    expect(jobs.map((j) => j.invoiceId)).toEqual([pinned, pinned]);
+    expect(new Set(jobs.map((j) => j.dedupeKey)).size).toBe(2);
   });
 
   it('never reads another restaurant: a foreign PO id finds nothing', async () => {
