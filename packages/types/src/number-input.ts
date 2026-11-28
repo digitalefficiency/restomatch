@@ -128,3 +128,119 @@ export function detectDecimalStyle(values: Iterable<string | null | undefined>):
   }
   return 'auto';
 }
+
+/* ------------------------------------------------------------------------- *
+ * parseDecimalInput (G-13): the ONE input parser for a typed or imported number.
+ * A kind → {scale, grouping} mapping over parseNumberInput (whose grammar does
+ * not change) plus the split of its `invalid` into `ambiguous` (a real number
+ * we refuse to guess — "1,250" as a quantity) and `invalid` (not a number).
+ * The integer it returns is exact: build money from it, never Math.round(x*100).
+ * ------------------------------------------------------------------------- */
+
+/** ils → agorot (scale 2) · unitPrice → price units = 1/100 agora (scale 4) · qty → milli (scale 3) · percent → basis points (scale 2). */
+export type DecimalKind = 'ils' | 'unitPrice' | 'qty' | 'percent';
+
+interface KindSpec {
+  scale: number;
+  grouping: boolean;
+}
+const KINDS: Record<DecimalKind, KindSpec> = {
+  ils: { scale: 2, grouping: true },
+  unitPrice: { scale: 4, grouping: true },
+  qty: { scale: 3, grouping: false },
+  percent: { scale: 2, grouping: false },
+};
+
+/** The integer field each kind returns. */
+export interface DecimalScaledField {
+  ils: 'agorot';
+  unitPrice: 'priceUnits';
+  qty: 'milli';
+  percent: 'basisPoints';
+}
+const FIELD: DecimalScaledField = { ils: 'agorot', unitPrice: 'priceUnits', qty: 'milli', percent: 'basisPoints' };
+
+/** A real number with two readings: ask the person, never pick one. */
+export type DecimalAmbiguousReason =
+  /** "1,250" for a quantity/percent: 1250 or 1.25? */
+  | 'thousands-or-decimal-comma'
+  /** "1.250" for ₪: ₪1,250 (European grouping) or ₪1.25 with three decimals? */
+  | 'thousands-or-three-decimals';
+
+export type DecimalInvalidReason =
+  | 'not-a-number'
+  | 'negative-not-allowed'
+  /** "1.234,50" outside a comma-decimal file. */
+  | 'comma-decimal-needs-comma-file'
+  | 'too-many-decimals'
+  /** Thousands grouping in a quantity or a percent ("1.250.000"). */
+  | 'grouping-not-allowed'
+  /** Beyond exact integer range. */
+  | 'out-of-range';
+
+export type DecimalInput<K extends DecimalKind = DecimalKind> =
+  | { kind: 'empty' }
+  | ({ kind: 'ok'; value: number } & { [F in DecimalScaledField[K]]: number })
+  | { kind: 'ambiguous'; raw: string; reason: DecimalAmbiguousReason }
+  | { kind: 'invalid'; raw: string; reason: DecimalInvalidReason };
+
+export interface DecimalInputOptions {
+  /** A sign ("-5", "5-", "(5)") is accepted. Default false. */
+  negative?: boolean;
+  /** The file's decimal style (detectDecimalStyle); 'auto' (default) for typed input. */
+  decimal?: DecimalStyle;
+}
+
+/** Bidi isolates/marks that `moneyText` output carries, beyond what parseNumberInput already ignores. */
+const ISOLATES = /[⁦-⁩‪-‮؜]/g;
+
+export function parseDecimalInput<K extends DecimalKind>(
+  raw: string | null | undefined,
+  kind: K,
+  opts: DecimalInputOptions = {},
+): DecimalInput<K> {
+  if (raw == null) return { kind: 'empty' };
+  const original = String(raw).trim();
+  let s = original.replace(ISOLATES, '');
+  if (kind === 'percent') s = s.replace(/%\s*$/, '').replace(/^\s*%/, '');
+  if (s.trim() === '') return original === '' ? { kind: 'empty' } : { kind: 'invalid', raw: original, reason: 'not-a-number' };
+  const spec = KINDS[kind];
+  const body = clean(s);
+  // Both separators can only mean one thing ("1,234.500" kg), so grouping is safe for every kind.
+  const both = body.includes(',') && body.includes('.');
+  const cell = parseNumberInput(s, {
+    scale: spec.scale,
+    grouping: spec.grouping || both,
+    negative: opts.negative,
+    decimal: opts.decimal,
+  });
+  if (cell.kind === 'empty') return { kind: 'empty' };
+  if (cell.kind === 'ok') {
+    return { kind: 'ok', value: cell.value, [FIELD[kind]]: cell.scaled } as DecimalInput<K>;
+  }
+  return { raw: original, ...why(body, spec, opts) } as DecimalInput<K>;
+}
+
+/** Why parseNumberInput refused: re-check the shapes it rejects, most specific first. */
+function why(
+  body: string,
+  spec: KindSpec,
+  opts: DecimalInputOptions,
+): { kind: 'ambiguous'; reason: DecimalAmbiguousReason } | { kind: 'invalid'; reason: DecimalInvalidReason } {
+  const inv = (reason: DecimalInvalidReason) => ({ kind: 'invalid' as const, reason });
+  const s = body.replace(/^\((.*)\)$/, '$1').replace(/^-|-$/g, '');
+  if (s !== body && !opts.negative && /^[\d.,]+$/.test(s)) return inv('negative-not-allowed');
+  if (!/^[\d.,]+$/.test(s)) return inv('not-a-number');
+  const groupedComma = /^\d{1,3}(,\d{3})+$/.test(s) && !/^0,/.test(s);
+  if (groupedComma && !spec.grouping) return { kind: 'ambiguous', reason: 'thousands-or-decimal-comma' };
+  if (/^[1-9]\d{0,2}(\.\d{3})+$/.test(s)) {
+    if (!spec.grouping) return inv('grouping-not-allowed');
+    if (/^[1-9]\d{0,2}\.\d{3}$/.test(s) && spec.scale < 3) return { kind: 'ambiguous', reason: 'thousands-or-three-decimals' };
+  }
+  if (s.includes('.') && s.includes(',') && s.lastIndexOf(',') > s.lastIndexOf('.') && opts.decimal !== 'comma')
+    return inv('comma-decimal-needs-comma-file');
+  const frac = /[.,](\d+)$/.exec(s)?.[1];
+  if (frac && frac.length > spec.scale && /^\d+[.,]\d+$/.test(s)) return inv('too-many-decimals');
+  if (/^\d+([.,]\d+)?$/.test(s)) return inv('out-of-range');
+  return inv('not-a-number');
+}

@@ -1,4 +1,4 @@
-import { parseScaled } from './cost';
+import { parseDecimalInput, type DecimalAmbiguousReason, type DecimalInvalidReason } from '@restomatch/types';
 
 /**
  * Recipe CSV import — one row per ingredient line, recipe columns repeated (or
@@ -46,6 +46,8 @@ export interface CsvError {
     | 'missingColumn' | 'tooManyRows' | 'badQuantity' | 'badUnit' | 'badWaste' | 'badPrice' | 'badYield'
     | 'unknownIngredient' | 'empty' | 'tooLong' | 'tooManyLines' | 'subRecipeCycle' | 'subRecipeInUse';
   value?: string;
+  /** Why a number cell was refused (parseDecimalInput's ambiguous/invalid reason), e.g. 'thousands-or-three-decimals'. */
+  reason?: DecimalAmbiguousReason | DecimalInvalidReason;
 }
 
 const MAX_ROWS = 2000;
@@ -100,8 +102,6 @@ export function parseCsvRows(text: string): string[][] {
 }
 
 const DEC = /^\d{1,8}(\.\d{1,4})?$/;
-/** ₪ amount: "68", "68.50", "1,250.00" (comma ONLY as a thousands separator). */
-const PRICE = /^(\d{1,7}|\d{1,3}(,\d{3}){1,2})(\.\d{1,2})?$/;
 /** Waste %: 0–95 with ≤ 2 decimals (no hex / exponent forms). */
 const WASTE = /^\d{1,2}(\.\d{1,2})?%?$/;
 const YES = new Set(['yes', 'y', 'true', '1', 'כן', 'v', '✓']);
@@ -145,10 +145,11 @@ export function parseRecipeCsv(text: string): { recipes: CsvRecipe[]; errors: Cs
       else r.yieldQty = raw.yieldQty;
     }
     if (raw.price) {
-      const clean = raw.price.replace(/[₪\s]/g, '');
-      const agorot = PRICE.test(clean) ? Number(parseScaled(clean.replace(/,/g, ''), 2)) : NaN;
-      if (!Number.isFinite(agorot) || agorot > CSV_LIMITS.maxPriceAgorot) errors.push({ row: rowNo, code: 'badPrice', value: raw.price });
-      else r.menuPriceAgorot = agorot;
+      // G-13: the one input parser — "12,90" is ₪12.90, "1,250" is ₪1,250, "1.250" is ambiguous (reported, never guessed).
+      const p = parseDecimalInput(raw.price, 'ils');
+      if (p.kind !== 'ok' || p.agorot > CSV_LIMITS.maxPriceAgorot) {
+        errors.push({ row: rowNo, code: 'badPrice', value: raw.price, ...(p.kind === 'ambiguous' || p.kind === 'invalid' ? { reason: p.reason } : {}) });
+      } else r.menuPriceAgorot = p.agorot;
     }
     if (!raw.ingredient) return; // a recipe-only row (e.g. just the price)
     if (!DEC.test(raw.quantity) || Number(raw.quantity) <= 0) { errors.push({ row: rowNo, code: 'badQuantity', value: raw.quantity }); return; }

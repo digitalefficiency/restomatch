@@ -1,0 +1,35 @@
+{
+  "₪${": {
+    "apps/mobile/app/owner/index.tsx": 1,
+    "apps/web/lib/messageTemplates.ts": 3,
+    "apps/web/scripts/verify-ask-chain.ts": 2,
+    "apps/worker/scripts/check-demo.ts": 16,
+    "apps/worker/scripts/demo-seed-all.ts": 1,
+    "apps/worker/scripts/seed-chain-demo.ts": 8,
+    "apps/worker/scripts/seed-demo.ts": 10,
+    "apps/worker/scripts/seed-inventory-demo.ts": 1,
+    "apps/worker/scripts/seed-recovery-demo.ts": 3,
+    "apps/worker/scripts/seed-wave1-contracts-demo.ts": 5,
+    "apps/worker/src/jobs/matchInvoice.ts": 3,
+    "apps/worker/src/lib/demoExtras.ts": 7,
+    "packages/api/src/approvals/engine.ts": 4,
+    "packages/api/src/match/persist.ts": 1,
+    "packages/matching/src/engine.ts": 8
+  },
+  "toLocaleString near ₪": {
+    "apps/mobile/app/owner/index.tsx": 1,
+    "apps/worker/scripts/demo-seed-all.ts": 1,
+    "apps/worker/scripts/seed-inventory-demo.ts": 1
+  },
+  "} ₪": {
+    "apps/worker/scripts/seed-demo.ts": 1,
+    "apps/worker/src/lib/demoExtras.ts": 1
+  },
+  "currency: 'ILS'": {
+    "packages/api/src/leakCheck/sampleOcr.ts": 1,
+    "packages/db/scripts/seed.ts": 1,
+    "packages/ocr/src/providers/claudePoVision.ts": 1,
+    "packages/procurement/src/adapters/zester.ts": 1,
+    "packages/procurement/src/fixtures/marketman.ts": 2
+  }
+}
