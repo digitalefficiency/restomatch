@@ -9,6 +9,8 @@ export const he = {
   label: 'השאלה שלכם',
   submit: 'שאלו',
   thinking: 'בודק בנתונים…',
+  stop: 'עצור',
+  stopped: 'נעצר',
   suggestionsLabel: 'שאלות נפוצות',
   suggestions: {
     leakChange: 'מה השתנה בדליפה החודש?',
