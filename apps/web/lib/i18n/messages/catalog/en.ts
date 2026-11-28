@@ -222,7 +222,7 @@ export const en: Shape<typeof he> = {
       EMPTY: 'The first row must hold the column headers.',
       NO_ROWS: 'No product names in the selected column. Check the mapping.',
       FLAGGED_PRICES: 'Confirm you checked the flagged prices.',
-      IMPORT_RUNNING: 'An earlier import for this supplier is still running. Try again soon.',
+      IMPORT_RUNNING: 'An earlier import for this supplier is still running, try again soon.',
       MAPPING_NAME: 'You must map the “Description / product name” column.',
     },
   },
