@@ -35,9 +35,12 @@ type Sheet =
  */
 export function PwaSessionGuard({
   userId,
+  sessionExpires = null,
   appPwa = false,
 }: {
   userId: string;
+  /** W3-03b: the session's expiry; the parked-share owner stamp lapses with it. */
+  sessionExpires?: string | null;
   /** W3-03b: the app-wide PWA shell (manifest, worker, install sheet, badge). Off by default. */ appPwa?: boolean;
 }) {
   const t = useT(receivingDelivery);
@@ -48,8 +51,8 @@ export function PwaSessionGuard({
   useEffect(() => {
     void purgeSnapshotIfNotOwner(userId);
     // …and another user's parked shares (W3-03b); this user's are stamped as theirs.
-    void claimSharesFor(userId);
-  }, [userId]);
+    void claimSharesFor(userId, sessionExpires);
+  }, [userId, sessionExpires]);
   const photosOnlyRef = useRef(true);
   const [sheet, setSheet] = useState<Sheet>(null);
   const answerRef = useRef<((c: LogoutChoice) => void) | null>(null);

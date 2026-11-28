@@ -29,6 +29,7 @@ export default async function SharePage({
       orderCapture={features.includes('orderCapture')}
       canReceive={role === 'owner' || role === 'manager' || role === 'receiver'}
       userId={session?.user?.id ?? null}
+      sessionExpires={session?.expires ?? null}
     />
   );
 }

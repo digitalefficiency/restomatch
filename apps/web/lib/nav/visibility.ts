@@ -21,12 +21,15 @@ export function canOpen(role: UserRole, def: RouteDef): boolean {
 
 /**
  * A flag-gated route whose flags are all off 404s, so nothing should link to it.
- * A child page inherits its ancestors' flags (`/inventory/count` lives under
- * `inventory`'s `inventoryCount`), so every ancestor's flags must be on too.
+ * A child page inherits the flags of ancestors it sits under in the URL
+ * (`/inventory/count` under `inventory`'s `inventoryCount`); a logical parent
+ * at another path (a detail page parented to a list elsewhere) does not gate it.
  */
 function flagsOn(viewer: Pick<NavViewer, 'features'>, def: RouteDef | undefined): boolean {
   if (!def) return true;
-  return ancestry(def).every((d) => !d.features || d.features.some((f) => viewer.features.includes(f)));
+  return ancestry(def)
+    .filter((d) => d === def || def.path.startsWith(`${d.path}/`))
+    .every((d) => !d.features || d.features.some((f) => viewer.features.includes(f)));
 }
 
 /**

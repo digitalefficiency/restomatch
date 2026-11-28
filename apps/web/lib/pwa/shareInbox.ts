@@ -8,9 +8,11 @@
  *
  * Shares are this user's content on a possibly shared phone, so:
  * - sign-out deletes the whole cache (`purgeFieldSnapshot` → `purgeShares`);
- * - every signed-in mount writes the current user to `/__share/owner`
- *   (`claimSharesFor`), and the worker copies it into each share's meta at
- *   park time, so every share carries the user it was parked under;
+ * - every signed-in mount writes {userId, exp: session expiry} to
+ *   `/__share/owner` (`claimSharesFor`), and the worker copies the user into
+ *   each share's meta at park time (an expired stamp = no owner), so every
+ *   share carries the user it was parked under;
+ * - the share page shows a parked share only if it is stamped with the viewer;
  * - `claimSharesFor` deletes only shares stamped with ANOTHER user. A share
  *   with no stamp was parked while signed out (after a sign-out purge) and goes
  *   to the first user who signs in, who is then stamped on it.
@@ -151,23 +153,33 @@ export async function purgeShares(api: CacheStorageLike | null = storage()): Pro
 }
 
 const pathOf = (k: Request | string) => new URL(typeof k === 'string' ? k : k.url, 'https://x').pathname;
-const plain = (body: string) => new Response(body, { headers: { 'content-type': 'text/plain' } });
+
+/** Session expiry → epoch ms (the owner stamp's `exp`); unknown → one day from now. */
+function expMs(expires: string | number | Date | null | undefined): number {
+  const t = expires instanceof Date ? expires.getTime() : typeof expires === 'number' ? expires : expires ? Date.parse(expires) : NaN;
+  return Number.isFinite(t) ? t : Date.now() + 24 * 3600 * 1000;
+}
 
 /**
  * Make the parked shares this user's. Run on every signed-in shell mount and
  * before the share page reads:
- * 1. `/__share/owner` := `userId` (the worker stamps new shares with it);
- * 2. each share stamped with another user is deleted (meta + files);
- * 3. each unstamped share (parked while signed out) is stamped `userId`.
- * Returns whether it deleted anything. Never throws.
+ * 1. each share stamped with another user is deleted (meta + files);
+ * 2. each unstamped share (parked while signed out) is stamped `userId`;
+ * 3. `/__share/owner` := {userId, exp} (`exp` = the session's expiry), so the
+ *    worker stamps new shares with this user until the session runs out.
+ * Deletions come first: a failed stamp write never skips the purge. Returns
+ * whether it deleted anything. Never throws.
  */
-export async function claimSharesFor(userId: string, api: CacheStorageLike | null = storage()): Promise<boolean> {
+export async function claimSharesFor(
+  userId: string,
+  expires?: string | number | Date | null,
+  api: CacheStorageLike | null = storage(),
+): Promise<boolean> {
   if (!api || !userId) return false;
+  let purged = false;
   try {
     const cache = await api.open(SHARE_CACHE);
-    await cache.put(SHARE_OWNER_PATH, plain(userId));
     const keys = (await cache.keys()).map(pathOf);
-    let purged = false;
     for (const path of keys) {
       if (!/^\/__share\/[0-9a-f]{24}\/meta$/.test(path)) continue;
       const res = await cache.match(path);
@@ -183,8 +195,14 @@ export async function claimSharesFor(userId: string, api: CacheStorageLike | nul
       for (const k of keys) if (k.startsWith(prefix)) await cache.delete(k);
       purged = true;
     }
-    return purged;
   } catch {
-    return false;
+    /* storage blocked: nothing to read either */
   }
+  try {
+    const stamp = JSON.stringify({ userId, exp: expMs(expires) });
+    await (await api.open(SHARE_CACHE)).put(SHARE_OWNER_PATH, new Response(stamp, { headers: { 'content-type': 'application/json' } }));
+  } catch {
+    /* the next mount writes it */
+  }
+  return purged;
 }

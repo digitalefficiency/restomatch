@@ -10,6 +10,8 @@ import { MANIFEST_BASE } from '../manifest';
 import { canFollowPath } from '../../nav/visibility';
 
 const ORIGIN = 'https://app.test';
+/** A live session's expiry (the owner stamp lapses with it). */
+const LIVE = () => Date.now() + 3600_000;
 
 /** Cache Storage keyed by pathname: enough for the worker and shareInbox. */
 function fakeCaches() {
@@ -33,12 +35,18 @@ function fakeCaches() {
       open,
       keys: async () => [...stores.keys()],
       delete: async (n: string) => stores.delete(n),
-      match: async () => undefined,
+      match: async (r: Request | string) => {
+        for (const m of stores.values()) {
+          const hit = m.get(keyOf(r));
+          if (hit) return hit.clone();
+        }
+        return undefined;
+      },
     },
   };
 }
 
-async function loadWorker(scope = `${ORIGIN}/dashboard/`) {
+async function loadWorker(scope = `${ORIGIN}/dashboard`, fetchImpl: (r: unknown) => Promise<Response> = vi.fn()) {
   const src = await GET().text();
   const listeners: Record<string, (e: unknown) => void> = {};
   const c = fakeCaches();
@@ -62,7 +70,7 @@ async function loadWorker(scope = `${ORIGIN}/dashboard/`) {
       openWindow: async (u: string) => void opened.push(u),
     },
   };
-  runInNewContext(src, { self, caches: c.api, fetch: vi.fn(), URL, Request, Response, Promise, console, Uint8Array, Array, String, Date, JSON });
+  runInNewContext(src, { self, caches: c.api, fetch: fetchImpl, URL, Request, Response, Promise, console, Uint8Array, Array, String, Date, JSON });
   const run = async (type: string, event: Record<string, unknown>) => {
     let waited: Promise<unknown> = Promise.resolve();
     let responded: Promise<Response> | null = null;
@@ -132,12 +140,12 @@ describe('share target in the worker (W3-03b)', () => {
 
     // The owner signs in on this phone: their share is stamped as theirs and survives a re-mount.
     let id = await park();
-    expect(await claimSharesFor('owner-1', api)).toBe(false);
-    expect(await claimSharesFor('owner-1', api)).toBe(false);
+    expect(await claimSharesFor('owner-1', LIVE(), api)).toBe(false);
+    expect(await claimSharesFor('owner-1', LIVE(), api)).toBe(false);
     expect((await readShare(id, open))?.files).toHaveLength(1);
 
     // A receiver signs in next (no sign-out in between): the owner's share is gone before anything reads it.
-    expect(await claimSharesFor('receiver-2', api)).toBe(true);
+    expect(await claimSharesFor('receiver-2', LIVE(), api)).toBe(true);
     expect(await readShare(id, open)).toBeNull();
 
     // The guarded sign-out's purge (PwaSessionGuard → purgeFieldSnapshot) deletes rm-share-v1.
@@ -164,10 +172,10 @@ describe('share target in the worker (W3-03b)', () => {
       return new URL(res.headers.get('location')!, ORIGIN).searchParams.get('id');
     };
     expect(w.caches.stores.has('rm-share-v1')).toBe(false);
-    expect(await claimSharesFor('user-a', api)).toBe(false); // empty device: the stamp is written anyway
+    expect(await claimSharesFor('user-a', LIVE(), api)).toBe(false); // empty device: the stamp is written anyway
     const id = await park();
     expect((await readShare(id, open))?.owner).toBe('user-a');
-    expect(await claimSharesFor('user-b', api)).toBe(true);
+    expect(await claimSharesFor('user-b', LIVE(), api)).toBe(true);
     expect(await readShare(id, open)).toBeNull();
   });
 
@@ -176,7 +184,7 @@ describe('share target in the worker (W3-03b)', () => {
     const api = w.caches.api as unknown as CacheStorageLike;
     const open = async () => (await w.caches.open('rm-share-v1')) as unknown as CacheLike;
     // user A was here, then signed out (the purge deletes the cache, owner stamp included).
-    await claimSharesFor('user-a', api);
+    await claimSharesFor('user-a', LIVE(), api);
     vi.stubGlobal('caches', w.caches.api);
     try {
       await purgeFieldSnapshot();
@@ -188,9 +196,41 @@ describe('share target in the worker (W3-03b)', () => {
     const res = (await w.run('fetch', { request: shareRequest(form) }))!;
     const id = new URL(res.headers.get('location')!, ORIGIN).searchParams.get('id');
     expect((await readShare(id, open))?.owner).toBe('');
-    expect(await claimSharesFor('user-b', api)).toBe(false);
+    expect(await claimSharesFor('user-b', LIVE(), api)).toBe(false);
     expect((await readShare(id, open))?.owner).toBe('user-b');
-    expect(await claimSharesFor('user-c', api)).toBe(true);
+    expect(await claimSharesFor('user-c', LIVE(), api)).toBe(true);
+    expect(await readShare(id, open)).toBeNull();
+  });
+
+  it("an expired owner stamp is no owner: the next user's signed-out share is kept and becomes theirs", async () => {
+    const w = await loadWorker();
+    const api = w.caches.api as unknown as CacheStorageLike;
+    const open = async () => (await w.caches.open('rm-share-v1')) as unknown as CacheLike;
+    await claimSharesFor('user-a', Date.now() - 1000, api); // A's session ran out, no sign-out
+    const form = new FormData();
+    form.set('text', 'ספק חדש');
+    const res = (await w.run('fetch', { request: shareRequest(form) }))!;
+    const id = new URL(res.headers.get('location')!, ORIGIN).searchParams.get('id');
+    expect((await readShare(id, open))?.owner).toBe('');
+    expect(await claimSharesFor('user-b', LIVE(), api)).toBe(false);
+    expect((await readShare(id, open))?.owner).toBe('user-b');
+  });
+
+  it('a failed owner-stamp write never skips the purge', async () => {
+    const w = await loadWorker();
+    const api = w.caches.api as unknown as CacheStorageLike;
+    const open = async () => (await w.caches.open('rm-share-v1')) as unknown as CacheLike;
+    await claimSharesFor('user-a', LIVE(), api);
+    const form = new FormData();
+    form.set('text', 'של א');
+    const res = (await w.run('fetch', { request: shareRequest(form) }))!;
+    const id = new URL(res.headers.get('location')!, ORIGIN).searchParams.get('id');
+    const cache = await api.open('rm-share-v1');
+    const brokenPut: CacheStorageLike = {
+      ...api,
+      open: async () => ({ ...cache, keys: cache.keys, delete: cache.delete, match: cache.match, put: async () => Promise.reject(new Error('quota')) }),
+    };
+    expect(await claimSharesFor('user-b', LIVE(), brokenPut)).toBe(true);
     expect(await readShare(id, open)).toBeNull();
   });
 
@@ -223,14 +263,24 @@ describe('share target without a worker (server fallback)', () => {
 });
 
 describe('two registrations, one script (W3-03b)', () => {
-  it('the app-wide registration never answers a navigation; the receiving one keeps the offline shell', async () => {
+  const nav = (w: Awaited<ReturnType<typeof loadWorker>>, path: string) =>
+    w.run('fetch', { request: { url: ORIGIN + path, method: 'GET', mode: 'navigate' } });
+  it('the app-wide registration leaves every other navigation to the browser; the receiving one keeps the offline shell', async () => {
     const app = await loadWorker();
-    const nav = (w: Awaited<ReturnType<typeof loadWorker>>, path: string) =>
-      w.run('fetch', { request: { url: ORIGIN + path, method: 'GET', mode: 'navigate' } });
     expect(await nav(app, '/dashboard/chain')).toBeNull();
     expect(await nav(app, '/dashboard/receiving')).toBeNull(); // a bookkeeper's 403 stays a 403
     const shell = await loadWorker(`${ORIGIN}/dashboard/receiving`);
     expect(await nav(shell, '/dashboard/receivingx')).toBeNull();
+    expect(await nav(shell, '/dashboard')).toBeNull();
+  });
+  it('the launch page /dashboard: online, the network answer as is; offline, the offline page (not a network error)', async () => {
+    const online = await loadWorker(`${ORIGIN}/dashboard`, async () => new Response('forbidden', { status: 403 }));
+    expect((await nav(online, '/dashboard'))!.status).toBe(403);
+    const offline = await loadWorker(`${ORIGIN}/dashboard`, async () => Promise.reject(new TypeError('Failed to fetch')));
+    await offline.run('install', {});
+    const page = (await nav(offline, '/dashboard'))!;
+    expect(page.status).toBe(200);
+    expect(await page.text()).toBe('/pwa/offline.html'); // the precached file (fakeCaches stores its path)
   });
 });
 
@@ -263,6 +313,16 @@ describe('push + notification click (W3-03b)', () => {
     w.setWindows([win]);
     await w.run('notificationclick', { notification: { close, data: { url: '/dashboard/receiving/9' } } });
     expect(navigate).toHaveBeenCalledWith('/dashboard/receiving/9');
+  });
+
+  it("a window this registration does not control (navigate rejects): it opens the card in a new window", async () => {
+    const w = await loadWorker();
+    const navigate = vi.fn(async () => Promise.reject(new TypeError('This service worker is not the client\'s active service worker.')));
+    const win = { url: `${ORIGIN}/dashboard/receiving`, focus: async () => win, navigate };
+    w.setWindows([win]);
+    await w.run('notificationclick', { notification: { close: vi.fn(), data: { url: '/dashboard/approvals?invoice=7' } } });
+    expect(navigate).toHaveBeenCalled();
+    expect(w.opened).toEqual(['/dashboard/approvals?invoice=7']);
   });
 });
 
@@ -299,16 +359,19 @@ describe('a child route inherits its parent flags (canFollowPath)', () => {
     }
     expect(canFollowPath({ role: 'owner', features: ['inventoryCount'] }, '/dashboard/inventory/count')).toBe(true);
   });
+  it('a logical parent at another path does not gate a page (only URL ancestors do)', () => {
+    expect(canFollowPath({ role: 'owner', features: [] }, '/dashboard/invoices/abc')).toBe(true);
+  });
 });
 
 describe('worker registrations (W3-03b)', () => {
-  it('app-wide at /dashboard/, the offline shell at /dashboard/receiving; never throws', async () => {
+  it('app-wide at /dashboard (the launch page is controlled), the offline shell at /dashboard/receiving; never throws', async () => {
     const { registerAppWorker, registerReceivingWorker } = await import('../registerWorker');
     const register = vi.fn(async () => ({}));
     expect(await registerAppWorker({ register })).toBe(true);
     expect(await registerReceivingWorker({ register })).toBe(true);
     expect(register.mock.calls).toEqual([
-      ['/receiver-sw.js', { scope: '/dashboard/' }],
+      ['/receiver-sw.js', { scope: '/dashboard' }],
       ['/receiver-sw.js', { scope: '/dashboard/receiving' }],
     ]);
     expect(await registerAppWorker(undefined)).toBe(false);

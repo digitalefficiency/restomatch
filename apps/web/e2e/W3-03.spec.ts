@@ -8,7 +8,8 @@ import { expect, test, type Page } from '@playwright/test';
  * share page (never a 404; text → order capture; empty share → calm card), the
  * server fallback for the share POST, and /dashboard/settings/notifications
  * (receiver: field events only, no ₪, 56 px controls; storage not deployed yet →
- * an honest "coming soon"). Receiver on a phone, Hebrew. Axe wcag22aa clean.
+ * an honest "coming soon"), and the installed launch (controlled online, the
+ * offline page offline). Receiver on a phone, Hebrew. Axe wcag22aa clean.
  */
 const AXE_SOURCE = readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8');
 const RECEIVER = 'receiver@kfar-hazeitim.test';
@@ -97,4 +98,31 @@ test('notification settings: field events only for the receiver, honest about st
   expect((await enable.boundingBox())!.height).toBeGreaterThanOrEqual(56);
   expect(await page.locator('main').innerText()).not.toContain('₪');
   expect(await axeSerious(page)).toEqual([]);
+});
+
+test('the installed app launches controlled, and offline its launch page is the offline page', async ({ page, context }) => {
+  test.setTimeout(120_000);
+  // The app-wide registration, as AppPwa makes it (the receiverPwa flag is off for this tenant).
+  await page.goto('/dashboard/settings/notifications');
+  await page.evaluate(async () => {
+    await navigator.serviceWorker.register('/receiver-sw.js', { scope: '/dashboard' });
+    await navigator.serviceWorker.ready;
+  });
+  // The launch page itself is in the registration's scope: it gets a controller.
+  await page.goto('/dashboard?source=pwa');
+  await expect
+    .poll(() => page.evaluate(() => navigator.serviceWorker.controller?.scriptURL ?? ''), { timeout: 30_000 })
+    .toContain('/receiver-sw.js');
+  // No signal: the launch shows the offline page with the way into receiving, never the browser's error.
+  await context.setOffline(true);
+  try {
+    await page.goto('/dashboard?source=pwa');
+    await expect(page.getByRole('heading', { name: 'אין חיבור לאינטרנט' })).toBeVisible();
+    await expect(page.locator('a.retry')).toHaveAttribute('href', '/dashboard/receiving?source=pwa');
+  } finally {
+    await context.setOffline(false);
+  }
+  await page.evaluate(async () => {
+    for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
+  });
 });

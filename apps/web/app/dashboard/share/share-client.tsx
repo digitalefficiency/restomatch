@@ -17,6 +17,7 @@ export function ShareClient({
   orderCapture,
   canReceive,
   userId,
+  sessionExpires = null,
 }: {
   id: string | null;
   fallback: { title: string; text: string; url: string };
@@ -25,6 +26,8 @@ export function ShareClient({
   canReceive: boolean;
   /** Another user's parked shares are wiped before anything is read (shared phone). */
   userId: string | null;
+  /** The session's expiry: the owner stamp lapses with it. */
+  sessionExpires?: string | null;
 }) {
   const t = useT(common);
   const router = useRouter();
@@ -35,8 +38,10 @@ export function ShareClient({
     let live = true;
     void (async () => {
       // No session id → nothing parked is shown (never another user's share).
-      const owned = userId ? (await claimSharesFor(userId), true) : false;
-      const parked = id && owned ? await readShare(id) : null;
+      if (userId) await claimSharesFor(userId, sessionExpires);
+      const found = id && userId ? await readShare(id) : null;
+      // Only a share stamped with this user (the claim stamps unowned ones), never on trust.
+      const parked = found && found.owner === userId ? found : null;
       const item: SharedItem | null =
         parked ?? (shareText(fallback) ? { id: '', at: 0, owner: userId ?? '', ...fallback, skipped: 0, files: [] } : null);
       const route = routeShare(item);

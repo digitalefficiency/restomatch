@@ -1,14 +1,16 @@
 /**
  * W3-03b · service-worker registrations of /receiver-sw.js. Two scopes, one
  * script (the worker reads its own scope):
- * - `/dashboard/` (app-wide, every role): share target + push + notification
- *   clicks. It never answers page navigations.
+ * - `/dashboard` (app-wide, every role; no trailing slash, like the manifest
+ *   scope, so the `/dashboard?source=pwa` launch page is controlled): share
+ *   target + push + notification clicks. Of the page navigations it answers
+ *   only exactly `/dashboard`, and only when the network fails (the offline page).
  * - `/dashboard/receiving` (W2-05, ReceiverPwa — roles that open receiving):
  *   the offline shell. The narrower scope controls the receiving pages.
  * Never throws.
  */
 export const SW_URL = '/receiver-sw.js';
-export const SW_SCOPE = '/dashboard/';
+export const SW_SCOPE = '/dashboard';
 export const RECEIVING_SCOPE = '/dashboard/receiving';
 
 export interface SwContainer {

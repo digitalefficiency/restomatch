@@ -1,7 +1,7 @@
 /**
  * Service worker for the receiver PWA (flag `receiverPwa`), served from the
  * origin root. Two registrations: scope `/dashboard/receiving` (W2-05 offline
- * shell, lib/pwa/ReceiverPwa.tsx) and scope `/dashboard/` (W3-03b share target
+ * shell, lib/pwa/ReceiverPwa.tsx) and scope `/dashboard` (W3-03b share target
  * and push, lib/pwa/registerWorker.ts); the narrower one controls receiving. Public (the last path segment
  * looks like a static asset) — it contains no tenant data.
  *
@@ -23,7 +23,7 @@
  * offline, the snapshot of that exact page, else the static offline page.
  * Field work done offline lives in IndexedDB (lib/pwa/outbox.ts), not here.
  *
- * W3-03b (app-wide PWA, scope /dashboard/):
+ * W3-03b (app-wide PWA, scope /dashboard):
  * - Share target: the manifest's POST multipart to SHARE_ACTION is caught here
  *   and parked in "rm-share-v1" (one entry per share: meta JSON + up to
  *   SHARE_MAX_FILES image/PDF files, each ≤ SHARE_MAX_BYTES), then 303 →
@@ -43,8 +43,8 @@ const KEEP = [CACHE, STATIC_CACHE, SNAPSHOT_CACHE, SHARE_CACHE];
 const SHARE_ACTION = '/dashboard/share/receive';
 const SHARE_OWNER_PATH = '/__share/owner';
 // Two registrations run this script: scope /dashboard/receiving (W2-05, the
-// offline shell) and scope /dashboard/ (W3-03b, share/push). Only the first
-// answers page navigations. No registration info (an old test harness) = shell.
+// offline shell) and scope /dashboard (W3-03b, share/push). Only the first
+// answers receiving navigations (the second: only an offline /dashboard launch). No registration info (an old test harness) = shell.
 const RECEIVING_SHELL = !(self.registration && self.registration.scope)
   || new URL(self.registration.scope).pathname.replace(/\/$/, '').endsWith('/dashboard/receiving');
 const SHARE_MAX_FILES = 10;
@@ -139,8 +139,13 @@ async function parkShare(req) {
   await dropOldShares(cache, now);
   // Whose share this is: the signed-in page keeps /__share/owner current
   // (claimSharesFor on mount; sign-out deletes the cache, so no stamp = signed out).
+  // The stamp is {userId, exp}; a missing, unreadable or expired one (the
+  // session ran out without a sign-out) means no owner.
   const stamp = await cache.match(SHARE_OWNER_PATH);
-  const owner = stamp ? (await stamp.text()).trim().slice(0, 200) : '';
+  const parsed = stamp ? await stamp.json().catch(() => null) : null;
+  const owner = parsed && typeof parsed.userId === 'string' && typeof parsed.exp === 'number' && parsed.exp > now
+    ? parsed.userId.slice(0, 200)
+    : '';
   const meta = {
     at: now,
     owner,
@@ -201,7 +206,11 @@ self.addEventListener('notificationclick', (event) => {
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => {
       for (const w of wins) {
         if (new URL(w.url).origin !== self.location.origin) continue;
-        return w.focus().then((f) => (f && typeof f.navigate === 'function' ? f.navigate(target) : f));
+        // navigate() rejects for a window this registration does not control
+        // (another registration's page, an uncontrolled tab): open one instead.
+        return w.focus()
+          .then((f) => (f && typeof f.navigate === 'function' ? f.navigate(target) : Promise.reject(new Error('no navigate'))))
+          .catch(() => self.clients.openWindow(target));
       }
       return self.clients.openWindow(target);
     }),
@@ -237,8 +246,16 @@ self.addEventListener('fetch', (event) => {
   // offline, the page's own snapshot of that page, else the static offline page.
   // Only the receiving pages, and only in the receiving registration (W2-05's
   // offline shell, registered by ReceiverPwa for the roles that open receiving).
-  // The app-wide registration (W3-03b) leaves every navigation to the browser,
-  // so the real status (the in-shell 403, a 404) reaches the page as before.
+  // The app-wide registration (W3-03b) leaves every other navigation to the
+  // browser, so the real status (the in-shell 403, a 404) reaches the page.
+  // The app-wide registration answers exactly one navigation: the launch page
+  // /dashboard, and only offline (network first, no HTML stored, so an online
+  // 403/404/redirect reaches the page as is). The offline page links to the
+  // receiving board, which the receiving registration's snapshot serves.
+  if (req.mode === 'navigate' && !RECEIVING_SHELL && url.pathname === '/dashboard') {
+    event.respondWith(fetch(req).catch(() => caches.match('/pwa/offline.html').then((hit) => hit || Response.error())));
+    return;
+  }
   if (req.mode === 'navigate' && RECEIVING_SHELL && (url.pathname === '/dashboard/receiving' || url.pathname.startsWith('/dashboard/receiving/'))) {
     event.respondWith(fetch(req).catch(() => offlineNavigation(url)));
   }
