@@ -6,6 +6,12 @@ import { computeRecoverySummary, returnedInMonth, syncClaims } from '../recovery
 import { formatIlsAgorot, formatPct, ilsToAgorot, type ReportLocale } from './money';
 
 /**
+ * Owner G-14 Q2 (21.11): the monthly report shows no "נתפס לפני תשלום" until H-03 (the real
+ * paid_at) is deployed — today's figure is the old "not marked paid yet" rule.
+ */
+const SHOW_CAUGHT = false;
+
+/**
  * The monthly "one number" report: last month's leak in ₪ and % of spend,
  * what was caught, claimed and actually returned, the top 3 suppliers and the
  * top 3 issues, plus next actions. All money is INTEGER AGOROT in the
@@ -449,7 +455,7 @@ export function monthlyReportEmail(
     <p style="margin:0 0 8px;font-size:17px;font-weight:700">${ilsSpan(f.ils(data.leakAgorot), 'danger')} · ${esc(f.pct(data.leakPct))} ${esc(c.ofSpend)}</p>
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:6px 0">
       ${row(c.spend, ilsSpan(f.ils(data.spendAgorot)))}
-      ${row(c.caught, ilsSpan(f.ils(data.caughtAgorot), 'gold'))}
+      ${SHOW_CAUGHT ? row(c.caught, ilsSpan(f.ils(data.caughtAgorot), 'gold')) : ''}
       ${row(c.claimed, ilsSpan(f.ils(data.claimedAgorot)))}
       ${data.recoveryTracked === false ? '' : row(c.returned, ilsSpan(f.ils(data.returnedAgorot), 'gold'))}
       ${data.recoveryTracked === false ? '' : row(c.outstanding, ilsSpan(f.ils(data.outstandingAgorot), 'danger'))}
@@ -475,7 +481,7 @@ export function monthlyReportEmail(
     '',
     headline,
     `${c.spend}: ${f.ils(data.spendAgorot)}`,
-    `${c.caught}: ${f.ils(data.caughtAgorot)}`,
+    ...(SHOW_CAUGHT ? [`${c.caught}: ${f.ils(data.caughtAgorot)}`] : []),
     `${c.claimed}: ${f.ils(data.claimedAgorot)}`,
     ...(data.recoveryTracked === false
       ? []
@@ -507,7 +513,8 @@ export function monthlyReportWhatsApp(
   const lines = [
     `*${c.title} · ${monthLabel(data.month, locale)}*`,
     c.oneNumber(f.ils(data.leakAgorot), f.pct(data.leakPct)),
-    `${c.caught}: ${f.ils(data.caughtAgorot)} · ${c.claimed}: ${f.ils(data.claimedAgorot)}` +
+    (SHOW_CAUGHT ? `${c.caught}: ${f.ils(data.caughtAgorot)} · ` : '') +
+      `${c.claimed}: ${f.ils(data.claimedAgorot)}` +
       (data.recoveryTracked === false ? '' : ` · ${c.returned}: ${f.ils(data.returnedAgorot)}`),
   ];
   const top = data.topSuppliers[0];

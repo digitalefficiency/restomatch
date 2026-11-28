@@ -56,8 +56,8 @@ export const en: Shape<typeof he> = {
   },
   answers: {
     unknown: 'Right now I answer five common questions: why the leak changed, how much leaked, which supplier raised prices, which supplier leaks the most, and what to send a credit request for. Try one of them.',
-    leakTotal: 'So far this month {leak} leaked, {pct} of checked spend, across {invoices} invoices. {caught} was caught before payment.',
-    leakTotalNoPct: 'So far this month {leak} leaked across {invoices} invoices. {caught} was caught before payment.',
+    leakTotal: 'So far this month {leak} leaked, {pct} of checked spend, across {invoices} invoices.',
+    leakTotalNoPct: 'So far this month {leak} leaked across {invoices} invoices.',
     leakUp: 'The leak went up by {delta}, {curSpan} vs {prevSpan}: {leak} vs {prev}.',
     leakDown: 'The leak went down by {delta}, {curSpan} vs {prevSpan}: {leak} vs {prev}.',
     leakSame: 'The leak is about the same, {curSpan} vs {prevSpan}: {leak} vs {prev}.',
