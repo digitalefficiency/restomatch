@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { expect, test, type Browser, type Page } from '@playwright/test';
+import { he as ovHe } from '../lib/i18n/messages/overview/he';
+import { interpolate } from '../lib/i18n/translate';
 import { DEMO_RESTAURANT_NAME } from './env';
 import { e2eSql } from './helpers';
 
@@ -107,12 +109,15 @@ test.describe('owner: one figure on the home row, the badge and the bell', () =>
     const summary = ((await res.json()) as { result: { data: { json: { count: number; blockers: number; toDecide: { amountIls: number } } } } }).result.data.json;
     expect(summary.count).toBeGreaterThan(0);
     expect(amount).toBe(String(Math.round(summary.toDecide.amountIls)));
-    await expect(page.getByTestId('needs-decide-sub')).toContainText(`${summary.blockers} חוסמים תשלום`);
+    // DS3-03: the blockers are the solid pill inside the sub line, worded by its ICU key ("1 חוסם תשלום" / "2 חוסמים תשלום").
+    await expect(page.getByTestId('needs-decide-sub')).toContainText(interpolate(ovHe.needs.blocking, { count: summary.blockers }, 'he-IL'));
 
     const link = page.locator('aside a[href="/dashboard/approvals"], nav a[href="/dashboard/approvals"]').first();
     // The badge words are the link's description (aria-describedby → a hidden span), not its name.
     // Same count as the home row (the lab seed alone: 4; another spec's parity rows add info rows, never ₪).
-    const rowCount = Number(/(\d+)\s*פערים/.exec(((await page.getByTestId('needs-decide-sub').innerText()) ?? '').replace(BIDI, ''))?.[1]);
+    // DS3-03: one gap reads "פער אחד" (needs.decideGaps, an ICU plural), more read "N פערים".
+    const gaps = /(?:(\d[\d,]*)\s*פערים|פער אחד)/.exec(((await page.getByTestId('needs-decide-sub').innerText()) ?? '').replace(BIDI, ''));
+    const rowCount = gaps ? (gaps[1] ? Number(gaps[1].replace(/,/g, '')) : 1) : Number.NaN;
     expect(rowCount).toBe(summary.count);
     await expect(link.locator('[data-nav-badge]')).toBeVisible({ timeout: 20_000 });
     const descId = (await link.getAttribute('aria-describedby')) ?? 'none';
@@ -158,7 +163,7 @@ test.describe('owner: one figure on the home row, the badge and the bell', () =>
       await page.goto('/dashboard');
       // Home row: it may sit under "עוד N" (owner home shows 3 rows).
       const more = page.getByTestId('needs-you-more');
-      if (await more.count()) await more.locator('summary').click();
+      if (await more.count()) await more.getByRole('button').click(); // DS3-03: "עוד" is a button that unfolds the rows in place, not a <details> summary
       const row = page.getByTestId('needs-invoiceLines').first();
       await expect(row).toBeVisible({ timeout: 20_000 });
       expect(await row.getAttribute('href')).toBe('/dashboard/invoices?view=lines');
@@ -215,7 +220,15 @@ for (const role of ROLES) {
       const first = role === 'receiver' ? page.getByTestId('receiving-board').first() : page.locator('[data-needs-row], [data-testid="needs-you-zero"], [data-testid="chef-count"]').first();
       await expect(first).toBeVisible();
       const box = await first.boundingBox();
-      expect(box!.y, 'the first row starts above the fold').toBeLessThan(667);
+      if (role === 'owner') {
+        // DS3-03 (SPEC §10.1 over I1 7.11): the owner's phone home opens on the leak card — its ₪ starts above the fold, the first row follows the card.
+        const hero = await page.getByTestId('leak-hero-amount').boundingBox();
+        expect(hero!.y, 'the hero ₪ starts above the fold').toBeLessThan(667);
+        await first.scrollIntoViewIfNeeded();
+        await expect(first).toBeInViewport();
+      } else {
+        expect(box!.y, 'the first row starts above the fold').toBeLessThan(667);
+      }
       if (staff) {
         await page.waitForLoadState('networkidle');
         expect(await page.locator('body').innerText()).not.toContain('₪');

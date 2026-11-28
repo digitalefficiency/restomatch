@@ -171,41 +171,53 @@ test.describe('owner home', () => {
   test.use({ storageState: OWNER_STATE });
   test.beforeEach(async ({ page, baseURL }) => consent(page, baseURL!));
 
-  test('375×667: the hero ₪ and the first Needs-you row are visible without scrolling', async ({ page }) => {
-    await page.setViewportSize(PHONE_SMALL.viewport);
-    await page.goto('/dashboard');
-    const amountBox = (await page.getByTestId('leak-hero-amount').boundingBox())!;
-    const firstRow = page.locator('[data-testid="needs-you"] li a, [data-testid="needs-you-zero"]').first();
-    await expect(firstRow).toBeVisible();
-    const rowBox = (await firstRow.boundingBox())!;
-    // Under the fixed bottom nav, not the raw viewport.
-    const navTop = await page.evaluate(() => {
-      const nav = [...document.querySelectorAll('nav')].find((n) => getComputedStyle(n).position === 'fixed' && n.getBoundingClientRect().top > 300);
-      return nav ? nav.getBoundingClientRect().top : window.innerHeight;
-    });
-    expect(amountBox.y + amountBox.height, 'hero ₪ bottom').toBeLessThanOrEqual(navTop);
-    expect(rowBox.y + rowBox.height, 'first Needs-you row bottom').toBeLessThanOrEqual(navTop);
-    // Owner decision I1 (7.11): the home has no view toolbar at all (views live on the leaks page).
-    await expect(page.getByTestId('home-view-toggle')).toHaveCount(0);
-    await expect(page.locator('#home-view-toolbar')).toHaveCount(0);
+  // DS3-03 (SPEC §10.1 over I1 7.11): the phone home opens on the leak card; the first row follows it. A touch phone, so the hero's links have their 44 px floor.
+  test('375×667: the hero ₪ is visible without scrolling, the first Needs-you row right under the hero', async ({ browser, baseURL }) => {
+    const context = await browser.newContext({ ...PHONE_SMALL, baseURL, storageState: OWNER_STATE });
+    const page = await context.newPage();
+    try {
+      await consent(page, baseURL!);
+      await page.goto('/dashboard');
+      const amountBox = (await page.getByTestId('leak-hero-amount').boundingBox())!;
+      const firstRow = page.locator('[data-testid="needs-you"] li a, [data-testid="needs-you-zero"]').first();
+      await expect(firstRow).toBeVisible();
+      const rowBox = (await firstRow.boundingBox())!;
+      // Under the fixed bottom nav, not the raw viewport.
+      const navTop = await page.evaluate(() => {
+        const nav = [...document.querySelectorAll('nav')].find((n) => getComputedStyle(n).position === 'fixed' && n.getBoundingClientRect().top > 300);
+        return nav ? nav.getBoundingClientRect().top : window.innerHeight;
+      });
+      expect(amountBox.y + amountBox.height, 'hero ₪ bottom').toBeLessThanOrEqual(navTop);
+      // DS3-03: the first row sits below the whole leak card and is reached by scrolling (no longer inside the 375×667 fold).
+      const heroBox = (await page.getByTestId('leak-hero').boundingBox())!;
+      expect(rowBox.y, 'first Needs-you row under the leak card').toBeGreaterThanOrEqual(heroBox.y + heroBox.height);
+      await firstRow.scrollIntoViewIfNeeded();
+      await expect(firstRow).toBeInViewport();
+      // Owner decision I1 (7.11): the home has no view toolbar at all (views live on the leaks page).
+      await expect(page.getByTestId('home-view-toggle')).toHaveCount(0);
+      await expect(page.locator('#home-view-toolbar')).toHaveCount(0);
 
-    // The split tiles are real targets on the phone (≥48 px), and the ⓘ note opens inside the viewport.
-    for (const id of ['hero-unpaid', 'hero-paid']) {
-      const tile = page.getByTestId(id);
-      if (await tile.count()) expect((await tile.boundingBox())!.height, `${id} target height`).toBeGreaterThanOrEqual(48);
-    }
-    const info = page.locator(`[data-testid="leak-hero"] summary[aria-label="${ovHe.hero.howCalc}"]`);
-    if (await info.count()) {
-      await info.click();
-      const note = page.locator('[data-testid="leak-hero"] details[open] > p').first();
-      await expect(note).toBeVisible();
-      const box = (await note.boundingBox())!;
-      expect(box.x, 'ⓘ note left edge').toBeGreaterThanOrEqual(0);
-      expect(box.x + box.width, 'ⓘ note right edge').toBeLessThanOrEqual(PHONE_SMALL.viewport.width);
+      // DS3-03: the split tiles became a legend with a link under each figure; the links are the phone's targets (≥44 px on a coarse pointer).
+      for (const id of ['hero-unpaid-link', 'hero-paid-link']) {
+        const link = page.getByTestId(id);
+        if (await link.count()) expect((await link.boundingBox())!.height, `${id} target height`).toBeGreaterThanOrEqual(44);
+      }
+      // DS3-03: the ⓘ note became "איך הגענו לסכום?", the calculation opened in place: it opens inside the viewport.
+      const why = page.getByTestId('hero-why-toggle');
+      if (await why.count()) {
+        await why.click();
+        const note = page.locator('[data-testid="hero-why"] [role="region"]');
+        await expect(note).toBeVisible();
+        const box = (await note.boundingBox())!;
+        expect(box.x, 'calculation left edge').toBeGreaterThanOrEqual(0);
+        expect(box.x + box.width, 'calculation right edge').toBeLessThanOrEqual(PHONE_SMALL.viewport.width);
+      }
+    } finally {
+      await context.close();
     }
   });
 
-  test('1440×900: the 5 blocks fit the fold, compact hero ≤260 px, no trend, no target line', async ({ page }) => {
+  test('1440×900: the blocks fit the fold, the pace line in the hero (no trend card), no target line', async ({ page }) => {
     await page.setViewportSize(DESKTOP.viewport);
     await page.goto('/dashboard');
     await expect(page.getByTestId('leak-hero')).toBeVisible();
@@ -214,12 +226,11 @@ test.describe('owner home', () => {
     // Owner decision I1 (7.11): hero first, then the task rows — the whole home fits 1440×900.
     const strip = (await page.getByTestId('needs-you').boundingBox())!;
     expect(strip.y + strip.height, 'Needs-you rows bottom').toBeLessThanOrEqual(900);
-    const hero = (await page.getByTestId('leak-hero').boundingBox())!;
-    expect(hero.height, 'hero height').toBeLessThanOrEqual(260);
+    // DS3-03: no "hero ≤260 px" any more — SPEC §10.1 (decision 1, 14.11) supersedes I1's compact hero: the card holds the number, its pace line and its split.
     await page.waitForLoadState('networkidle');
     const height = await page.evaluate(() => document.documentElement.scrollHeight);
     expect(height, 'desktop home height').toBeLessThanOrEqual(1100);
-    // The trend lives on the leaks page now (I1), not collapsed on the home.
+    // DS3-03: the old collapsed trend card stays off the home; the pace line inside the hero replaces it (asserted below, in the leak state).
     await expect(page.getByTestId('home-trend')).toHaveCount(0);
     // No target line (R-14 default) and no full-month "חודש קודם" caption in the hero.
     await expect(page.getByTestId('leak-hero')).not.toContainText('יעד');
@@ -239,36 +250,32 @@ test.describe('owner home', () => {
       expect(await axeSerious(page)).toEqual([]);
       return;
     }
-    // The delta compares the same day-span ("לעומת 1–25 בספטמבר"), never the whole previous month.
+    // DS3-03: in the leak state from the 2nd of the month (Israel time) the hero draws its pace line.
+    const israelDay = Number(new Intl.DateTimeFormat('en-GB', { day: 'numeric', timeZone: 'Asia/Jerusalem' }).format(new Date()));
+    if (state === 'leak' && israelDay >= 2) await expect(page.getByTestId('leak-hero-pace')).toBeVisible();
+    // The delta compares the same day-span, never the whole previous month.
     const delta = page.getByTestId('leak-hero-delta');
     if (state === 'leak' || state === 'clean') {
       await expect(delta).toBeVisible();
-      if ((await delta.getAttribute('data-direction')) !== 'none') await expect(delta).toContainText(/לעומת \d+–\d+ ב/);
+      // DS3-03: the same span is said in words ("לעומת אותם ימים באוקטובר"), no longer as a day range ("לעומת 1–25 בספטמבר").
+      if ((await delta.getAttribute('data-direction')) !== 'none') await expect(delta).toContainText(/לעומת אותם ימים ב/);
     } else {
       await expect(delta, 'no delta while only invoices waiting for a PO link').toHaveCount(0);
     }
     // DoD-4: in Hebrew the ₪ glyph sits left of the first digit.
+    // DS3-03: the hero ₪ is its own span now (<Money context="hero">, .money-glyph): its right edge vs the first digit's left edge.
     const shekelLeft = await page.getByTestId('leak-hero-amount').evaluate((el) => {
       const text = el.textContent ?? '';
-      const node = (function find(n: Node): Text | null {
-        if (n.nodeType === Node.TEXT_NODE && /₪/.test(n.textContent ?? '')) return n as Text;
-        for (const c of n.childNodes) {
-          const f = find(c);
-          if (f) return f;
-        }
-        return null;
-      })(el);
-      if (!node) return { ok: false, text };
-      const t = node.textContent!;
-      const rect = (i: number) => {
-        const r = document.createRange();
-        r.setStart(node, i);
-        r.setEnd(node, i + 1);
-        return r.getBoundingClientRect();
-      };
-      const sh = rect(t.indexOf('₪'));
-      const dg = rect(t.search(/\d/));
-      return { ok: sh.right <= dg.left + 1, text };
+      const glyph = el.querySelector('.money-glyph');
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      let node: Text | null = null;
+      for (let n = walker.nextNode(); n && !node; n = walker.nextNode()) if (/\d/.test(n.textContent ?? '')) node = n as Text;
+      if (!glyph || !node) return { ok: false, text };
+      const r = document.createRange();
+      const i = node.data.search(/\d/);
+      r.setStart(node, i);
+      r.setEnd(node, i + 1);
+      return { ok: glyph.getBoundingClientRect().right <= r.getBoundingClientRect().left + 1, text };
     });
     expect(shekelLeft.ok, `₪ left of the digits in "${shekelLeft.text}"`).toBe(true);
     expect(await axeSerious(page)).toEqual([]);
@@ -282,10 +289,11 @@ test.describe('owner home', () => {
     await expect(hero).toBeVisible();
     await expect(hero).not.toContainText('נתפס לפני תשלום');
     // The hero's two parts (by payment status) add up to the hero.
+    // DS3-03: exactly — the parts and the hero carry their agorot (G-16 markers), no whole-shekel tolerance.
     if (await hero.getByTestId('hero-unpaid').count()) {
-      const part = async (id: string, label: string) => amount((await hero.getByTestId(id).innerText()).replace(label, ''));
-      const sum = (await part('hero-unpaid', ovHe.hero.unpaid)) + (await part('hero-paid', ovHe.hero.paid));
-      expect(Math.abs(sum - amount(await hero.getByTestId('leak-hero-amount').innerText())), 'unpaid + paid = hero ₪').toBeLessThanOrEqual(1);
+      const part = async (id: string) => Number(await hero.getByTestId(id).locator('[data-money-row-of="hero-split"]').getAttribute('data-money-agorot'));
+      const sum = (await part('hero-unpaid')) + (await part('hero-paid'));
+      expect(sum, 'unpaid + paid = hero, in agorot').toBe(Number(await hero.getByTestId('leak-hero-amount').getAttribute('data-money-agorot')));
     }
     const rows = page.locator('[data-testid="needs-you"] [data-needs-row] a');
     // The rows stream in after the hero (inside a Suspense boundary that is still hidden for a few

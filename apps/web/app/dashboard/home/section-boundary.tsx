@@ -3,6 +3,7 @@
 import { Component, createRef, useEffect, useRef, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { RotateCcw } from 'lucide-react';
+import { Icon } from '@/lib/components/icon';
 import { useT } from '@/lib/i18n/client';
 import { overview } from '@/lib/i18n/messages/overview';
 
@@ -42,7 +43,8 @@ class Boundary extends Component<Props, { failed: boolean; attempt: number }> {
       );
     }
     return (
-      <div key={this.state.attempt} ref={this.region} tabIndex={-1} className="rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60">
+      // Focus after a retry is drawn by the one global outline (DS3 SPEC §4), around the card's radius.
+      <div key={this.state.attempt} ref={this.region} tabIndex={-1} className="rounded-card">
         {this.props.children}
       </div>
     );
@@ -64,7 +66,7 @@ function SectionFailed({ name, onRetry, focusOnMount }: { name: string; onRetry:
     <div
       role="status"
       data-testid={`home-section-failed-${name}`}
-      className="flex min-h-14 items-center justify-between gap-3 rounded-2xl border border-line bg-surface px-4 py-3 text-sm text-muted"
+      className="flex min-h-14 items-center justify-between gap-3 rounded-card border border-line-rule bg-surface px-4 py-3 text-body-sm text-fg-secondary shadow-e1"
     >
       <span>{t('section.failed')}</span>
       <button
@@ -77,9 +79,9 @@ function SectionFailed({ name, onRetry, focusOnMount }: { name: string; onRetry:
             onRetry();
           })
         }
-        className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-3 font-semibold text-primary hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 disabled:opacity-60"
+        className="inline-flex min-h-11 items-center gap-1.5 rounded-control px-3 font-medium text-primary transition-colors duration-micro ease-standard hover:bg-surface-hover disabled:text-fg-tertiary"
       >
-        <RotateCcw className="h-4 w-4" aria-hidden="true" />
+        <Icon as={RotateCcw} size="body-sm" />
         {t('section.retry')}
       </button>
     </div>

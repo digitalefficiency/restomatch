@@ -1,20 +1,20 @@
 import Link from 'next/link';
-import { ArrowLeft, HelpCircle } from 'lucide-react';
-import { cn } from '@/lib/components';
+import { cn } from '@/lib/components/cn';
+import { StatusDot } from '@/lib/components/feedback/StatusChip';
+import { DirIcon } from '@/lib/components/icon';
 import { formatNumber } from '@/lib/i18n/format';
 import type { Locale } from '@/lib/i18n/config';
 import type { UserRole } from '@restomatch/db';
 import { getT } from '@/lib/i18n/server';
 import { catalog as catalogNs } from '@/lib/i18n/messages/catalog';
 
-const focus = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2';
-
 /**
  * G-08 · "N מוצרים מחכים לשאלה: זה אותו מוצר?" — when the link policy is unsure
  * it asks a person instead of guessing, and the question must be seen. A calm
- * T2 line: one CTA to the mapper, a warn rail and no alarm, no ₪. Hidden at 0.
+ * T2 line in the clean finish's card: the amber dot (it waits for handling,
+ * blocks nothing), one CTA to the mapper, no alarm, no ₪. Hidden at 0.
  * `spacing` places it: under the page title on the chef's home (the default),
- * under the "מחכה לך" ₪ rows on the finance homes (never above the T1 hero).
+ * under the "מחכה לך" card on the finance homes (never above the T1 hero).
  */
 export function QuestionsLine({
   count,
@@ -36,18 +36,16 @@ export function QuestionsLine({
       data-testid="home-link-questions"
       className={cn(
         spacing,
-        'relative flex min-h-[48px] items-center justify-between gap-3 rounded-2xl border border-line bg-surface px-4 py-3 ps-5 shadow-card hover:border-primary/40',
-        'before:absolute before:inset-y-3 before:start-1.5 before:w-1 before:rounded-full before:bg-warn',
-        focus,
+        'flex min-h-12 items-center justify-between gap-3 rounded-card border border-line-rule bg-surface px-5 py-3 shadow-e1 transition-colors duration-micro ease-standard hover:bg-surface-hover max-sm:px-4',
       )}
     >
-      <span className="flex min-w-0 items-center gap-2 text-sm text-ink">
-        <HelpCircle className="h-4 w-4 shrink-0 text-warn" aria-hidden="true" />
+      <span className="flex min-w-0 items-center gap-2.5 text-body-sm text-fg">
+        <StatusDot tone="warn" />
         <span className="min-w-0">{label(formatNumber(count, locale))}</span>
       </span>
-      <span className="flex shrink-0 items-center gap-1 text-sm font-semibold text-primary">
+      <span className="flex shrink-0 items-center gap-0.5 text-body-sm font-medium text-primary">
         {cta}
-        <ArrowLeft className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
+        <DirIcon kind="forward" size="caption" />
       </span>
     </Link>
   );
