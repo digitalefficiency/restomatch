@@ -6,17 +6,18 @@ outside `apps/*` / `packages/*`, so `pnpm install` at the root never touches it)
 
 ```
 src/
-  Root.tsx          compositions + the beat timeline (TIMELINE / VERTICAL)
-  copy.ts           every on-screen string (he + en), demo FACTS, invoice LINES, SITE url
+  Root.tsx          compositions + the beat timeline (TIMELINE)
+  sample.ts         the site's ONE sample month (= sampleMonth.ts) + the film's reconciled breakdown (FILM)
+  copy.ts           every on-screen string (he + en), the receiver's invoice LINES (no ₪)
+  transcript.ts     the per-locale text alternative of the film (→ scripts/transcript.mjs → apps/web)
   theme.ts          stage palettes (LIGHT default, DARK via STAGE=dark), fonts, the one easing family
   fonts.ts          self-hosted Heebo + JetBrains Mono (copied from apps/web/public/fonts)
-  components/       Background (stage), Devices (laptop / phone / Screen with focus-pull), primitives
-  scenes/           Hook, Problem, Match, Product, Receiver, Chains, Value, Cta, PhoneDash, HeroLoop
-public/shots/       REAL screenshots of the app (seeded demo), 2× DPR
-scripts/capture.mjs re-captures public/shots from a locally running app, and measures every spotlight
-                    rect / e-mail redaction from the live DOM → src/rects.generated.json (receiver
-                    invoice lines → src/receiver.generated.json), so a re-theme needs no hand edits
-scripts/rebuild.sh  ONE command: capture → checks → render all cuts → encode web media → commit
+  components/       Background, Devices, primitives, and the DRAWN product screens: ProductScreens
+                    (owner screens), SampleCards (T1/T2/T3 cards), ReceiverScreen (receiver phone, no ₪)
+  scenes/           Hook, Problem, Match, Product, Receiver, Value, Cta, HeroLoop, HeroLoopVertical
+scripts/rebuild.sh  ONE command: checks → render both films → encode web media
+scripts/frame-check.mjs  frame gate: every 2 s of both films + posters (Sample tag on, no ₪ in the receiver beat)
+scripts/check-sample.mjs pins SAMPLE to sampleMonth.ts and reconciles every FILM figure
 scripts/encode-web.sh  web deliverables in apps/web/public/media from the masters in out/
 render.mjs          renders stills / videos with the preinstalled Chromium
 out/                deliverables (MP4s, key frames); out/frames/ is scratch (git-ignored)
@@ -30,7 +31,6 @@ cd tools/promo
 npm ci
 node render.mjs he          # out/restomatch-promo-he.mp4       (1920×1080, 60 s)
 node render.mjs en          # out/restomatch-promo-en.mp4
-node render.mjs vertical    # out/restomatch-promo-he-vertical.mp4 (1080×1920)
 node render.mjs loop        # out/hero-loop-master.mp4  → see "Hero loop" below
 node render.mjs loop-en     # out/hero-loop-en-master.mp4
 node render.mjs loop-9x16   # out/hero-loop-9x16-master.mp4 — portrait phone loop (he, light): two real cards at native phone scale
@@ -40,7 +40,7 @@ npm run studio              # interactive preview/scrubbing (Remotion Studio)
 ```
 
 Chromium: `render.mjs` points Remotion at the container's preinstalled headless shell
-(`/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell`) — override with
+(the newest `/opt/pw-browsers/chromium_headless_shell-*`) — override with
 `REMOTION_BROWSER=/path/to/chrome`. On a Mac with no such path, unset it and Remotion downloads its own.
 `CONCURRENCY=3` (default) controls parallel frame rendering. ~10–15 min per 60 s film on 4 cores.
 
@@ -50,23 +50,13 @@ Encoding: H.264 High, yuv420p, CRF 18, preset slow, no audio track (`muted`).
 
 - All text is in `src/copy.ts` (`COPY.he` / `COPY.en`, typed — `en` must have every `he` key).
 - The locale is an input prop: `{ "locale": "en" }`. RTL/LTR flips automatically (layouts mirror).
-- Numbers live in `FACTS`; each has its source in `STORYBOARD.md`. **Don't type a new number without a
-  source** (AGENTS.md North Star: one ₪ number an owner believes).
-- Domain placeholder: `SITE` in `copy.ts`.
-
-## Re-capture the product screens
-
-```bash
-./scripts/dev-setup.sh                         # repo root: Postgres + Redis + seeded demo "כפר הזיתים"
-pnpm --filter @restomatch/web dev &            # http://localhost:3000
-(cd apps/worker && set -a && . ../web/.env.local && set +a && pnpm start &)   # worker (else a "worker down" banner shows)
-cd tools/promo && node scripts/capture.mjs     # ONLY=desktop | ONLY=receiver to do half
-```
-
-It logs in with the seed's demo password (one login per user — the login rate limiter is strict),
-sets the locale + cookie-consent cookies, and captures at 1440×900 / 390×844 with deviceScaleFactor 2.
-The receiver run uploads a 1×1 PNG so the local dev OCR stub produces a real reconciliation
-(`reconcile-en.png`) — it writes one receipt + invoice into your **local** dev DB.
+- Numbers live in `src/sample.ts` only: `SAMPLE` (= the site's sampleMonth.ts) and `FILM` (the film's
+  breakdown, reconciled to SAMPLE by `scripts/check-sample.mjs`). **No other number on screen.**
+- Words follow `apps/web/lib/i18n/glossary.ts` (an undecided ₪ is a "פער", never "הפסד"); the w3-06
+  vitest scans `src/` for retired terms.
+- No URL on screen until the domain is final; the site's dialog carries the real CTA.
+- After changing copy, run `node --experimental-strip-types scripts/transcript.mjs` (the site's
+  text alternative of the film is generated from COPY + SAMPLE).
 
 ## Swap in music
 

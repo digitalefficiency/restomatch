@@ -1,6 +1,6 @@
 import React from 'react';
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
-import { COPY, FACTS, Locale } from '../copy';
+import { COPY, SAMPLE, Locale } from '../copy';
 import { C, EASE_IN_OUT, FONT, prog } from '../theme';
 import { FadeUp, ReelNumber, RiseLine } from '../components/primitives';
 
@@ -65,7 +65,7 @@ export const Hook: React.FC<{ locale: Locale }> = ({ locale }) => {
               opacity: prog(f, 130, 150),
             }}
           />
-          <ReelNumber id="hook" value={FACTS.leak} at={84} dur={46} size={vertical ? 300 : 280} color={C.danger} />
+          <ReelNumber id="hook" value={SAMPLE.leak} at={84} dur={46} size={vertical ? 300 : 280} color={C.danger} />
         </div>
         <FadeUp at={140} style={{ marginTop: 18 }}>
           <div

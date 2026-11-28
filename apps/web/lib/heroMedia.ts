@@ -32,13 +32,16 @@ export const heroMedia = {
    * Full promo shown in the "Watch 60 seconds" modal (S10's film, per locale).
    * null hides the button. Nothing downloads until the modal opens.
    *
-   * null for the Thu 12.11 release (conductor M1): promo-{he,en}-720.mp4 and
-   * their posters still carry the OLD demo figures (₪760 · 1.8% · "דרישה"), a
-   * second figure set. S10 re-renders the films from sampleMonth.ts after
-   * Thursday; re-enable only with the NEW files allow-listed by SHA-256 in
-   * APPROVED_MEDIA_FILES (the unit test fails otherwise).
+   * The #320 review-fix render of the sample-month films: only the ONE sample month
+   * (₪2,250 · 1.5% of ₪150,000 · ₪910 incl. the ₪104.80 keg · ₪720 · Value ₪2,250 / ₪1,530 /
+   * ₪720), a "דוגמה · מספרים להמחשה" tag on every frame, a ₪-free receiver beat, no URL. Pinned
+   * by SHA-256 in APPROVED_MEDIA_FILES; the ₪760 cut and #318's cut are in REJECTED_PROMO_SHA256.
+   * The 16:9 film is offered on sm+ only (page.tsx) until a 9:16 cut exists.
    */
-  promoVideo: null as PromoSources | null,
+  promoVideo: {
+    he: { src: '/media/promo-he-720.mp4', poster: '/media/promo-poster-he.jpg' },
+    en: { src: '/media/promo-en-720.mp4', poster: '/media/promo-poster-en.jpg' },
+  } as PromoSources | null,
   /**
    * 9:16 phone loop (W3-06b). Phones (below `sm`) get only these files — never
    * the 16:9 loop too. null = phones show the legible HeroMatch mock.
@@ -54,7 +57,11 @@ export const heroMedia = {
     webm: '/media/hero-loop-9x16.webm',
     mp4: '/media/hero-loop-9x16.mp4',
     poster: '/media/hero-poster-9x16.jpg',
-  } as null | { webm: string; mp4: string; poster: string },
+    /** Same frame as WebP (S10 #318, Q4): 18–21 KB instead of the 53 KB JPEG on phones. */
+    posterSrcSet: '/media/hero-poster-9x16-540.webp 540w, /media/hero-poster-9x16-810.webp 810w',
+  } as null | { webm: string; mp4: string; poster: string; posterSrcSet?: string },
+  /** The 9:16 frame fills the phone's width (below `sm`). */
+  phonePosterSizes: '100vw',
   /** English hero loop (same motion, English dashboard + callouts); Hebrew is the default above. */
   loopEn: {
     webm: '/media/hero-loop-en.webm',
@@ -91,8 +98,60 @@ export const APPROVED_MEDIA_FILES: Readonly<Record<string, string>> = {
   '/media/hero-poster-en.jpg': '7e717404e6daab01d8eb41e6f90dcefa01ed6d96c626cfe578f67fdcb9fc55e2',
   '/media/hero-poster-en-768.webp': 'ef5302c39d0b016a897ea8c56814908742c4932fbdd8c5057ce837ab6182e373',
   '/media/hero-poster-en-1280.webp': '411276b88384dbf16ee45b42a3e5859c1db50141996f439b22bf6c94ca18d96f',
-  // promo-{he,en}-720.mp4 + promo-poster-{he,en}.jpg: NOT approved (old ₪760 figures; promoVideo is null).
+  // S10 #318 @b0937588 9:16 poster WebPs (540×960, 810×1440) — same frame as hero-poster-9x16.jpg.
+  '/media/hero-poster-9x16-540.webp': '3b451f8fc3f98b37a1dab53f57192be0fea5f59dc3f5a50e1104da31222615fe',
+  '/media/hero-poster-9x16-810.webp': '0f014686e33de7f7ceca2108b69e10e45ee4675b61b9da9cd41e63b9d9b46b5b',
+  // #320 review-fix re-render, round 3 (14.11: dips around the receiver beat, he stamp sign left; round 2: end card = the
+  // real CTA, ₪720 T2, stamps readable), from the sample month only. Frame gate
+  // (tools/promo/scripts/frame-check.mjs, he + en): DOM probe every 2 s + every 0.2 s through the
+  // receiver beat (986–1253, boundaries frame by frame) + the poster — Sample tag on every frame, NO ₪ on any frame with the receiver beat mounted
+  // (drawn screen: quantities and states only), no URL; pixel check of the tag on every 2 s grab of
+  // the files below and on the posters. ₪ at the visual left in Hebrew; "פער" for undecided money.
+  '/media/promo-he-720.mp4': '517d92ec2220a544a938250c498657756da44d865de069246e6cd919437ade1d',
+  '/media/promo-en-720.mp4': '2b98e35ecb83d59df046f8ac8a6e6b5c8f03c666a900b5112aec8f5351d950eb',
+  '/media/promo-poster-he.jpg': 'aaa3416f9ab8ecf86929e77c86cebad3bc2aa2aa8a1c2c591cc6216f00c203e4',
+  '/media/promo-poster-en.jpg': '63ca8ec304c249ad51ac55f215fd492bd7fb0fd749d44cf26254af0e038d5a1b',
 };
+
+/** SHA-256 of rejected promo films + posters (the ₪760 cut, and #318's demo-seed receiver beat): never approvable. */
+export const REJECTED_PROMO_SHA256: readonly string[] = [
+  '1d1f29db6aeb61c5d3b79bb5e55fbf3c03ddfcb7d08eebe38b40c0d53c84b8ca', // promo-he-720.mp4
+  '40e10c1ba04c34edfd2399367072331adce274ed0713895bb44442ac5c0011b1', // promo-en-720.mp4
+  '217e3fac676b1508fa7c1b3b9a72587c7337e4b8e047ea9238bc4cbb5f8db344', // promo-poster-he.jpg
+  'aa259ecffc5e4265e0e1ec4213fa759f4c892556cd1538f0b9337041886a54f5', // promo-poster-en.jpg
+  // #318 @b0937588 cut, blocked in #320 review (14.11): its receiver beat (33–41 s) showed demo-seed
+  // screenshots with a second figure set (₪17.05 · lettuce ₪90.00/₪97.20 · peppers, "כפר הזיתים"),
+  // "ההפסד המוערך" on undecided money, and ₪ on both sides of the number in Hebrew.
+  'fa83db83faf08b103d460b31eaa3e4254f2c588c3f13ead9460ef0cd711e6f4c', // promo-he-720.mp4
+  '2f39a99aaa3f17e4a744171eec9b4dc80fb5fd805adad20e5cb4f2913833dfe4', // promo-en-720.mp4
+  '8cc67ef4525a82c229be95a172b57bf4f2f4ac572030eaa5281b4b32dff38aed', // promo-poster-he.jpg
+  'c4fd861f83dba2d22f5b60be0944c758fe5175c05ce22b5ac0d438deeed4de04', // promo-poster-en.jpg
+  // #320 @7e55012f round-1 render — superseded (end card said "תאמו הדגמה קצרה" ≠ the dialog's CTA).
+  'c8b807c893f37a91368588ad70f823244a46d2446fa9fc4f38e17b7bb8ded6f0', // promo-he-720.mp4
+  '88304eef45d9601377a92efc407b32356bde33427b3a05e38e316e94f53bcf1a', // promo-en-720.mp4
+  '7390e09750e9be1edf8e402e636c3e16d33faf430937ce3b7e3139bfe521fa2d', // promo-poster-he.jpg
+  '92570bbb49650a52c6b58b41723c250b1ba9083c6796b3cd5a97a51c16968614', // promo-poster-en.jpg
+  // #320 @fcc7b7c3 round-2 render — superseded (receiver beat crossfaded with the laptop's ₪ rows).
+  '40d41107df594f9981b96a33d4edee0b7216e5ba5a0372f9b9a27668327cf00d', // promo-he-720.mp4
+  '0547675725d511e50851de8d3c180ff842868ad9b5d75a5c8ec3c80749dca83e', // promo-en-720.mp4
+  'e496b602babd00b2f49b3f7b3606f1e7f100cbd735db775a0aed2833643ebfb4', // promo-poster-he.jpg
+  '67f0bcaec1c8d3b69f0268c027616940e8b0ce1ef81a1b30b108d413a68b1056', // promo-poster-en.jpg
+  // Older demo-seed cuts from git history (commit · date): demo tenant figures, never approvable.
+  '80f421ba7adc5b4f15dac8669d5e717c97bbdf0206ead868b17830f851900b25', // promo-he-720.mp4 · ea385511 · 2026-10-18
+  '76bab579633298c961a295ac01baf7811897f0c6e7eab5af340b5155abba8517', // promo-he-720.mp4 · b6882440 · 2026-10-18
+  '0cf98f7df912ec23465a4f5252c4a142747b5e000dc315eae17226dea51b874d', // promo-he-720.mp4 · 056bfd07 · 2026-10-18
+  '2e4e113f3573def275275afd81255539656957fb4a92055a480cf71cd074423a', // promo-he-720.mp4 · a27db0f3 · 2026-10-24
+  '07654f0becd5900665914eff3cc00da64125b1bbc2a85981dff2f61640596e1f', // promo-he-720.mp4 · 54858771 · 2026-10-24
+  '2c49ee912d753458a72b6efc37345906a9e38c9b60a000b6f6ae0cec28f14946', // promo-en-720.mp4 · baf0a54e · 2026-10-24
+  'a7701137be3f4a9994492e0afe4a8f83a005b9ef32b754a966c1aeadad311917', // promo-en-720.mp4 · 472b183e · 2026-10-24
+  'c5d45dc4551697750693bed043c0405805e73398b4343e01fd5888b83e8d3589', // promo-poster-he.jpg · ea385511 · 2026-10-18
+  '7abc7117a015d94db23f93e89c751b0659099a7011c807065f34e68f93b198c7', // promo-poster-he.jpg · b6882440 · 2026-10-18
+  '6f395bb8d1238ced8411421d263129a4d74341b20cbbdad7ec2eb682ea5ccd09', // promo-poster-he.jpg · 056bfd07 · 2026-10-18
+  'c8a3dd65db6da850c5086a5ce5942b65dfb8df8dd9cb68f5bc0a63d50e523d64', // promo-poster-he.jpg · a27db0f3 · 2026-10-24
+  '73ae8813d330392803aa3bf1f6f08afb934db994f5d276d8d59a6ca70f50223b', // promo-poster-he.jpg · 54858771 · 2026-10-24
+  '3d5345f92dce7f1f30fc37e4ba29661495bee7c7a205d4cb397435930d511277', // promo-poster-en.jpg · baf0a54e · 2026-10-24
+  'd8b36b0c759acdd0112abb34dfb7d8f3bfac078f77999aa5c4ea63a85cbf25f2', // promo-poster-en.jpg · 472b183e · 2026-10-24
+];
 
 /**
  * Every /media path heroMedia references (srcSet entries included), so the
