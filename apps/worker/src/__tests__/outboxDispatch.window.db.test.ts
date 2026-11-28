@@ -289,3 +289,49 @@ describe('the WhatsApp mock in production', () => {
     expect(res.ok).toBe(true);
   });
 });
+
+describe('payload.expiresAt: a row is never delivered at or after its expiry', () => {
+  // AU-11: "draft ready for Thursday" is useful only until Thursday's 08:00 cut-off (06:00Z in IST).
+  const EXP = '2026-11-05T06:00:00.000Z';
+
+  it('a cap deferral to the next 06:00 that is still before expiresAt stays queued', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    for (let i = 0; i < 6; i++) {
+      await alert(ALICE, '2026-11-04T05:00:00Z', { status: 'sent', sentAt: new Date(`2026-11-04T05:0${i}:00Z`) });
+    }
+    const n = await alert(ALICE, '2026-11-04T07:00:00Z', { payload: { expiresAt: EXP } });
+    const r = await processOutboxDispatch(job('2026-11-04T08:00:00Z')); // Wed 10:00 → Thu 06:00 (04:00Z) < 06:00Z
+    expect(r).toMatchObject({ dispatched: 0, expired: 0, deferred: { cap: 1 } });
+    expect(await rowOf(n.id)).toMatchObject({ status: 'queued', scheduledAt: new Date('2026-11-05T04:00:00Z') });
+  });
+
+  it('a deferral that lands at or after expiresAt cancels the row as expired, never sends it', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    for (let i = 0; i < 6; i++) {
+      await alert(ALICE, '2026-11-04T05:00:00Z', { status: 'sent', sentAt: new Date(`2026-11-04T05:0${i}:00Z`) });
+    }
+    // Expires Thu 05:30 IL (03:30Z): the next allowed instant, Thu 06:00, is too late.
+    const n = await alert(ALICE, '2026-11-04T07:00:00Z', { payload: { expiresAt: '2026-11-05T03:30:00.000Z' } });
+    const r = await processOutboxDispatch(job('2026-11-04T08:00:00Z'));
+    expect(r).toMatchObject({ dispatched: 0, expired: 1 });
+    expect(await rowOf(n.id)).toMatchObject({ status: 'cancelled', lastError: 'expired', claimedAt: null });
+    expect(sentTo).toEqual([]);
+  });
+
+  it('a row claimed at or after expiresAt is cancelled; one before it goes out; no / bad expiresAt is unaffected', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const late = await alert(ALICE, '2026-11-05T05:00:00Z', { payload: { expiresAt: EXP } });
+    const ok = await alert(BOB, '2026-11-05T05:00:00Z', { payload: { expiresAt: '2026-11-05T06:30:00.000Z' } });
+    const bad = await alert(SUPPLIER, '2026-11-05T05:00:00Z', {
+      relatedEntityType: 'purchase_order',
+      dedupeKey: `po:${tag}-exp:placed`,
+      payload: { expiresAt: 'not-a-date' },
+    });
+    const r = await processOutboxDispatch(job(EXP)); // exactly at expiry
+    expect(r).toMatchObject({ dispatched: 2, expired: 1 });
+    expect(await rowOf(late.id)).toMatchObject({ status: 'cancelled', lastError: 'expired' });
+    expect((await rowOf(ok.id)).status).toBe('sent');
+    expect((await rowOf(bad.id)).status).toBe('sent');
+    expect(sentTo.sort()).toEqual([BOB, SUPPLIER].sort());
+  });
+});

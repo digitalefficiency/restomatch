@@ -23,6 +23,11 @@
  * that may not go out now goes back to `queued` with scheduled_at = the next
  * allowed instant — it does not consume an attempt and is never dropped.
  * Supplier messages a user explicitly sent (a PO send) are exempt.
+ *
+ * Expiry: a row whose payload carries `expiresAt` (ISO; e.g. AU-11's "draft
+ * ready for <day>" notice, useful only until the order's cut-off) is cancelled
+ * with last_error = EXPIRED instead of being sent, or deferred, at or after
+ * that instant. Rows without it are unaffected.
  */
 import {
   SKIPPED_NO_PROVIDER,
@@ -58,6 +63,17 @@ const MAX_ATTEMPTS = 5;
 /** last_error for an email the dispatcher refused to hand a real provider (demo / .test domain). */
 export const SKIPPED_UNDELIVERABLE = 'skipped_undeliverable_address';
 const LOG_ERROR_CHARS = 160;
+
+/** last_error for a row cancelled because it could go out no earlier than its payload.expiresAt. */
+export const EXPIRED = 'expired';
+
+/** `payload.expiresAt` as a Date, or null when absent / not a valid ISO instant. */
+export function expiresAtOf(payload: Record<string, unknown> | null): Date | null {
+  const raw = payload?.expiresAt;
+  if (typeof raw !== 'string') return null;
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
 
 /** Shape of a claimed outbox row (subset we dispatch with). */
 interface ClaimedRow {
@@ -131,6 +147,7 @@ export async function processOutboxDispatch(job: WorkerJob<OutboxDispatchJob>) {
   // A send that threw and went back to `queued` for a backoff retry. Counted
   // and logged so a failing provider never reads as claimed=1 with 0/0/0.
   let retried = 0;
+  let expired = 0;
   const deferred = { quiet: 0, shabbat: 0, cap: 0 };
 
   const window = shabbatWindow();
@@ -145,6 +162,18 @@ export async function processOutboxDispatch(job: WorkerJob<OutboxDispatchJob>) {
   claimed.sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
 
   for (const claimedRow of claimed) {
+    const expiresAt = expiresAtOf(claimedRow.payload);
+    const expire = async () => {
+      await db
+        .update(notificationsOutbox)
+        .set({ status: 'cancelled', lastError: EXPIRED, claimedAt: null })
+        .where(eq(notificationsOutbox.id, claimedRow.id));
+      expired += 1;
+    };
+    if (expiresAt && now.getTime() >= expiresAt.getTime()) {
+      await expire();
+      continue;
+    }
     if (isStaff(claimedRow)) {
       let until: Date | null = null;
       if (!gate.open) {
@@ -156,6 +185,11 @@ export async function processOutboxDispatch(job: WorkerJob<OutboxDispatchJob>) {
           until = nextDayAllowedAt(now, window);
           deferred.cap += 1;
         }
+      }
+      if (until && expiresAt && until.getTime() >= expiresAt.getTime()) {
+        // The next allowed instant is past its usefulness: cancel, never deliver late.
+        await expire();
+        continue;
       }
       if (until) {
         // Back to queued at the next allowed instant. attempt_count and
@@ -248,10 +282,11 @@ export async function processOutboxDispatch(job: WorkerJob<OutboxDispatchJob>) {
   if (deferredTotal > 0) {
     console.log(`[outbox-dispatch] deferred quiet=${deferred.quiet} shabbat=${deferred.shabbat} cap=${deferred.cap}`);
   }
+  if (expired > 0) console.log(`[outbox-dispatch] expired=${expired}`);
   console.log(
     `[outbox-dispatch] claimed=${claimed.length} dispatched=${dispatched} failed=${failed} skipped_no_provider=${skipped} retried=${retried}`,
   );
-  return { dispatched, failed, skipped, deferred, retried };
+  return { dispatched, failed, skipped, deferred, retried, expired };
 }
 
 /**
