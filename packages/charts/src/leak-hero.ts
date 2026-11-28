@@ -3,6 +3,8 @@ import { DECISION_KEY_SQL } from './decisions';
 import { sql, type Database } from '@restomatch/db';
 import { scanAwaitingCountSql } from './awaiting-count';
 import { LEAK_FILTER, LIVE_DUPLICATE, lineFilter, originalChecked, viewInvoicesSql, type ViewSpec } from './leak-views';
+import { includedInLiveCarrierSql } from './included';
+export { includedInLiveCarrierSql } from './included';
 
 /**
  * The owner's 10-second story: "₪X leaked this month, Y% of spend, Z caught
@@ -88,7 +90,8 @@ export function monthInvoicesCte(restaurantId: string, now: Date, offset: number
              ${scanAwaitingCountSql(restaurantId, sql`i`)} AS counting,
              -- G-08: held for a "זה אותו מוצר?" question (no run yet) — in neither
              -- leak, spend nor "waiting to be linked to an order".
-             ${AWAITING_QUESTION_SQL} AS question
+             ${AWAITING_QUESTION_SQL} AS question,
+             ${includedInLiveCarrierSql('i')} AS included
       FROM invoices i, b
       WHERE i.restaurant_id = ${restaurantId}
         AND COALESCE(i.invoice_date, i.created_at) >= b.lo
@@ -115,11 +118,12 @@ export function monthInvoicesCte(restaurantId: string, now: Date, offset: number
         -- the "waiting to be linked" line and list leave it out.
         (NOT bool_or(mr.id IS NOT NULL)) AND inv.counting AS awaiting_count,
         (NOT bool_or(mr.id IS NOT NULL)) AND inv.question AS awaiting_question,
-        COALESCE(bool_or(${LIVE_DUPLICATE}), false) AND ${originalChecked(restaurantId, sql`inv.id`)} AS dup_copy
+        COALESCE(bool_or(${LIVE_DUPLICATE}), false) AND ${originalChecked(restaurantId, sql`inv.id`)} AS dup_copy,
+        inv.included
       FROM inv
       LEFT JOIN match_runs mr ON mr.invoice_id = inv.id AND mr.restaurant_id = ${restaurantId}
       LEFT JOIN discrepancies d ON d.match_run_id = mr.id AND d.restaurant_id = ${restaurantId}
-      GROUP BY inv.id, inv.status, inv.total_incl_vat, inv.total_excl_vat, inv.counting, inv.question
+      GROUP BY inv.id, inv.status, inv.total_incl_vat, inv.total_excl_vat, inv.counting, inv.question, inv.included
     )`;
 }
 
@@ -149,8 +153,8 @@ export async function computeLeakHero(
       COALESCE(SUM(LEAST(raw_leak, total)) FILTER (WHERE status <> 'paid'), 0) AS caught,
       COALESCE(SUM(LEAST(raw_recovered, LEAST(raw_leak, total))), 0) AS recovered,
       COUNT(*) FILTER (WHERE raw_leak > 0) AS with_leak,
-      COUNT(*) FILTER (WHERE pending_link AND NOT awaiting_count AND NOT awaiting_question) AS pending_count,
-      COALESCE(SUM(total) FILTER (WHERE pending_link AND NOT awaiting_count AND NOT awaiting_question), 0) AS pending_amount,
+      COUNT(*) FILTER (WHERE pending_link AND NOT awaiting_count AND NOT awaiting_question AND NOT included) AS pending_count,
+      COALESCE(SUM(total) FILTER (WHERE pending_link AND NOT awaiting_count AND NOT awaiting_question AND NOT included), 0) AS pending_amount,
       COUNT(*) FILTER (WHERE awaiting_count) AS awaiting_count,
       COALESCE(SUM(total) FILTER (WHERE awaiting_count), 0) AS awaiting_amount,
       COUNT(*) FILTER (WHERE awaiting_question AND NOT awaiting_count) AS question_count,
@@ -295,14 +299,15 @@ export async function computeLeakBreakdown(
     WITH ${cte}
     SELECT
       per.id, per.status, per.total, LEAST(per.raw_leak, per.total) AS leak,
-      per.pending_link AND NOT per.awaiting_count AND NOT per.awaiting_question AS pending_link,
+      per.pending_link AND NOT per.awaiting_count AND NOT per.awaiting_question AND NOT ${includedInLiveCarrierSql('i')} AS pending_link,
       i.invoice_number, COALESCE(i.invoice_date, i.created_at) AS invoice_date,
       s.name AS supplier_name, s.name_en AS supplier_name_en, i.supplier_id
     FROM per
     JOIN invoices i ON i.id = per.id
     LEFT JOIN suppliers s ON s.id = i.supplier_id AND s.restaurant_id = ${restaurantId}
     -- A scan waiting for its count (#94) is no leak and not "waiting to be linked".
-    WHERE per.raw_leak > 0 OR (per.pending_link AND NOT per.awaiting_count AND NOT per.awaiting_question)
+    -- G-09 (round 12 #5): a page included in a live carrier is not "waiting to be linked".
+    WHERE per.raw_leak > 0 OR (per.pending_link AND NOT per.awaiting_count AND NOT per.awaiting_question AND NOT ${includedInLiveCarrierSql('i')})
     ORDER BY per.pending_link ASC, LEAST(per.raw_leak, per.total) DESC, invoice_date DESC
     LIMIT ${limit}
   `);

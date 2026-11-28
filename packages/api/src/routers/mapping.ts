@@ -43,6 +43,7 @@ import {
 import { enqueue, isQueueUnavailableError, MATCH_INVOICE_QUEUE, type MatchInvoiceQueueJob } from '@restomatch/queue';
 import { chefProcedure, financeProcedure, managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
+import { A_PERSONS_DECISION } from '../lib/decisions';
 import { readConsolidatedRaw } from '../match/consolidated';
 import { buildLinkQueue, summarizeLinkQueue, type LinkQueueRow } from '../catalog/linkQueue';
 import { loadLinkQueueCandidates } from '../catalog/linkQueueLoad';
@@ -417,14 +418,6 @@ async function releaseLinkHolds(db: Database, rid: string, invoiceIds: string[])
   return released;
 }
 
-/**
- * Rounds 5/7/9: a finding a PERSON decided (loadPriorDecisions' rule: resolved_at
- * set, or escalated) or a credit claim hangs on. Engine auto-approvals
- * ('accepted' with no resolved_at) are not a decision. Alias d; rid-free (the
- * claim must match the finding's own restaurant).
- */
-const A_PERSONS_DECISION = sql.raw(`(d.resolved_at is not null or d.resolution_status = 'escalated'
-  or exists (select 1 from recovery_claims c where c.discrepancy_id = d.id and c.restaurant_id = d.restaurant_id))`);
 
 /**
  * The undo of an answer that released an invoice: once a line is unlinked

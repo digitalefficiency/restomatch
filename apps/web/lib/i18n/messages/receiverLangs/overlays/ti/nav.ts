@@ -18,6 +18,7 @@ export const nav: Shape<typeof he> = {
     inbox: 'ዝኣተዉ ፋቱራታት',
     invoices: 'ፋቱራታት',
     invoiceDetail: 'ፋቱራ',
+    inboxCompare: 'ምንጽጻር ፋቱራታት',
     leaks: 'ብኽነት',
     leaksBreakdown: 'ዝርዝር ብኽነት',
     leaksProof: 'መረጋገጺ ብኽነት',

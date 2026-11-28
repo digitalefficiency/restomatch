@@ -12,6 +12,7 @@ import {
   lt,
   lte,
   ne,
+  not,
   or,
   poLines,
   priceBaselines,
@@ -61,6 +62,8 @@ export interface BuiltMatchInput {
    * as if unpinned (usually UNORDERED_ARRIVAL). Additive and optional (G-04).
    */
   pinSkipped?: 'po_draft';
+  /** G-09 (round 13 #2): the invoices included in this carrier whose lines were read (empty: none). */
+  groupMemberIds?: string[];
 }
 
 const num = (v: string | null, fallback = 0): number => (v == null ? fallback : Number(v));
@@ -152,16 +155,51 @@ export async function buildMatchInputForInvoice(
   if (!options.skipPoDiscovery && (inv.ocrPayload?.raw as { kind?: unknown } | null | undefined)?.kind === 'consolidated') {
     return null;
   }
+  // G-09 (round 11 L1): a page "included in" another invoice (checked together as ONE
+  // document) is never matched on its own — its lines are matched with the carrier's.
+  const includedIn = (inv.ocrPayload?.raw as { paidWith?: { invoiceId?: unknown } } | null | undefined)?.paidWith?.invoiceId;
+  if (typeof includedIn === 'string') return null;
+  // G-09 (round 11 L1): the CARRIER of a "checked together" group is matched on the
+  // document's real lines — its own plus every invoice included in it — against its
+  // printed (document) total: one document, one match, never a page TOTAL_MISMATCH.
+  // Members in the order they arrived (created_at, then id); each member's lines in the
+  // same storage order main reads a single invoice's lines in (round 12 #1: the engine
+  // pairs a PO line with the FIRST unpaired invoice line of its product, so the order
+  // of a single invoice's lines must stay exactly main's).
+  // Round 13 (#12): the group is read BY ID from the carrier's own record (raw.carrierOf)
+  // — never a scan of the restaurant's invoices: no group ⇒ no extra query at all. Only
+  // members still linked back to this carrier count.
+  const carrierOf = (inv.ocrPayload?.raw as { carrierOf?: unknown } | null | undefined)?.carrierOf;
+  const claimedIds = Array.isArray(carrierOf) ? carrierOf.filter((id): id is string => typeof id === 'string' && UUID_RE.test(id)) : [];
+  const groupRows =
+    claimedIds.length === 0
+      ? []
+      : await db
+          .select({ id: invoices.id, ocrPayload: invoices.ocrPayload, createdAt: invoices.createdAt })
+          .from(invoices)
+          .where(
+            and(
+              eq(invoices.restaurantId, restaurantId),
+              inArray(invoices.id, claimedIds),
+              sql`${invoices.ocrPayload} -> 'raw' -> 'paidWith' ->> 'invoiceId' = ${invoiceId}::text`,
+            ),
+          )
+          .orderBy(asc(invoices.createdAt), asc(invoices.id));
+  const groupMemberIds = groupRows.map((r) => r.id);
+  const groupMembers = new Set(groupMemberIds);
   // A scan whose number another invoice of this supplier already holds is
   // stored WITHOUT it (invoices_dedupe_idx; the worker's writeOcrHeader) and
   // keeps the number in ocr_payload.raw.duplicateOf. Match on that number so
   // the engine still raises DUPLICATE_INVOICE (block) on the copy.
-  const heldDuplicate = (
+  const stamped = (
     inv.ocrPayload?.raw as
       | { duplicateOf?: { invoiceId?: unknown; invoiceNumber?: unknown } }
       | null
       | undefined
   )?.duplicateOf;
+  // G-09 (round 12 #2): a carrier's stamp naming one of its OWN pages (a continuation
+  // repeating its page 1's number) is the same document, never a duplicate.
+  const heldDuplicate = typeof stamped?.invoiceId === 'string' && groupMembers.has(stamped.invoiceId) ? undefined : stamped;
   const heldDuplicateNumber = heldDuplicate?.invoiceNumber;
   const invoiceNumber =
     inv.invoiceNumber ?? (typeof heldDuplicateNumber === 'string' ? heldDuplicateNumber : null);
@@ -184,6 +222,8 @@ export async function buildMatchInputForInvoice(
           eq(invoices.restaurantId, restaurantId),
           eq(invoices.supplierId, inv.supplierId),
           ne(invoices.id, invoiceId),
+          // G-09 (round 12 #2): the group's own pages are this document, not earlier invoices.
+          ...(groupMemberIds.length > 0 ? [not(inArray(invoices.id, groupMemberIds))] : []),
           // Only invoices that arrived BEFORE this one: re-matching the original
           // after its duplicate shows up must not flag the original too (the
           // pair would otherwise both be blocked and the total counted twice).
@@ -205,20 +245,30 @@ export async function buildMatchInputForInvoice(
   const normalizedNumber = normalizeInvoiceNumber(invoiceNumber);
   const isDuplicate = !!normalizedNumber && (knownInvoiceNumbers?.has(normalizedNumber) ?? false);
 
-  const invLineRows = await db
-    .select({
-      id: invoiceLines.id,
-      productId: invoiceLines.productId,
-      supplierSku: invoiceLines.supplierSku,
-      rawDescription: invoiceLines.rawDescription, // G-08 charge (round 6)
-      qtyBilled: invoiceLines.qtyBilled,
-      unit: invoiceLines.unit,
-      unitPriceBilled: invoiceLines.unitPriceBilled,
-      lineTotal: invoiceLines.lineTotal,
-      vatRate: invoiceLines.vatRate, // G-08 charge
-    })
-    .from(invoiceLines)
-    .where(eq(invoiceLines.invoiceId, invoiceId));
+  const linesOf = (id: string) =>
+    db
+      .select({
+        id: invoiceLines.id,
+        productId: invoiceLines.productId,
+        supplierSku: invoiceLines.supplierSku,
+        rawDescription: invoiceLines.rawDescription, // G-08 charge (round 6)
+        qtyBilled: invoiceLines.qtyBilled,
+        unit: invoiceLines.unit,
+        unitPriceBilled: invoiceLines.unitPriceBilled,
+        lineTotal: invoiceLines.lineTotal,
+        vatRate: invoiceLines.vatRate, // G-08 charge
+      })
+      .from(invoiceLines)
+      .where(eq(invoiceLines.invoiceId, id));
+  // No group ⇒ exactly main's single query. A group ⇒ the carrier's lines first (as main
+  // reads them), then each member's lines appended after.
+  // Round 13 (nit): the whole document in arrival order — the carrier among its pages by
+  // created_at (then id), each invoice's lines in storage order. No group ⇒ main's query.
+  const order = [{ id: invoiceId, createdAt: inv.createdAt }, ...groupRows]
+    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id))
+    .map((r) => r.id);
+  const invLineRows = await linesOf(order[0]!);
+  for (const id of order.slice(1)) invLineRows.push(...(await linesOf(id)));
   if (invLineRows.length === 0) return null;
 
   // G-08 charge: lines a person answered "שורת חיוב — לא מוצר" (deposit, delivery,
@@ -226,7 +276,9 @@ export async function buildMatchInputForInvoice(
   // them UNORDERED_ITEM. They stay out of the engine input, and the invoice totals
   // passed in are reduced by exactly their amounts (below), so TOTAL / VAT checks
   // stay reconciled. No charge line ⇒ byte-identical input to before.
-  const chargeIds = isDuplicate ? new Set<string>() : readChargeLineIds(inv.ocrPayload);
+  const chargeIds = isDuplicate
+    ? new Set<string>()
+    : new Set([...readChargeLineIds(inv.ocrPayload), ...groupRows.flatMap((r) => [...readChargeLineIds(r.ocrPayload)])]);
   let chargeRows = invLineRows.filter((l) => chargeIds.has(l.id));
   let productRows = chargeRows.length > 0 ? invLineRows.filter((l) => !chargeIds.has(l.id)) : invLineRows;
   const invoiceDate = inv.invoiceDate ?? inv.createdAt;
@@ -655,7 +707,7 @@ export async function buildMatchInputForInvoice(
     ...(po?.expectedDeliveryAt ? { expectedDeliveryDate: po.expectedDeliveryAt } : {}),
   };
 
-  return { input, poId: po?.id ?? null, grId, ...(pinSkipped ? { pinSkipped } : {}) };
+  return { input, poId: po?.id ?? null, grId, ...(pinSkipped ? { pinSkipped } : {}), ...(groupMemberIds.length > 0 ? { groupMemberIds } : {}) };
 }
 
 /** The printed VAT in agorot; when none is printed but the subtotal and total are, their gap (round 7 LOW-2). */

@@ -140,6 +140,9 @@ export const en: Shape<typeof he> = {
     cancel: 'Cancel',
   },
   card: {
+    pageQuestion: 'Open page',
+    pageQuestionBody: 'A page of this invoice, or one that may belong to it, waits for a decision. Decide on it before deciding here.',
+    pageQuestionCta: 'Decide on the page',
     invoice: 'Invoice {number}',
     fixInvoice: 'Open invoice',
     more: 'More actions',

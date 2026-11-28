@@ -75,6 +75,11 @@ export const en: Shape<typeof he> = {
     major: 'Major discrepancies',
     blocked: 'Blocker',
   },
+  pageQuestion: {
+    badge: 'Open page',
+    body: 'A page of this invoice, or one that may belong to it, waits for a decision. Do not approve it for payment before deciding.',
+    cta: 'Decide on the page',
+  },
   needsLines: {
     title: 'Invoices waiting for you',
     subtitle: 'Invoices whose reading did not finish, or that we held for review. Each one says why.',
@@ -167,6 +172,7 @@ export const en: Shape<typeof he> = {
     flagged_open: 'Open gap',
     claim_open: 'To the credit request',
     held_duplicate: 'Possible duplicate',
+    included: 'Included in another invoice',
     approved: 'Approved to pay',
     paid: 'Paid',
   },

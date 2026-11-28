@@ -1,5 +1,5 @@
 import { sql, type Database } from '@restomatch/db';
-import { invoiceLeakStateCte, LEAK_FILTER, monthInvoicesCte, scanAwaitingCountSql } from '@restomatch/charts';
+import { includedInLiveCarrierSql, invoiceLeakStateCte, LEAK_FILTER, monthInvoicesCte, scanAwaitingCountSql } from '@restomatch/charts';
 import type { SQL } from 'drizzle-orm';
 import { discrepancyDecidableSql, duplicateHoldingSql } from '../lifecycle/predicates';
 
@@ -15,6 +15,8 @@ import { discrepancyDecidableSql, duplicateHoldingSql } from '../lifecycle/predi
  *
  * First match wins:
  *   paid           invoices.status = paid (a person's payment decision)
+ *   included       G-09: "checked together" into another invoice of the same document —
+ *                  its ₪ is the carrier's; in no money tab and no register total
  *   awaiting_count no match run yet and the OCR held it for its receipt's count (#94)
  *   in_ocr         still in OCR (ocr_pending)
  *   held_duplicate a live duplicate finding (open/escalated/accepted): "don't pay this copy"
@@ -31,6 +33,7 @@ import { discrepancyDecidableSql, duplicateHoldingSql } from '../lifecycle/predi
  */
 
 export const INVOICE_STATES = [
+  'included',
   'in_ocr',
   'awaiting_count',
   'awaiting_link',
@@ -80,6 +83,7 @@ export function invoiceStateCte(restaurantId: string): SQL {
         LEAST(per.raw_leak, per.total) AS leak,
         COALESCE(per.matched, false) AS checked,
         COALESCE(per.pending_link, false) AS pending_link,
+        ${includedInLiveCarrierSql('si')} AS included,
         (NOT COALESCE(per.matched, false)) AND ${scanAwaitingCountSql(restaurantId, sql`si`)} AS awaiting_count,
         ${finding(sql`d.type = 'DUPLICATE_INVOICE' AND d.severity IN ('warn','block') AND ${duplicateHoldingSql(sql`d.resolution_status`)}`)} AS duplicate,
         ${finding(sql`${LEAK_FILTER} AND ${discrepancyDecidableSql(sql`d.resolution_status`)} AND ABS(d.delta_amount) > 0`)} AS open_finding,
@@ -91,6 +95,7 @@ export function invoiceStateCte(restaurantId: string): SQL {
       SELECT st0.*,
         CASE
           WHEN status = 'paid' THEN 'paid'
+          WHEN included THEN 'included'
           WHEN awaiting_count THEN 'awaiting_count'
           WHEN status = 'ocr_pending' THEN 'in_ocr'
           WHEN duplicate THEN 'held_duplicate'

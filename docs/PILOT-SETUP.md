@@ -113,3 +113,15 @@ It changes only what differs:
 - **Wrong details or flags:** fix the config, dry-run, and apply. Use `--update-existing` if the name changed.
 - **A wrong member:** remove them in `/dashboard/team`.
 - **Never hand-delete rows** in the database.
+
+## Multi-page documents (G-09, flag `multiPage`) — the only safe rollback
+
+Once `multiPage` has been ON for a tenant, even briefly, **turn it off with the switch, never by
+reverting the code**:
+
+- per tenant: `settings.features.multiPage = false` (admin features screen or pilot config);
+- everywhere: `INGEST_MULTIPAGE_OFF=1` or `FEATURES_OFF=multiPage` on the web and worker services.
+
+With the switch off, held pages are released by the worker's sweep and open page questions stay
+answerable in the inbox. A code revert removes both: scans stored by the bare-path form become
+unreadable on the reverted code, and pages held for a sibling are never released.

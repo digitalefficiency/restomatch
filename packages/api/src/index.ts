@@ -442,6 +442,8 @@ export {
 } from './lib/claims';
 export type { PayRunInvoice, PayRunResult, PayRunStatus, PayRunSupplier, PayRunClaim, PayRunPaymentMethod } from './routers/payRun';
 export { SKIPPED_NO_PROVIDER, providerConfigured, supplierMessageState, type SupplierMessageState } from './notifications/delivery';
+export { settleDocumentPages, windowCloseGate, WINDOW_MAX_ATTEMPTS, multiPageEnabled, signObjectRef, toObjectRef, REMATCH_PENDING_KEY, resolvePageFlag } from './documents';
+export { pageOnHoldSql, PARTIAL_PAGE_REASONS } from './documents/holds';
 export * from './briefs';
 export * from './notifications/sendWindow';
 export { awaitingDecision, awaitingDecisionDetail, type AwaitingDecision } from './approvals/awaiting';

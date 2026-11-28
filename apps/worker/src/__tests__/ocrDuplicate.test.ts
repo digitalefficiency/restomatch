@@ -156,3 +156,27 @@ describe('writeOcrHeader', () => {
     }
   });
 });
+
+describe('writeOcrHeader · G-09 round 7: compare-and-set on the object read', () => {
+  it('a read of the OLD image never lands once the row was recomposed (another raw_image_url)', async () => {
+    const id = await newInvoice();
+    await db.update(invoices).set({ rawImageUrl: 'https://x/composed.pdf' }).where(eq(invoices.id, id));
+    const out = await writeOcrHeader(db, { restaurantId, invoiceId: id, supplierId }, header('A-701'), {
+      onlyPending: true,
+      onlyImage: 'https://x/a.jpg',
+    });
+    expect(out.written).toBe(false);
+    const [row] = await db.select().from(invoices).where(eq(invoices.id, id));
+    expect(row!.status).toBe('ocr_pending');
+    expect(row!.invoiceNumber).toBeNull();
+  });
+
+  it('the read of the CURRENT image is written', async () => {
+    const id = await newInvoice();
+    const out = await writeOcrHeader(db, { restaurantId, invoiceId: id, supplierId }, header('A-702'), {
+      onlyPending: true,
+      onlyImage: 'https://x/a.jpg',
+    });
+    expect(out.written).toBeUndefined();
+  });
+});

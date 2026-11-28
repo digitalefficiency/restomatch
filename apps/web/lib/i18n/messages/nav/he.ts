@@ -20,6 +20,7 @@ export const he = {
     inbox: 'חשבוניות נכנסות',
     invoices: 'חשבוניות',
     invoiceDetail: 'חשבונית',
+    inboxCompare: 'השוואת חשבוניות',
     leaks: 'דליפה',
     leaksBreakdown: 'פירוק הדליפה',
     leaksProof: 'הוכחת הדליפה',

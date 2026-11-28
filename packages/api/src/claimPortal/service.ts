@@ -101,7 +101,10 @@ function linesSql(link: ClaimLink, extra = sql``) {
     JOIN discrepancies d ON d.id = c.discrepancy_id AND d.restaurant_id = ${link.restaurantId}
     LEFT JOIN invoices i ON i.id = c.invoice_id AND i.restaurant_id = ${link.restaurantId}
     LEFT JOIN products p ON p.id = d.product_id AND p.restaurant_id = ${link.restaurantId}
-    LEFT JOIN invoice_lines il ON il.id = d.invoice_line_id AND il.invoice_id = c.invoice_id
+    -- G-09 (round 12 #12): a carrier's finding may sit on a line of a page "included in" it.
+    LEFT JOIN invoice_lines il ON il.id = d.invoice_line_id AND (il.invoice_id = c.invoice_id OR EXISTS (
+      SELECT 1 FROM invoices m WHERE m.id = il.invoice_id AND m.restaurant_id = ${link.restaurantId}
+        AND m.ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' = c.invoice_id::text))
     WHERE c.restaurant_id = ${link.restaurantId}
       AND c.supplier_id = ${link.supplierId}
       AND c.status = 'letter_sent'

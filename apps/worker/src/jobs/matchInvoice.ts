@@ -23,13 +23,17 @@ import {
   recordUsage,
   releaseClaimsForRematch,
   resolveApprovalThresholds,
+  windowCloseGate,
   formatIlsAgorot,
+  REMATCH_PENDING_KEY,
+  pageOnHoldSql,
   findingIdentity,
   briefOptionOn,
   matchAlertBrief,
   newFindingKeys,
 } from '@restomatch/api';
 import { and, desc, discrepancies, eq, invoices, matchRuns, restaurants, sql, suppliers, type Database, type UserRole } from '@restomatch/db';
+import { enqueueMatchInvoice } from '@restomatch/queue';
 import { sendBrief } from '../lib/briefSend';
 import { computeInvoiceLeak } from '@restomatch/charts';
 import { runMatch, type MatchOutput } from '@restomatch/matching';
@@ -58,6 +62,9 @@ export interface MatchInvoiceJob {
    * order. Still subject to the assembler's same-supplier / ±window checks.
    */
   poId?: string;
+  /** G-09: the window-close match of a held lone page (settle-aware, see windowCloseGate). */
+  g09Window?: boolean;
+  g09Attempt?: number;
 }
 
 const CLEAN: MatchOutput = { status: 'clean', totalDiscrepancyAmount: 0, discrepancies: [] };
@@ -134,7 +141,11 @@ export interface MatchJobOutcome {
     | 'settled'
     | 'po_rejected'
     | 'receipt_open'
-    | 'claim_in_progress';
+    | 'claim_in_progress'
+    /** G-09 (round 12 #7): the invoice was "checked together" into another meanwhile — its lines are matched with the carrier's. */
+    | 'included'
+    /** G-09 (round 13 #2): the carrier's group changed between the build and the save. */
+    | 'group_changed';
 }
 
 /**
@@ -153,6 +164,25 @@ export async function matchInvoiceForJob(
   db: Database,
   data: MatchInvoiceJob,
 ): Promise<MatchJobOutcome> {
+  const out = await matchInvoiceOnce(db, data);
+  // G-09 (rounds 12–14 #9/#8/N3): a group re-match the answer (or its undo) stamped is done
+  // once a run was SAVED — or the skip is permanent (signed off / paid, the invoice is itself
+  // included in another, nothing to match): retrying those would only starve the sweep. A
+  // passing skip (a receipt still open, an order question, the group changed meanwhile) or
+  // a throw keeps the stamp: the sweep retries it.
+  if (out.persisted || (out.skipped && PERMANENT_SKIPS.has(out.skipped))) {
+    await db.execute(sql`
+      update invoices set ocr_payload = jsonb_set(ocr_payload, '{raw}', (ocr_payload -> 'raw') - ${REMATCH_PENDING_KEY})
+       where id = ${data.invoiceId}::uuid and restaurant_id = ${data.restaurantId}
+         and jsonb_typeof(ocr_payload -> 'raw') = 'object' and (ocr_payload -> 'raw') ? ${REMATCH_PENDING_KEY}`);
+  }
+  return out;
+}
+
+/** G-09 (round 14 N3): skips no retry can change — they clear a pending group re-match. */
+const PERMANENT_SKIPS: ReadonlySet<NonNullable<MatchJobOutcome['skipped']>> = new Set(['settled', 'included', 'no_lines']);
+
+async function matchInvoiceOnce(db: Database, data: MatchInvoiceJob): Promise<MatchJobOutcome> {
   const { restaurantId, invoiceId } = data;
   const [inv] = await db
     .select({ status: invoices.status, ocrPayload: invoices.ocrPayload })
@@ -182,6 +212,28 @@ export async function matchInvoiceForJob(
       inv.status = 'matched';
       pinPoId = rel.pinPoId;
     }
+  }
+  // G-09 (round 13 #3): an invoice "checked together" into another is never matched on its
+  // own — whatever brought it here (its hold released, a re-read, a receipt) changed the
+  // carrier's document: the CARRIER is matched again (stamped first, so it is never lost).
+  const carrierId = (inv.ocrPayload as { raw?: { paidWith?: { invoiceId?: unknown } } } | null)?.raw?.paidWith?.invoiceId;
+  if (typeof carrierId === 'string') {
+    // Round 14 (N3): never a carrier already signed off or paid (its re-match is skipped for
+    // good) — nor one itself included elsewhere.
+    const stamped = (await db.execute(sql`
+      update invoices
+         set ocr_payload = jsonb_set(ocr_payload, ${`{raw,${REMATCH_PENDING_KEY}}`}::text[], to_jsonb(now()), true), updated_at = now()
+       where id = ${carrierId}::uuid and restaurant_id = ${restaurantId} and jsonb_typeof(ocr_payload -> 'raw') = 'object'
+         and status not in ('approved', 'paid') and not coalesce((ocr_payload -> 'raw') ? 'paidWith', false)
+       returning id`)) as unknown as Array<{ id: string }>;
+    if (stamped.length > 0) {
+      try {
+        await enqueueMatchInvoice({ restaurantId, invoiceId: carrierId, rematch: true });
+      } catch (err) {
+        console.warn(`[match-invoice] carrier re-match for invoice=${carrierId} not enqueued (the sweep retries it)`, err);
+      }
+    }
+    return { result: CLEAN, persisted: null, replaced: false, skipped: 'included' };
   }
   // A person already signed this invoice off (a receipt submit never rewrites
   // its match — only match.runForInvoice, a manager action, may), or the OCR
@@ -249,6 +301,26 @@ export async function matchInvoiceForJob(
   const result = runMatch(built.input);
 
   let newFindingsOut: { keys: string[]; roles: UserRole[] } | undefined;
+  // G-09 (rounds 13/14 #2, M3, m12): the carrier's group as it stands NOW, under the row
+  // lock below — and whether a page of it is on hold for a person (the answer's own rule).
+  // Only when this input HAS a group: an invoice without one pays nothing (a cheap check
+  // of its own row that no group appeared meanwhile — never a scan).
+  const builtGroup = [...(built.groupMemberIds ?? [])].sort();
+  const carrierOfSql = sql`(case when jsonb_typeof(i.ocr_payload -> 'raw' -> 'carrierOf') = 'array' then i.ocr_payload -> 'raw' -> 'carrierOf' else '[]'::jsonb end)`;
+  // CASE: the subquery runs only when this row records a group (no group ⇒ no scan at all)
+  const groupNow = sql`(case when jsonb_array_length(${carrierOfSql}) = 0 then '[]'::jsonb else
+        (select coalesce(jsonb_agg(m.id::text order by m.id::text), '[]'::jsonb) from invoices m
+          where m.restaurant_id = i.restaurant_id
+            and m.id = any(array(select jsonb_array_elements_text(${carrierOfSql}))::uuid[])
+            and m.ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' = i.id::text) end) as group_now`;
+  const groupNowSql =
+    builtGroup.length === 0
+      ? sql`${groupNow}, false as group_held`
+      : sql`${groupNow},
+            exists (select 1 from invoices m
+                     where m.restaurant_id = i.restaurant_id
+                       and m.id = any(${sql`array[${sql.join(builtGroup.map((id) => sql`${id}::uuid`), sql`, `)}]::uuid[]`})
+                       and ${pageOnHoldSql('m', sql`array[${sql.join([invoiceId, ...builtGroup].map((id) => sql`${id}::uuid`), sql`, `)}]::uuid[]`)}) as group_held`;
   const persisted = await db.transaction(async (rawTx) => {
     const tx = rawTx as unknown as Database;
     // K: a retake (registerInvoice) may have sent the invoice back to OCR while
@@ -290,11 +362,33 @@ export async function matchInvoiceForJob(
                or coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ?| ${LINK_HOLD_REASONS}) as link_held,
              (coalesce(i.ocr_payload -> 'raw' -> 'ocrFailed' = 'true'::jsonb, false)
                or coalesce(i.ocr_payload -> 'raw' -> 'manualLines' = 'true'::jsonb, false)) as hand_entered,
-             coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ?| ${LINK_HOLD_REASONS} as question_reason
+             coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ?| ${LINK_HOLD_REASONS} as question_reason,
+             coalesce((i.ocr_payload -> 'raw') ? 'paidWith', false) as included,
+             ${groupNowSql}
         from invoices i where i.id = ${invoiceId}::uuid and i.restaurant_id = ${restaurantId}
        for no key update
-    `)) as unknown as Array<{ status: string; has_run: boolean; unlinked: boolean; link_held: boolean; hand_entered: boolean; question_reason: boolean }>;
+    `)) as unknown as Array<{
+      status: string;
+      has_run: boolean;
+      unlinked: boolean;
+      link_held: boolean;
+      hand_entered: boolean;
+      question_reason: boolean;
+      included: boolean;
+      group_now: string[];
+      group_held: boolean;
+    }>;
     if (!race || race.status === 'ocr_pending') return 'ocr_pending' as const;
+    // G-09 (round 12 #7): "checked together" into another invoice while this job was
+    // matching (the answer takes this row lock too) — never a second run for its lines.
+    if (race.included) return 'included' as const;
+    // G-09 (round 13 #2): the group this input was built from changed meanwhile (an undo, a
+    // new answer): never persist a run of a stale document. The pending stamp stays — the
+    // change that moved the group re-matches it (or the sweep does).
+    if (builtGroup.length !== race.group_now.length || builtGroup.some((id, k) => id !== race.group_now[k])) return 'group_changed' as const;
+    // Round 14 (M3): a page of the document put on hold for a person since the answer
+    // (a failed re-read, a supplier mismatch, a link) — its lines wait, the whole match waits.
+    if (race.group_held) return 'awaiting_review' as const;
     if ((race.link_held || race.hand_entered) && race.unlinked) return 'awaiting_review' as const;
     if (race.status === 'parsed' && race.question_reason) return 'awaiting_review' as const;
     if (priorRun && !race.has_run) return 'awaiting_review' as const;
@@ -535,6 +629,17 @@ export async function processMatchInvoice(job: WorkerJob<MatchInvoiceJob>): Prom
     );
   }
 
+  // G-09 window — a held lone page's window-close match re-settles its cluster
+  // first: a sibling still being read re-schedules it (bounded), so page 1 gets
+  // no run that would block the merge (api/documents/settle.ts windowCloseGate).
+  if (job.data.g09Window) {
+    const gate = await windowCloseGate(db, { restaurantId, invoiceId, attempt: job.data.g09Attempt ?? 0 });
+    if (gate !== 'match') {
+      console.log(`[match-invoice] invoice=${invoiceId} — G-09 window: ${gate}`);
+      return CLEAN;
+    }
+  }
+  // end G-09 window
   const { result, persisted, replaced, skipped } = await matchInvoiceForJob(db, job.data);
   if (!persisted) {
     console.log(`[match-invoice] invoice=${invoiceId} — nothing to do (${skipped})`);

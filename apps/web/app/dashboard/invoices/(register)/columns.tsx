@@ -14,7 +14,7 @@ export interface RegisterRow {
   totalInclVatAgorot: number;
   gapAgorot: number;
   state: InvoiceStateKey;
-  tab: 'review' | 'awaiting' | 'matched' | 'held' | 'paid';
+  tab: 'review' | 'awaiting' | 'matched' | 'held' | 'paid' | 'included';
   hasAllocation: boolean;
   allocationNumber: string | null;
   allocationRequired: boolean;
@@ -22,6 +22,7 @@ export interface RegisterRow {
 }
 
 export type InvoiceStateKey =
+  | 'included'
   | 'in_ocr'
   | 'awaiting_count'
   | 'awaiting_link'
@@ -43,6 +44,8 @@ export const STATE_TONE: Record<InvoiceStateKey, { tone: StatusTone; emphasis: '
   claim_open: { tone: 'gold', emphasis: 'subtle' },
   clean: { tone: 'success', emphasis: 'subtle' },
   approved: { tone: 'success', emphasis: 'subtle' },
+  // G-09: one page of an invoice counted at its carrier — calm, never an alarm (T4)
+  included: { tone: 'neutral', emphasis: 'subtle' },
   paid: { tone: 'success', emphasis: 'subtle' },
   awaiting_link: { tone: 'neutral', emphasis: 'subtle' },
   awaiting_count: { tone: 'neutral', emphasis: 'subtle' },
@@ -144,9 +147,12 @@ export function registerColumns(t: RegisterCopy, locale: Locale): ColumnDef<Regi
 
 /** Σ of the visible rows, integer agorot (the TotalsRow equals its rows). */
 export function visibleTotals(rows: readonly RegisterRow[]) {
+  // G-09 (round 13 #5): a page "included" in another invoice is shown, never summed —
+  // its ₪ is its carrier's (the hero, pay run and month close count it once, there).
+  const counted = rows.filter((r) => r.state !== 'included');
   return {
     count: rows.length,
-    sumAgorot: rows.reduce((s, r) => s + r.totalInclVatAgorot, 0),
-    gapAgorot: rows.reduce((s, r) => s + r.gapAgorot, 0),
+    sumAgorot: counted.reduce((s, r) => s + r.totalInclVatAgorot, 0),
+    gapAgorot: counted.reduce((s, r) => s + r.gapAgorot, 0),
   };
 }

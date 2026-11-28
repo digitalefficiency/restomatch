@@ -17,6 +17,7 @@ export const dynamic = 'force-dynamic';
 
 const TABS = ['review', 'lines', 'awaiting', 'matched', 'held', 'paid', 'noAllocation', 'intake'] as const;
 const STATES: InvoiceStateKey[] = [
+  'included',
   'in_ocr',
   'awaiting_count',
   'awaiting_link',

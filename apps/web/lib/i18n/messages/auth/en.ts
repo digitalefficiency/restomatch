@@ -253,6 +253,7 @@ export const en: Shape<typeof he> = {
     invoiceClaimInProgress: 'The match is locked: a credit claim on this invoice has history (a letter, a credit or a decision). The claim stays in the ₪-back tracker.',
     invoicePartialHeaderClear: 'Clear the invoice totals together: before VAT, VAT and total. Or fill in all three.',
     invoiceBeingRead: 'This invoice is still being read. Try again in a minute.',
+    invoicePageQuestionOpen: 'A page of this invoice, or one that may belong to it, waits for a decision. Decide on it first.',
     invoiceReceiptOpen: "The goods receipt for this invoice is still being counted. The match runs when the count is closed, and you can edit the lines after that.",
     paymentOwnerApprovalRequired: 'Only the owner can approve this payment: large amount or new supplier.',
     invoiceLinesLocked: "This invoice's lines can't be changed: it was approved or paid, it has a credit claim with history or a recorded credit note, its findings were already decided, or it is a consolidated invoice.",

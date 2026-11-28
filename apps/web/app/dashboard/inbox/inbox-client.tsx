@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, Eye, FileText, Mail, MessageCircle, Settings, X } from 'lucide-react';
-import { Badge, Button, Card, EmptyState, Select, cn, useToast, type BadgeTone } from '@/lib/components';
+import { Badge, Button, Card, ConfirmDialog, EmptyState, LinkButton, Money, Select, cn, useToast, type BadgeTone } from '@/lib/components';
 import { Tabs } from '@/lib/components/form';
 import { formatIls } from '@/lib/money';
 import { localizeServerError } from '@/lib/serverErrors';
@@ -12,6 +12,7 @@ import { formatDateTime, formatNumber } from '@/lib/i18n/format';
 import { originalProps } from '@/lib/i18n/original';
 import { ingest } from '@/lib/i18n/messages/ingest';
 import { trpc } from '@/lib/trpc/client';
+import { REFUSALS } from './refusals';
 
 type Kind = 'whatsapp' | 'email';
 
@@ -34,6 +35,15 @@ export interface InboxMessage {
     error: string | null;
     invoiceId: string | null;
     stored: boolean;
+    /** G-09: the invoice a page_duplicate repeats (when known). */
+    repeatsInvoiceId?: string | null;
+    /** G-09: what is at stake on a page question — the page invoice's ₪ (shekels, string) and supplier. */
+    invoiceTotal?: string | null;
+    invoiceSupplier?: string | null;
+    /** G-09: the invoice right before this page from the same sender (for "בדקו את שתיהן יחד"). */
+    relatedInvoiceId?: string | null;
+    /** G-09 (round 7): the page still asks something (an unreadable page whose invoice got lines does not). */
+    questionOpen?: boolean;
     /** W2-02: the OCR outcome of the registered invoice (null before registration). */
     ocr?: {
       state: 'reading' | 'read' | 'failed';
@@ -88,7 +98,36 @@ const KNOWN_ERRORS = [
   'rejected_by_user',
   'processing_failed',
   'quota_exceeded',
+  // G-09: a page of a multi-page document that was not merged — the one question.
+  'page_other_supplier',
+  'page_other_invoice',
+  'page_duplicate',
+  'page_unreadable',
+  'page_not_merged',
+  'page_merge_blocked',
+  'page_too_large',
+  'page_separate',
+  'page_unreadable_closed',
+  'page_checked_together',
 ] as const;
+/** Flags that still ask a person something (page_separate is already answered). */
+const PAGE_QUESTIONS: readonly string[] = [
+  'page_other_supplier',
+  'page_other_invoice',
+  'page_duplicate',
+  'page_unreadable',
+  'page_not_merged',
+  'page_merge_blocked',
+  'page_too_large',
+];
+/** Page questions whose honest next step is to look at both invoices together. */
+const COMPARE: readonly string[] = ['page_not_merged', 'page_merge_blocked', 'page_too_large'];
+/** Page questions a person already answered (round 9: calm, never "an error"). */
+const ANSWERED: readonly string[] = ['page_separate', 'page_unreadable_closed', 'page_checked_together'];
+const shekels = (v: string | null | undefined) => {
+  const n = v == null ? NaN : Number(v);
+  return Number.isFinite(n) ? n : undefined;
+};
 
 function KindIcon({ kind, className }: { kind: Kind; className?: string }) {
   return kind === 'whatsapp' ? (
@@ -106,8 +145,13 @@ export function InboxClient(props: Props) {
 
   const approve = trpc.ingest.approveDocument.useMutation();
   const reject = trpc.ingest.rejectDocument.useMutation();
-  const bulk = trpc.ingest.bulkApprove.useMutation();
+  const resolvePage = trpc.ingest.resolvePageFlag.useMutation();
+  /** The possible duplicate a person is about to mark as a separate invoice (confirm first). */
+  const [confirmSep, setConfirmSep] = useState<InboxMessage['documents'][number] | null>(null);
   const [supplierFor, setSupplierFor] = useState<Record<string, string>>({});
+  /** The document whose duplicate invoice is about to be deleted (confirm first). */
+  const [confirmDup, setConfirmDup] = useState<InboxMessage['documents'][number] | null>(null);
+  const bulk = trpc.ingest.bulkApprove.useMutation();
   const [messages, setMessages] = useState(props.messages);
   const [picked, setPicked] = useState<Set<string>>(() => new Set());
   const [preview, setPreview] = useState<
@@ -164,7 +208,13 @@ export function InboxClient(props: Props) {
       toast.success(ok);
       await refetch();
     } catch (err) {
-      toast.error(localizeServerError(err, locale, t('inbox.actionFailed', { message: '' })));
+      const code = err instanceof Error ? err.message : '';
+      // G-09: a named page-question refusal reads as a sentence; anything else is localised.
+      if ((REFUSALS as readonly string[]).includes(code)) {
+        toast.error(t('inbox.actionFailed', { message: t(`refusals.${code as (typeof REFUSALS)[number]}`) }));
+      } else {
+        toast.error(localizeServerError(err, locale, t('inbox.actionFailed', { message: '' })));
+      }
     }
   }
 
@@ -311,7 +361,21 @@ export function InboxClient(props: Props) {
                               })}
                             </span>
                           ) : null}
-                          <Badge tone={DOC_TONE[d.status]}>{t(`documentStatus.${d.status}`)}</Badge>
+                          {d.error && PAGE_QUESTIONS.includes(d.error) && d.questionOpen !== false ? (
+                            // T2: an open page question is an act-now item — solid badge + ₪.
+                            <>
+                              <Badge tone={d.error === 'page_duplicate' ? 'danger-solid' : 'warning-solid'}>
+                                {d.error === 'page_duplicate' ? t('inbox.possibleDuplicate') : t('inbox.pageQuestion')}
+                              </Badge>
+                              {shekels(d.invoiceTotal) !== undefined ? (
+                                <span className="text-sm font-semibold text-ink">
+                                  <Money value={shekels(d.invoiceTotal)!} context="line" />
+                                </span>
+                              ) : null}
+                            </>
+                          ) : (
+                            <Badge tone={DOC_TONE[d.status]}>{t(`documentStatus.${d.status}`)}</Badge>
+                          )}
                           {d.docTypeSuggestion.type && d.docTypeSuggestion.type !== 'invoice' ? (
                             <span className="inline-flex items-center gap-1.5" data-testid="doc-type-chip">
                               <Badge tone="info">
@@ -336,10 +400,11 @@ export function InboxClient(props: Props) {
                             <span
                               className={cn(
                                 'inline-flex items-center gap-1 text-xs',
-                                d.status === 'failed' ? 'text-danger' : 'text-muted',
+                                d.status === 'failed' || d.error === 'page_duplicate' ? 'text-danger' : 'text-muted',
                               )}
                             >
-                              <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
+                              {/* An answered page question reads calmly (no warning glyph). */}
+                              {ANSWERED.includes(d.error) ? null : <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />}
                               {errorText(d.error)}
                             </span>
                           ) : null}
@@ -444,6 +509,82 @@ export function InboxClient(props: Props) {
                               </Button>
                             </>
                           ) : null}
+                          {props.canManage && d.invoiceId && d.error && PAGE_QUESTIONS.includes(d.error) && d.questionOpen !== false ? (
+                            <>
+                              {/* ONE primary action per question (T2). */}
+                              {d.error === 'page_duplicate' ? (
+                                <Button
+                                  size="sm"
+                                  variant="primary"
+                                  className="min-h-11"
+                                  disabled={resolvePage.isPending}
+                                  onClick={() => setConfirmDup(d)}
+                                >
+                                  {t('inbox.pageDeleteDuplicate')}
+                                </Button>
+                              ) : COMPARE.includes(d.error) ? (
+                                <LinkButton
+                                  href={`/dashboard/inbox/compare?invoice=${d.invoiceId}`}
+                                  size="sm"
+                                  variant="primary"
+                                  className="min-h-11"
+                                >
+                                  {t('inbox.pageCompare')}
+                                </LinkButton>
+                              ) : null}
+                              {d.error === 'page_unreadable' ? (
+                                <Button
+                                  size="sm"
+                                  variant="primary"
+                                  className="min-h-11"
+                                  disabled={resolvePage.isPending}
+                                  onClick={() =>
+                                    act(
+                                      () => resolvePage.mutateAsync({ documentId: d.id, action: 'close_unreadable' }),
+                                      t('inbox.pageClosedUnreadable'),
+                                    )
+                                  }
+                                >
+                                  {t('inbox.pageCloseUnreadable')}
+                                </Button>
+                              ) : null}
+                              {/* Round 9 (L12): a "same invoice?" question is answered on the compare page
+                                  only, where "separate" asks first with both ₪ — never one tap here. */}
+                              {d.error !== 'page_unreadable' && !COMPARE.includes(d.error) ? (
+                                <Button
+                                  size="sm"
+                                  variant={d.error === 'page_duplicate' ? 'secondary' : 'primary'}
+                                  className="min-h-11"
+                                  disabled={resolvePage.isPending}
+                                  onClick={() =>
+                                    // A possible double payment is released only after a confirm (reversible).
+                                    d.error === 'page_duplicate'
+                                      ? setConfirmSep(d)
+                                      : act(
+                                          () => resolvePage.mutateAsync({ documentId: d.id, action: 'separate' }),
+                                          t('inbox.pageSeparated'),
+                                        )
+                                  }
+                                >
+                                  {t('inbox.pageSeparate')}
+                                </Button>
+                              ) : null}
+                            </>
+                          ) : null}
+                          {/* Round 10 (P6/P7): "one invoice" is undoable — the page asks again. */}
+                          {props.canManage && d.invoiceId && d.error === 'page_checked_together' ? (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              className="min-h-11"
+                              disabled={resolvePage.isPending}
+                              onClick={() =>
+                                act(() => resolvePage.mutateAsync({ documentId: d.id, action: 'undo_checked_together' }), t('inbox.pageUndoneTogether'))
+                              }
+                            >
+                              {t('inbox.pageUndoTogether')}
+                            </Button>
+                          ) : null}
                         </div>
                         {d.ocr ? (
                           <p className="w-full text-xs text-muted" data-testid="ingest-ocr-outcome">
@@ -488,6 +629,66 @@ export function InboxClient(props: Props) {
           ))}
         </ul>
       )}
+
+      <ConfirmDialog
+        open={confirmDup !== null}
+        title={t('inbox.pageDeleteConfirmTitle')}
+        body={
+          <>
+            <span>{t('inbox.pageDeleteConfirmBody')}</span>
+            {confirmDup?.repeatsInvoiceId ? (
+              <Link
+                href={`/dashboard/invoices/${confirmDup.repeatsInvoiceId}`}
+                className="mt-2 block font-semibold text-primary hover:underline"
+              >
+                {t('inbox.pageDeleteConfirmRepeats')}
+              </Link>
+            ) : null}
+          </>
+        }
+        amount={shekels(confirmDup?.invoiceTotal)}
+        party={confirmDup?.invoiceSupplier ?? undefined}
+        confirmLabel={t('inbox.pageDeleteDuplicate')}
+        cancelLabel={t('inbox.keep')}
+        danger
+        loading={resolvePage.isPending}
+        onClose={() => setConfirmDup(null)}
+        onConfirm={() => {
+          const d = confirmDup;
+          setConfirmDup(null);
+          if (d) void act(() => resolvePage.mutateAsync({ documentId: d.id, action: 'delete_duplicate' }), t('inbox.pageDuplicateDeleted'));
+        }}
+      />
+
+      <ConfirmDialog
+        open={confirmSep !== null}
+        title={t('inbox.pageSeparateConfirmTitle')}
+        body={
+          <>
+            <span>{t('inbox.pageSeparateConfirmBody')}</span>
+            {confirmSep?.repeatsInvoiceId ? (
+              <Link
+                href={`/dashboard/invoices/${confirmSep.repeatsInvoiceId}`}
+                className="mt-2 block font-semibold text-primary hover:underline"
+              >
+                {t('inbox.pageDeleteConfirmRepeats')}
+              </Link>
+            ) : null}
+          </>
+        }
+        amount={shekels(confirmSep?.invoiceTotal)}
+        party={confirmSep?.invoiceSupplier ?? undefined}
+        confirmLabel={t('inbox.pageSeparate')}
+        cancelLabel={t('inbox.keep')}
+        danger
+        loading={resolvePage.isPending}
+        onClose={() => setConfirmSep(null)}
+        onConfirm={() => {
+          const d = confirmSep;
+          setConfirmSep(null);
+          if (d) void act(() => resolvePage.mutateAsync({ documentId: d.id, action: 'separate' }), t('inbox.pageSeparated'));
+        }}
+      />
 
       {/* Bulk "פענחו N": sending to OCR is not a payment approval — no ₪ cap applies. */}
       {pickedIds.length > 0 ? (

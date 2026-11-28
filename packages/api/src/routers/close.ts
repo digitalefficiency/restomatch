@@ -91,7 +91,34 @@ async function invoiceFigures(db: Database, restaurantId: string, monthOffset: n
     .map((r) => r.id);
   const consSet = new Set(consolidatedIds);
   const cons = open.filter((s) => consSet.has(s.invoiceId));
-  const unchecked = states.filter((s) => tabOfState(s.state) === 'awaiting' && !consSet.has(s.invoiceId));
+  // G-09 (round 11 L2): an invoice "included in" another (checked together as one
+  // document) is counted once, at its carrier — exactly like the pay run. Round 12 (#11):
+  // only while that carrier still exists (and, round 13, is not itself included elsewhere);
+  // an orphaned "included" invoice is unchecked again.
+  const carrierOf = new Map<string, string>();
+  for (const r of payloads) {
+    const to = (r.payload as { raw?: { paidWith?: { invoiceId?: unknown } } } | null)?.raw?.paidWith?.invoiceId;
+    if (typeof to === 'string') carrierOf.set(r.id, to);
+  }
+  const liveCarriers = carrierOf.size
+    ? new Set(
+        (
+          await db
+            .select({ id: invoices.id })
+            .from(invoices)
+            .where(
+              and(
+                eq(invoices.restaurantId, restaurantId),
+                inArray(invoices.id, [...new Set(carrierOf.values())]),
+                // round 13 (nit): a carrier itself "included" elsewhere is no carrier
+                sql`not coalesce((${invoices.ocrPayload} -> 'raw') ? 'paidWith', false)`,
+              ),
+            )
+        ).map((r) => r.id),
+      )
+    : new Set<string>();
+  const included = new Set([...carrierOf].filter(([, to]) => liveCarriers.has(to)).map(([id]) => id));
+  const unchecked = states.filter((s) => tabOfState(s.state) === 'awaiting' && !consSet.has(s.invoiceId) && !included.has(s.invoiceId));
   return {
     unchecked: {
       count: unchecked.length,

@@ -40,10 +40,11 @@
  * retry could only be refused ('disabled') or re-stub the demo, so with nobody
  * listed the sweep does nothing.
  */
+import { multiPageEnabled, REMATCH_PENDING_KEY, WINDOW_MAX_ATTEMPTS } from '@restomatch/api';
 import type { Sql } from '@restomatch/queue';
 import { insertJob } from '@restomatch/queue';
 import { makeWorker, workerSql, type WorkerJob } from '../queue';
-import { claudeOcrRestaurantIds } from './ocrInvoice';
+import { claudeOcrRestaurantIds, rowScanUrl } from './ocrInvoice';
 
 export type OcrSweepJob = { now?: string };
 
@@ -62,7 +63,16 @@ export interface OcrSweepResult {
   requeued: string[];
   /** Candidates that lost the dedupe race (another sweep enqueued them first). */
   raced: string[];
+  /** G-09: held multi-page pages released to the match after the hold cap. */
+  released?: string[];
 }
+
+/** G-09: a page held for its siblings' OCR is released to the match after this long. */
+export const G09_HOLD_MAX_MS = 30 * 60_000;
+/** G-09: path-form scans are signed at sweep time, so they have no URL expiry; look back a day. */
+export const G09_PATH_MAX_AGE_MS = 24 * 60 * 60_000;
+/** G-09 (round 12 #9): a stamped group re-match still pending after this long is re-enqueued. */
+export const G09_REMATCH_RETRY_MS = 5 * 60_000;
 
 /**
  * `restaurantIds` = the tenants on real OCR (claudeOcrRestaurantIds); others are
@@ -140,7 +150,199 @@ export async function runOcrSweep(
     );
     (inserted ? result.requeued : result.raced).push(inv.id);
   }
+  // G-09 sweep — multi-page documents (api/documents). Path-form scans
+  // (`<restaurantId>/scan-….<ext>`, never an expiring URL) are signed HERE, so a
+  // lost enqueue is retried; the dedupe key carries the page count, so an
+  // invoice re-opened for a composed re-OCR is retried too.
+  const pathSince = new Date(now.getTime() - G09_PATH_MAX_AGE_MS);
+  const pathStale = await sql<
+    Array<{ id: string; restaurant_id: string; supplier_id: string | null; raw_image_url: string; object: string; gen: number }>
+  >`
+    SELECT x.* FROM (
+    SELECT i.id, i.restaurant_id, i.supplier_id, i.raw_image_url, i.updated_at,
+           -- the OCR dedupe key is per (invoice, object, re-open generation)
+           regexp_replace(split_part(i.raw_image_url, '/', 2), '\.[A-Za-z0-9]+$', '') AS object,
+           (SELECT count(*)::int FROM audit_log a
+             WHERE a.entity_type = 'invoice' AND a.entity_id = i.id AND a.restaurant_id = i.restaurant_id
+               AND a.action = 'document.reopened_for_ocr') AS gen
+      FROM invoices i
+     WHERE i.status = 'ocr_pending'
+       AND i.raw_image_url !~* '^[a-z][a-z0-9+.-]*:'
+       AND split_part(i.raw_image_url, '/', 1) = i.restaurant_id::text
+       AND i.restaurant_id::text = ANY(string_to_array(${only.join(',')}, ','))
+       AND i.updated_at < ${staleBefore}
+       AND i.updated_at >= ${pathSince}
+    ) x
+     WHERE NOT EXISTS (
+         SELECT 1 FROM job_queue j
+          WHERE j.queue = 'ocr-invoice' AND j.payload->>'invoiceId' = x.id::text
+            AND j.dedupe_key IN ('ocr:' || x.id::text || ':' || x.object || ':' || x.gen::text,
+                                 'ocr-sweep-' || x.id::text || ':' || x.object || ':' || x.gen::text)
+            AND NOT (
+              j.status = 'failed'
+              AND j.dedupe_key NOT LIKE 'ocr-sweep-%'
+              AND coalesce(j.last_error, '') ~ ${NOT_FOUND_REFUSAL_PG}
+            )
+       )
+     ORDER BY x.updated_at
+     LIMIT ${OCR_SWEEP_BATCH}`;
+  for (const inv of pathStale) {
+    // The SAME exact tenant-path allowlist as the OCR job (S13 rowScanUrl).
+    const imageUrl = await rowScanUrl(inv.restaurant_id, inv.raw_image_url).catch(() => null);
+    if (!imageUrl || /^[a-z][a-z0-9+.-]*:/i.test(inv.raw_image_url)) {
+      // Not this tenant's object, or storage unavailable: never enqueue a foreign path.
+      console.warn(`[ocr-sweep] G-09: could not sign the scan of invoice=${inv.id}; not re-enqueued`);
+      continue;
+    }
+    const inserted = await insertJob(
+      sql,
+      'ocr-invoice',
+      { restaurantId: inv.restaurant_id, invoiceId: inv.id, supplierId: inv.supplier_id, imageUrl },
+      { restaurantId: inv.restaurant_id, dedupeKey: `ocr-sweep-${inv.id}:${inv.object}:${inv.gen}` },
+    );
+    (inserted ? result.requeued : result.raced).push(inv.id);
+  }
+
+  // Held pages: an ingested page, read ('matched'), never matched and with no
+  // match job, waited G09_HOLD_MAX_MS for a sibling that never settled (a lost
+  // job, a crash, or the switch turned OFF meanwhile — so it does not need the
+  // switch ON, only that it was ever set: switch-off is the rollback). Release it: a plain
+  // match job is idempotent and the engine skips an invoice that already has a
+  // run. Never a re-shot duplicate (it waits for a person), and not while a
+  // sibling page of the same sender is merely slow (still ocr_pending).
+  const holdBefore = new Date(now.getTime() - G09_HOLD_MAX_MS);
+  const siblingSince = new Date(now.getTime() - 2 * G09_HOLD_MAX_MS);
+  const held = await sql<Array<{ id: string; restaurant_id: string }>>`
+    SELECT i.id, i.restaurant_id
+      FROM invoices i
+     WHERE i.status = 'matched'
+       AND i.restaurant_id::text = ANY(string_to_array(${only.join(',')}, ','))
+       -- only where the switch was EVER set (on, or turned off since: the
+       -- rollback); a restaurant that never had multi-page is untouched
+       AND EXISTS (SELECT 1 FROM restaurants r
+                    WHERE r.id = i.restaurant_id AND coalesce(r.settings -> 'features', '{}'::jsonb) ? 'multiPage')
+       AND coalesce(i.updated_at, i.created_at) < ${holdBefore}
+       AND coalesce(i.updated_at, i.created_at) >= ${pathSince}
+       AND EXISTS (SELECT 1 FROM ingest_documents d
+                    WHERE d.invoice_id = i.id AND d.restaurant_id = i.restaurant_id AND d.status = 'registered')
+       -- Round 9 (L6) / round 10 (Q2): the switch was really ON for this tenant — G-09
+       -- writes invoice_scans mappings only then (main never writes one). Tenant-level, so a
+       -- page registered seconds before the switch went ON is still released; a tenant whose
+       -- features merely STORE multiPage:false stays exactly as main.
+       AND EXISTS (SELECT 1 FROM invoice_scans sc WHERE sc.restaurant_id = i.restaurant_id)
+       AND NOT EXISTS (SELECT 1 FROM ingest_documents d
+                        WHERE d.invoice_id = i.id AND d.restaurant_id = i.restaurant_id AND d.error = 'page_duplicate')
+       AND NOT EXISTS (
+         SELECT 1
+           FROM ingest_documents d
+           JOIN ingest_messages m ON m.id = d.message_id AND m.restaurant_id = d.restaurant_id
+           JOIN ingest_documents d2 ON d2.restaurant_id = d.restaurant_id AND d2.status = 'registered'
+           JOIN ingest_messages m2 ON m2.id = d2.message_id AND m2.restaurant_id = d2.restaurant_id
+           JOIN invoices i2 ON i2.id = d2.invoice_id AND i2.restaurant_id = d2.restaurant_id
+          WHERE d.invoice_id = i.id AND d.restaurant_id = i.restaurant_id
+            AND m2.channel_id = m.channel_id AND m2.sender = m.sender
+            AND i2.id <> i.id AND i2.status = 'ocr_pending'
+            AND m2.received_at BETWEEN m.received_at - interval '2 hours' AND m.received_at + interval '2 hours'
+            -- a sibling blocks while it is plausibly still being read: updated
+            -- within 2× the hold cap, or with a live (queued / active) OCR job
+            AND (coalesce(i2.updated_at, i2.created_at) >= ${siblingSince}
+                 OR EXISTS (SELECT 1 FROM job_queue jq
+                             WHERE jq.queue = 'ocr-invoice' AND jq.payload->>'invoiceId' = i2.id::text
+                               AND jq.status IN ('queued', 'active'))))
+       AND NOT EXISTS (SELECT 1 FROM match_runs m WHERE m.invoice_id = i.id AND m.restaurant_id = i.restaurant_id)
+       -- Round 8: a FINISHED G-09 window / release / retry job is no match on
+       -- record (its chain may have skipped); only a live job or any other
+       -- match job blocks the release.
+       AND NOT EXISTS (SELECT 1 FROM job_queue j
+                        WHERE j.queue = 'match-invoice' AND j.payload->>'invoiceId' = i.id::text
+                          AND (j.status IN ('queued', 'active') OR coalesce(j.dedupe_key, '') NOT LIKE 'g09-%'))
+     ORDER BY i.created_at
+     LIMIT ${OCR_SWEEP_BATCH}`;
+  result.released = [];
+  for (const inv of held) {
+    const inserted = await insertJob(
+      sql,
+      'match-invoice',
+      // Round 7: settle-aware, as the LAST attempt — a live sibling still wins
+      // (skip), a transient merge failure becomes a person's question, and only
+      // then is the page matched alone (api/documents/settle.ts windowCloseGate).
+      { restaurantId: inv.restaurant_id, invoiceId: inv.id, g09Window: true, g09Attempt: WINDOW_MAX_ATTEMPTS },
+      // one release per hour at most (the gate may re-check a still-alive sibling)
+      { restaurantId: inv.restaurant_id, dedupeKey: `g09-release-${inv.id}-${Math.floor(now.getTime() / 3_600_000)}`, maxAttempts: 3 },
+    );
+    if (inserted) result.released.push(inv.id);
+  }
+
+  // Round 8 (M12): a G-09 re-read that ended outside settle (stall recovery
+  // dead-letters the job and marks the invoice failed, never settling) still
+  // reaches the failed-re-read guard: settle-aware job, last attempt.
+  // Round 9 (L11): settle is a no-op with the switch OFF (or killed) — never enqueue one.
+  const multiPageLive = multiPageEnabled({ features: { multiPage: true } });
+  const unsettled = !multiPageLive ? [] : await sql<Array<{ id: string; restaurant_id: string }>>`
+    SELECT i.id, i.restaurant_id
+      FROM invoices i
+     WHERE i.restaurant_id::text = ANY(string_to_array(${only.join(',')}, ','))
+       AND EXISTS (SELECT 1 FROM restaurants r
+                    WHERE r.id = i.restaurant_id AND (r.settings -> 'features' ->> 'multiPage') = 'true')
+       AND i.status <> 'ocr_pending'
+       AND coalesce((i.ocr_payload -> 'raw' ->> 'ocrFailed')::boolean, false)
+       AND coalesce(i.updated_at, i.created_at) >= ${pathSince}
+       AND EXISTS (SELECT 1 FROM audit_log a
+                    WHERE a.entity_type = 'invoice' AND a.entity_id = i.id AND a.restaurant_id = i.restaurant_id
+                      AND a.action IN ('document.pages_recomposed', 'document.reopened_for_ocr', 'document.split_from'))
+       AND EXISTS (SELECT 1 FROM ingest_documents d
+                    WHERE d.invoice_id = i.id AND d.restaurant_id = i.restaurant_id AND d.status = 'registered' AND d.error IS NULL)
+     ORDER BY i.updated_at
+     LIMIT ${OCR_SWEEP_BATCH}`;
+  for (const inv of unsettled) {
+    const inserted = await insertJob(
+      sql,
+      'match-invoice',
+      { restaurantId: inv.restaurant_id, invoiceId: inv.id, g09Window: true, g09Attempt: WINDOW_MAX_ATTEMPTS },
+      { restaurantId: inv.restaurant_id, dedupeKey: `g09-unsettled-${inv.id}-${Math.floor(now.getTime() / 3_600_000)}`, maxAttempts: 3 },
+    );
+    if (inserted) result.released.push(inv.id);
+  }
+  // end G-09 sweep
+
   return result;
+}
+
+/**
+ * G-09 (rounds 12/13 #9/#8): a "checked together" re-match whose enqueue was lost — the
+ * answer stamped raw.groupRematchPending in its own transaction; the job clears it once a
+ * run was saved. Runs for EVERY tenant (an answer is never real-OCR-only), in its own step.
+ */
+export async function runGroupRematchSweep(sql: Sql, now = new Date()): Promise<string[]> {
+  const before = new Date(now.getTime() - G09_REMATCH_RETRY_MS);
+  // A group exists only where multi-page was ever switched on (the key is set, ON or OFF):
+  // only those tenants' invoices are looked at — by restaurant, never a whole-table scan.
+  const tenants = await sql<Array<{ id: string }>>`
+    SELECT id FROM restaurants WHERE coalesce(settings -> 'features', '{}'::jsonb) ? 'multiPage'`;
+  if (tenants.length === 0) return [];
+  // Round 14 (N3/m12): by restaurant (the index — a uuid[], never a ::text cast), oldest stamp
+  // first, and never an invoice whose re-match is skipped for good (signed off, paid, or
+  // itself included elsewhere): a stuck stamp can't starve a genuinely lost re-match.
+  const pending = await sql<Array<{ id: string; restaurant_id: string }>>`
+    SELECT i.id, i.restaurant_id FROM invoices i
+     WHERE i.restaurant_id = ANY(string_to_array(${tenants.map((t) => t.id).join(',')}, ',')::uuid[])
+       AND (i.ocr_payload -> 'raw') ? ${REMATCH_PENDING_KEY}
+       AND (i.ocr_payload -> 'raw' ->> ${REMATCH_PENDING_KEY})::timestamptz < ${before}
+       AND i.status NOT IN ('approved', 'paid')
+       AND NOT coalesce((i.ocr_payload -> 'raw') ? 'paidWith', false)
+     ORDER BY (i.ocr_payload -> 'raw' ->> ${REMATCH_PENDING_KEY})::timestamptz
+     LIMIT ${OCR_SWEEP_BATCH}`;
+  const requeued: string[] = [];
+  for (const inv of pending) {
+    const inserted = await insertJob(
+      sql,
+      'match-invoice',
+      { restaurantId: inv.restaurant_id, invoiceId: inv.id, rematch: true },
+      { restaurantId: inv.restaurant_id, dedupeKey: `g09-rematch-${inv.id}-${Math.floor(now.getTime() / 3_600_000)}`, maxAttempts: 3 },
+    );
+    if (inserted) requeued.push(inv.id);
+  }
+  return requeued;
 }
 
 export function startOcrSweepWorker() {
@@ -149,6 +351,9 @@ export function startOcrSweepWorker() {
 
 /** The ocr-sweep job: run by the worker loop (above) and by the serverless runner (handlers.ts). */
 export async function processOcrSweep(job: WorkerJob<OcrSweepJob>) {
+  // G-09 (round 13 #8): lost group re-matches, for every tenant — before the real-OCR gate.
+  const rematched = await runGroupRematchSweep(workerSql(), job.data.now ? new Date(job.data.now) : new Date());
+  if (rematched.length) console.log(`[ocr-sweep] group re-matches re-enqueued: ${rematched.length}`);
   const only = claudeOcrRestaurantIds();
   if (only.size === 0) return { skipped: 'no tenant on real OCR (ANTHROPIC_API_KEY + OCR_REAL_RESTAURANT_IDS)' };
   const result = await runOcrSweep(workerSql(), job.data.now ? new Date(job.data.now) : new Date(), only);

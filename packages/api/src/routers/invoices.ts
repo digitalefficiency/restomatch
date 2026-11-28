@@ -59,7 +59,8 @@ import {
 export const REGISTER_TABS = ['review', 'awaiting', 'matched', 'held', 'paid', 'noAllocation', 'intake'] as const;
 export type RegisterTab = (typeof REGISTER_TABS)[number];
 
-type StateTab = 'review' | 'awaiting' | 'matched' | 'held' | 'paid';
+/** G-09 (round 13 #5): 'included' is outside the money tabs — its ₪ is its carrier's. */
+type StateTab = 'review' | 'awaiting' | 'matched' | 'held' | 'paid' | 'included';
 
 /** The tab of each canonical state — a total map, so a new G-05 state fails typecheck here. */
 export const TAB_OF_STATE: Readonly<Record<InvoiceState, StateTab>> = {
@@ -72,6 +73,7 @@ export const TAB_OF_STATE: Readonly<Record<InvoiceState, StateTab>> = {
   awaiting_count: 'held',
   held_duplicate: 'held',
   paid: 'paid',
+  included: 'included',
 };
 
 export const TAB_STATES: Readonly<Record<StateTab, ReadonlyArray<InvoiceState>>> = Object.fromEntries(
@@ -174,8 +176,9 @@ async function intakeCount(db: Parameters<typeof invoiceStatesForMonth>[0], rest
 function countTabs(rows: readonly RegisterRow[], intake: number): Record<RegisterTab, number> {
   const out = Object.fromEntries(REGISTER_TABS.map((t) => [t, 0])) as Record<RegisterTab, number>;
   for (const r of rows) {
+    if (r.tab === 'included') continue; // G-09 (round 13 #5): counted at its carrier
     out[r.tab] += 1;
-    if (!r.hasAllocation && r.state !== 'in_ocr') out.noAllocation += 1;
+    if (!r.hasAllocation && r.state !== 'in_ocr') out.noAllocation += 1; // (included rows skipped above)
   }
   out.intake = intake;
   return out;
@@ -243,7 +246,7 @@ export const invoicesRouter = router({
       const visible = !input.tab
         ? rows
         : input.tab === 'noAllocation'
-          ? rows.filter((r) => !r.hasAllocation && r.state !== 'in_ocr')
+          ? rows.filter((r) => !r.hasAllocation && r.state !== 'in_ocr' && r.state !== 'included')
           : input.tab === 'intake'
             ? []
             : rows.filter((r) => r.tab === input.tab);
@@ -251,9 +254,10 @@ export const invoicesRouter = router({
         rows: visible,
         counts: countTabs(rows, await intakeCount(ctx.db, ctx.session.restaurantId)),
         /** Σ visible rows, integer agorot (the TotalsRow). */
+        // G-09 (round 13 #5): an "included" page is shown, never summed — its ₪ is the carrier's.
         totals: {
-          totalInclVatAgorot: visible.reduce((s, r) => s + r.totalInclVatAgorot, 0),
-          gapAgorot: visible.reduce((s, r) => s + r.gapAgorot, 0),
+          totalInclVatAgorot: visible.reduce((s, r) => s + (r.state === 'included' ? 0 : r.totalInclVatAgorot), 0),
+          gapAgorot: visible.reduce((s, r) => s + (r.state === 'included' ? 0 : r.gapAgorot), 0),
         },
       };
     }),

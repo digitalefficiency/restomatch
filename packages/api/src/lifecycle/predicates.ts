@@ -102,6 +102,9 @@ export const CONSOLIDATED_COVERS_NOTES = ['matched', 'approved', 'paid'] as cons
  */
 export const INVOICE_PAST_INTAKE = ['matched', 'disputed', 'approved', 'paid'] as const satisfies readonly InvoiceStatus[];
 
+/** G-09: statuses an invoice may hold and still gain or lose pages (merge / split / re-read). */
+export const INVOICE_RECOMPOSABLE = ['ocr_pending', 'parsed', 'matched'] as const satisfies readonly InvoiceStatus[];
+
 /**
  * Unpaid and out of OCR: the pay run's candidate list (replaces
  * `status NOT IN ('paid','ocr_pending')` in payRun/procedures, preflightData).
