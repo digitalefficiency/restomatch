@@ -26,8 +26,12 @@ import { discrepancyDecidableSql, duplicateHoldingSql } from '../lifecycle/predi
  *
  * Pay-run parity (routers/payRun.ts, unpaid and not in OCR): pay = clean |
  * approved; claim = claim_open; hold = awaiting_count | held_duplicate |
- * flagged_open; link = awaiting_link. Hero parity: awaitingCount* and
- * pendingLink* use the same flags (see invoice-state.test.ts).
+ * flagged_open; link = awaiting_link. ONE exception, outside the state: an
+ * invoice with VAT at risk (vat/vatAtRisk — no allocation number above the
+ * threshold) is held by the pay run whatever its state, so a clean / approved /
+ * claim_open invoice can sit in 'hold' (payrun-month-vat-hold.test.ts).
+ * Hero parity: awaitingCount* and pendingLink* use the same flags (see
+ * invoice-state.test.ts).
  */
 
 export const INVOICE_STATES = [

@@ -141,6 +141,13 @@ export interface PayRunResult {
   totals: {
     invoices: number;
     payIls: number;
+    /**
+     * What the pay-run page (payRun.list, same month) lets you pay: Σ totals incl. VAT of the
+     * invoices with no hold — 'pay' AND 'claim' (a credit still asked for doesn't stop the
+     * payment; list keeps those rows selectable). The home row shows THIS, never payIls alone.
+     */
+    payableIls: number;
+    payableCount: number;
     holdIls: number;
     claimIls: number;
     creditIls: number;
@@ -158,7 +165,7 @@ const CLAIMABLE_DUP = new Set<string>(DUPLICATE_HOLDING);
 
 const ag = (v: number) => Math.round(v * 100);
 const ils = (a: number) => a / 100;
-const EMPTY_TOTALS = { invoices: 0, payIls: 0, holdIls: 0, claimIls: 0, creditIls: 0, pendingIls: 0, linkIls: 0, linkCount: 0 };
+const EMPTY_TOTALS = { invoices: 0, payIls: 0, payableIls: 0, payableCount: 0, holdIls: 0, claimIls: 0, creditIls: 0, pendingIls: 0, linkIls: 0, linkCount: 0 };
 
 type Row = Record<string, unknown>;
 const rowsOf = (res: unknown): Row[] => (Array.isArray(res) ? (res as Row[]) : ((res as { rows?: Row[] }).rows ?? []));
@@ -963,6 +970,11 @@ export async function computePayRunMonth(
     totals: {
       invoices: t.invoices,
       payIls: ils(t.pay),
+      payableIls: ils(t.pay + t.claim),
+      payableCount: suppliers.reduce(
+        (n, sp) => n + sp.invoices.filter((i) => !(i.pendingLink && !i.duplicate) && (i.status === 'pay' || i.status === 'claim')).length,
+        0,
+      ),
       holdIls: ils(t.hold),
       claimIls: ils(t.claim),
       creditIls: ils(t.credit),
