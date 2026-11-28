@@ -308,7 +308,9 @@ test.describe('owner home', () => {
       await expect(page.getByTestId('needs-decide-notes')).toBeVisible();
       await page.getByTestId('needs-decide').click();
       await page.waitForURL(/\/dashboard\/approvals/);
-      await expect(page.locator('main')).toContainText(apHe.summary.atRisk);
+      // DS3-04: the four tiles became one head sentence; `summary-claimable` keeps the sum, its basis "לפני מע״מ"
+      // beside it.
+      await expect(page.getByTestId('approvals-summary-line')).toContainText(apHe.summary.atRiskBasis);
       const tile = page.getByTestId('summary-claimable');
       await expect(tile).toBeVisible();
       // Home renders whole ₪, the tile agorot: compare at whole-shekel precision.

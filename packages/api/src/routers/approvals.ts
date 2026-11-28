@@ -262,6 +262,8 @@ export const approvalsRouter = router({
           // Decision 19: the effect line names the channel by invoice state
           // (unpaid → offset at payment, paid → credit claim).
           invoiceStatus: invoices.status,
+          // DS3-04: the evidence meta ("חשבונית X מיום dd.MM.yyyy").
+          invoiceDate: invoices.invoiceDate,
           // The evidence pane shows /scans/<invoiceId>/file when a scan exists.
           hasScan: sql<boolean>`EXISTS (SELECT 1 FROM invoice_scans s WHERE s.invoice_id = ${invoices.id} AND s.restaurant_id = ${rid})`.mapWith(Boolean),
           message: discrepancies.resolutionNote, // reuse field for now
@@ -276,8 +278,12 @@ export const approvalsRouter = router({
           lineDescriptionEn: invoiceLines.rawDescriptionEn,
           qtyBilled: invoiceLines.qtyBilled,
           billedUnit: invoiceLines.unit,
+          // DS3-04: the three-way table's price row and the calculation line (NUMERIC strings, exact).
+          unitPriceBilled: invoiceLines.unitPriceBilled,
+          lineTotal: invoiceLines.lineTotal,
           qtyOrdered: poLines.qtyOrdered,
           orderedUnit: poLines.unit,
+          unitPriceExpected: poLines.unitPriceExpected, // nulled with the other PO facts below
           qtyReceived: grLines.qtyReceived,
           poId: purchaseOrders.id,
           poRef: purchaseOrders.sourceRef,
@@ -324,7 +330,9 @@ export const approvalsRouter = router({
       // header, the BatchBar Σ and `seenClaimAgorot` on approve all read it.
       const claims = await claimsByRow(ctx.db, rid, rows.filter(isClaimableRow));
       return rows.map((r) => ({
-        ...(r.poId ? r : { ...r, qtyOrdered: null, orderedUnit: null, poRef: null, poDate: null }),
+        ...(r.poId
+          ? r
+          : { ...r, qtyOrdered: null, orderedUnit: null, poRef: null, poDate: null, unitPriceExpected: null }),
         claimable: isClaimableRow(r),
         claimAgorot: isClaimableRow(r) ? Math.round((claims.get(r.id)?.amount ?? 0) * 100) : 0,
         canAct: canActOn(ctx.session.role, r.requiredRole),

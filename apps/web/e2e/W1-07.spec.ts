@@ -11,13 +11,14 @@ import { collectPageErrors, e2eSql } from './helpers';
  * first in the priority order: a PRICE_HIGHER with the full why-line facts, a
  * QTY_OVER and a second PRICE_HIGHER. Every test re-arms them to `open`.
  *
- *   - phone 390×844: the first card's 50/50 48 px pair is above the fold, the
- *     filters fold into one chip, ₪ sits left of its digits in he;
- *   - approve: optimistic exit, focus moves to the next card, a 10 s undo that
- *     really reopens the row (DB), tiles = server totals;
+ *   - phone 390×844: one gap at a time (DS3-04); its stacked full-width pair is
+ *     above the fold, the filters fold into one chip, ₪ sits left of its digits in he;
+ *   - approve: optimistic exit, focus moves to the next gap, a 10 s undo that
+ *     really reopens the row (DB), the head = server totals;
  *   - "pay as billed": one tap on a reason chip, reasonCode in the audit;
- *   - a stale card gets the decider named instead of overwriting;
- *   - axe (WCAG 2.2 AA + best practice): 0 critical/serious, he + en.
+ *   - a stale gap gets the decider named instead of overwriting;
+ *   - desktop 1440: server totals, no row menu; axe (WCAG 2.2 AA + best practice):
+ *     0 critical/serious, he + en.
  */
 test.use({ storageState: OWNER_STATE });
 
@@ -128,10 +129,9 @@ async function dbStatus(id: string): Promise<string> {
   }
 }
 
-const card = (page: Page, nth = 0) => page.getByTestId('approval-card').nth(nth);
-/** The fixture's cards only (the seed has its own beer-keg finding). */
-const fxCard = (page: Page, text: string) =>
-  page.getByTestId('approval-card').filter({ hasText: 'W107-1' }).filter({ hasText: text });
+// Rows replace cards on purpose (DS3-04, SPEC §10.2): below 1280 px the desk shows one gap at a time, its evidence
+// keyed by the gap's id (`data-id`), so a fixture gap is named by id instead of found among cards.
+const evidence = (p: Page) => p.getByTestId('approval-evidence');
 
 async function axeSerious(page: Page): Promise<string[]> {
   await page.addScriptTag({ content: AXE_SOURCE });
@@ -153,33 +153,40 @@ async function axeSerious(page: Page): Promise<string[]> {
 test.describe('phone 390×844', () => {
   test.use({ viewport: PHONE, isMobile: true, hasTouch: true });
 
-  test('the first decision is above the fold: two 50/50 48 px buttons, filters folded, ₪ left of its digits', async ({ page }) => {
+  test('the first decision is above the fold: stacked full-width buttons, filters folded, ₪ left of its digits', async ({ page }) => {
     const errors = collectPageErrors(page);
     await setLocale(page, 'he');
     await page.goto('/dashboard/approvals');
-    const first = card(page);
-    await expect(first).toContainText('בירה מהחבית');
-    const approve = first.getByTestId('decide-approve');
-    const reject = first.getByTestId('decide-reject');
+    // One gap at a time on a phone (DS3-04): the first gap is the fixture's beer keg.
+    await expect(evidence(page)).toHaveAttribute('data-id', fx.priceId);
+    await expect(evidence(page)).toContainText('בירה מהחבית');
+    // The buttons live in the decision bar (DS3-04), not in a card.
+    const approve = page.getByTestId('decide-approve');
+    const reject = page.getByTestId('decide-reject');
     await expect(approve).toHaveText(/בקשת זיכוי · .*104\.80/);
-    await expect(reject).toHaveText('שלמו כפי שחויב');
+    // The button may carry an aria-hidden key cap (DS3-04 §5; hidden on a phone by CSS, but in the DOM): its name is
+    // unchanged.
+    await expect(reject).toHaveAccessibleName('שלמו כפי שחויב');
     const a = (await approve.boundingBox())!;
     const r = (await reject.boundingBox())!;
     expect(a.height).toBeGreaterThanOrEqual(48);
     expect(r.height).toBeGreaterThanOrEqual(48);
     expect(Math.abs(a.width - r.width)).toBeLessThan(2);
     expect(a.y + a.height).toBeLessThanOrEqual(PHONE.height);
-    // The claim sits at the start (right in RTL).
-    expect(a.x).toBeGreaterThan(r.x);
+    // The phone bar stacks full-width buttons, the claim first (DS3-04), so its label never wraps.
+    expect(a.y + a.height).toBeLessThanOrEqual(r.y + 0.5);
+    expect(a.width).toBeGreaterThan(PHONE.width * 0.8);
     // Filters fold into one chip; the toolbar is not on screen until opened.
     await expect(page.getByTestId('approvals-filters-toggle')).toBeVisible();
     await expect(page.locator('#approvals-filters')).toBeHidden();
-    // Why-line in the card: billed × qty instead of the order price.
-    // The order by supplier + date (lab 11.11), never its raw code inside the sentence.
-    await expect(first.getByTestId('why-line')).toContainText('(הזמנה מ־');
-    await expect(first.getByTestId('why-line')).not.toContainText('PO-W107');
-    // he-IL ₪: the glyph is LEFT of the first digit.
-    const amount = first.getByTestId('card-amount');
+    // The calculation line and the three-way table replace the why-line (DS3-04): the price gap per unit, and the
+    // order still named by its date (lab 11.11), never its raw code.
+    await expect(evidence(page).getByTestId('calc-line')).toContainText('יותר ל');
+    await expect(evidence(page).getByTestId('match-table')).toContainText('הזמנה מ־');
+    await expect(evidence(page)).not.toContainText('PO-W107');
+    // he-IL ₪: the glyph is LEFT of the first digit. Phone rows are hidden (DS3-04): the claim button's <Money> is
+    // one text node.
+    const amount = page.getByTestId('decide-approve').locator('bdi').first();
     const pos = await amount.evaluate((el) => {
       const text = el.textContent ?? '';
       const range = document.createRange();
@@ -199,9 +206,12 @@ test.describe('phone 390×844', () => {
     await setLocale(page, 'he');
     await page.goto('/dashboard/approvals');
     const before = Number(await page.getByTestId('approvals-summary-line').locator('bdi').first().textContent());
-    await card(page).getByTestId('decide-approve').click();
-    await expect(fxCard(page, 'בירה מהחבית')).toHaveCount(0);
-    // Focus moved to the next card's primary, not to <body>.
+    // The bar's claim (DS3-04: the buttons live in the decision bar).
+    await expect(evidence(page)).toHaveAttribute('data-id', fx.priceId);
+    await page.getByTestId('decide-approve').click();
+    // The next gap comes in (one gap at a time, DS3-04).
+    await expect(evidence(page)).not.toHaveAttribute('data-id', fx.priceId);
+    // Focus moved to the next gap's primary, not to <body>.
     await expect(page.locator(':focus')).toHaveAttribute('data-testid', 'decide-approve');
     await expect(page.getByTestId('approvals-announcer')).toContainText('נוסף לבקשת הזיכוי');
     await expect(page.getByTestId('approvals-undo')).toContainText('נוסף לבקשת הזיכוי');
@@ -209,27 +219,30 @@ test.describe('phone 390×844', () => {
     await expect(page.getByTestId('approvals-summary-line').locator('bdi').first()).toHaveText(String(before - 1));
 
     await page.getByTestId('approvals-undo-button').click();
-    await expect(fxCard(page, 'בירה מהחבית')).toHaveCount(1);
+    // Undo brings the gap back as the current one (DS3-04).
+    await expect(evidence(page)).toHaveAttribute('data-id', fx.priceId);
     await expect.poll(() => dbStatus(fx.priceId)).toBe('open');
     await expect(page.getByTestId('approvals-summary-line').locator('bdi').first()).toHaveText(String(before));
-    // Back at its own index (first).
-    await expect(card(page)).toContainText('בירה מהחבית');
+    // Back at its own index (first), through the position (DS3-04: no list of cards on a phone).
+    await expect(page.getByTestId('desk-position')).toHaveText(/^1\s/);
   });
 
   test('"pay as billed" commits with one tap on a reason chip and stores the code', async ({ page }) => {
     await setLocale(page, 'he');
-    await page.goto('/dashboard/approvals');
-    const target = fxCard(page, 'חויבו');
-    await target.getByTestId('decide-reject').click();
-    const reasons = target.getByTestId('waive-reasons');
+    // The gap is selected (DS3-04: one gap at a time), not found as a card.
+    await page.goto(`/dashboard/approvals?sel=${fx.qtyId}`);
+    await expect(evidence(page)).toHaveAttribute('data-id', fx.qtyId);
+    await page.getByTestId('decide-reject').click();
+    const reasons = page.getByTestId('waive-reasons');
     await expect(reasons).toBeVisible();
     // Focus lands on the first chip; Esc closes and returns to the button.
     await expect(reasons.getByRole('button').first()).toBeFocused();
     await page.keyboard.press('Escape');
-    await expect(target.getByTestId('decide-reject')).toBeFocused();
-    await target.getByTestId('decide-reject').click();
-    await target.getByRole('button', { name: 'הגיע בפועל, הקבלה שגויה' }).click();
-    await expect(target).toHaveCount(0);
+    await expect(page.getByTestId('decide-reject')).toBeFocused();
+    await page.getByTestId('decide-reject').click();
+    await page.getByRole('button', { name: 'הגיע בפועל, הקבלה שגויה' }).click();
+    // The next gap comes in (DS3-04).
+    await expect(evidence(page)).not.toHaveAttribute('data-id', fx.qtyId);
     await expect.poll(() => dbStatus(fx.qtyId)).toBe('rejected');
     const sql = e2eSql();
     try {
@@ -244,7 +257,9 @@ test.describe('phone 390×844', () => {
   test('a stale card names who decided instead of overwriting', async ({ page }) => {
     await setLocale(page, 'he');
     await page.goto('/dashboard/approvals');
-    await expect(card(page)).toContainText('בירה מהחבית');
+    // The evidence of the one gap shown (DS3-04), the fixture's beer keg.
+    await expect(evidence(page)).toHaveAttribute('data-id', fx.priceId);
+    await expect(evidence(page)).toContainText('בירה מהחבית');
     // Someone else decides while this card is on screen.
     const sql = e2eSql();
     try {
@@ -259,28 +274,27 @@ test.describe('phone 390×844', () => {
     } finally {
       await sql.end();
     }
-    await card(page).getByTestId('decide-approve').click();
+    // The bar's claim (DS3-04).
+    await page.getByTestId('decide-approve').click();
     await expect(page.getByRole('status').filter({ hasText: 'כבר הוחלט ע״י מנהל' }).first()).toBeVisible();
     expect(await dbStatus(fx.priceId)).toBe('rejected');
   });
 });
 
 for (const locale of ['he', 'en'] as const) {
-  test(`desktop 1440 ${locale}: server tiles, ⋯ menu, axe clean`, async ({ page }) => {
+  test(`desktop 1440 ${locale}: server totals, no row menu, axe clean`, async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     await setLocale(page, locale);
     const errors = collectPageErrors(page);
     await page.goto('/dashboard/approvals');
-    await expect(card(page)).toBeVisible();
-    // Tiles come from approvals.queueSummary (whole queue, not the page).
+    // 1440: rows replace cards on purpose (DS3-04, SPEC §10.2).
+    await expect(page.getByTestId('approval-row').first()).toBeVisible();
+    // The head comes from approvals.queueSummary (whole queue, not the page).
     const res = await page.request.get(`/api/trpc/approvals.queueSummary?input=${encodeURIComponent(JSON.stringify({ json: {} }))}`);
     const summary = ((await res.json()) as { result: { data: { json: { count: number } } } }).result.data.json;
     await expect(page.getByTestId('summary-count')).toHaveText(String(summary.count));
-    // Escalate and evidence live in ⋯, not next to the money buttons.
-    await card(page).getByTestId('card-more').click();
-    await expect(page.getByRole('menuitem').first()).toBeVisible();
-    await page.keyboard.press('Escape');
-    await expect(card(page).getByTestId('card-more')).toBeFocused();
+    // No row menu (DS3-04): escalation is the bar's quiet action, and the owner never escalates.
+    await expect(page.getByTestId('decide-escalate')).toHaveCount(0);
     expect(await axeSerious(page)).toEqual([]);
     expect(errors).toEqual([]);
   });

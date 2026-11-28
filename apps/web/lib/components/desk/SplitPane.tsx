@@ -135,11 +135,12 @@ export function SplitPane<Item>({
               aria-selected={on}
               data-index={i}
               data-row-id={id}
+              // The list scrolls, so the one global focus outline is drawn inside the row (DS3-00 hook).
+              data-focus="inset"
               tabIndex={on || (selIndex < 0 && i === 0) ? 0 : -1}
               onClick={() => (wide ? select(i) : update({ sel: id, peek: id }))}
               className={cn(
                 'relative cursor-pointer border-b border-line px-4 py-2 last:border-b-0',
-                'focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-info',
                 on ? 'bg-primary/[0.08] before:absolute before:inset-y-0 before:start-0 before:w-0.5 before:bg-primary' : 'hover:bg-surface-2',
               )}
             >

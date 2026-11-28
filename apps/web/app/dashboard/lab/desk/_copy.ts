@@ -14,7 +14,7 @@ const he = {
   stateError: 'שגיאה',
   stateEmpty: 'ריק',
   search: 'חיפוש ספק או מספר חשבונית',
-  views: { all: 'הכל', block: 'חוסמים', warn: 'אזהרות', open: 'פתוחות' },
+  views: { all: 'הכול', block: 'חוסמים', warn: 'אזהרות', open: 'פתוחות' },
   col: { supplier: 'ספק', number: 'חשבונית', date: 'תאריך', total: 'סכום', atRisk: 'פער', severity: 'חומרה', status: 'סטטוס' },
   severity: { block: 'חוסם', warn: 'אזהרה', none: 'תקין' },
   status: { open: 'פתוחה', approved: 'אושרה', held: 'מושהית' },

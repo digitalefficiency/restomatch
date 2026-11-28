@@ -27,10 +27,10 @@ export default function ApprovalsError({
   }, [error]);
   return (
     <Card padding="lg" role="alert" className="mx-auto mt-6 flex max-w-md flex-col items-center gap-3 text-center" data-testid="approvals-error">
-      <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-danger/12 text-danger">
+      <span className="flex h-12 w-12 items-center justify-center rounded-full border border-line bg-surface-sunken text-fg-secondary">
         <AlertTriangle className="h-6 w-6" aria-hidden="true" />
       </span>
-      <h1 className="text-lg font-bold text-ink">{t(payRun ? 'errorPage.titlePayRun' : 'errorPage.title')}</h1>
+      <h1 className="text-title-md text-fg">{t(payRun ? 'errorPage.titlePayRun' : 'errorPage.title')}</h1>
       <p className="text-sm text-muted">{t(payRun ? 'errorPage.bodyPayRun' : 'errorPage.body')}</p>
       {error.digest ? <bdi className="text-xs tabular-nums text-subtle">{error.digest}</bdi> : null}
       <div className="flex flex-wrap justify-center gap-2">
