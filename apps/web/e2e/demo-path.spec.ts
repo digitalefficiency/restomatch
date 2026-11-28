@@ -506,8 +506,9 @@ test('B · owner: hero ₪, leak detective, approvals, claims, report, chain, br
 
   await test.step('approvals: queue count + ₪ at risk match the hero', async () => {
     await clickNav(page, m.nav.links.approvals, '/dashboard/approvals');
-    const inQueue = num(await valueAfter(page, m.approvals.summary.inQueue));
-    n.atRisk = num(await valueAfter(page, m.approvals.summary.atRisk));
+    // DS3-04: the labelled tiles are gone; the head sentence carries the server totals in attributes (every state).
+    const inQueue = Number(await page.getByTestId('approvals-summary-line').getAttribute('data-count'));
+    n.atRisk = Number(await page.getByTestId('approvals-summary-line').getAttribute('data-claimable-agorot')) / 100;
     expect(inQueue, 'approvals "in queue" vs dashboard "waiting for your decision"').toBe(n.pendingApprovals);
     expect(n.atRisk, 'approvals "amount at risk" vs dashboard "waiting for your decision" ₪').toBe(n.decide);
     // Owner sees Approve / Reject, never "escalate to owner" (pack 5:30).
