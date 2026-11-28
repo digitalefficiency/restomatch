@@ -130,7 +130,7 @@ describe('UndoToast — the dark toast with the time left', () => {
     expect(root).toContain('forced-colors:border forced-colors:border-[color:ButtonText]');
     expect(root.split(' ')).toEqual(expect.arrayContaining(['bg-fg', 'text-on-bold', 'rounded-card', 'shadow-e2', 'flex-none']));
     expect(root).toContain('motion-safe:animate-[rm-toast-in_var(--dur-medium)_var(--ease-enter)]');
-    expect(html).toContain('<p class="min-w-0 truncate">נוסף לבקשת הזיכוי · 38.70 ₪ לפני מע״מ</p>');
+    expect(html).toContain('<p class="line-clamp-2 min-w-0">נוסף לבקשת הזיכוי · 38.70 ₪ לפני מע״מ</p>');
     expect(html).not.toMatch(/aria-live|role="status"|role="alert"/); // the desk's announcer speaks
   });
 
@@ -173,7 +173,7 @@ describe('UndoToast — the dark toast with the time left', () => {
     expect(html).toContain('data-undo-left-ms="0"');
     expect(html).not.toContain('approvals-undo-button');
     expect(html).not.toContain('undo-line');
-    expect(html).toContain('<p class="min-w-0 truncate">כבר אי אפשר לבטל.</p>');
+    expect(html).toContain('<p class="line-clamp-2 min-w-0">כבר אי אפשר לבטל.</p>');
   });
 
   it('busy disables the button (no text change); instant drops the entry animation', () => {

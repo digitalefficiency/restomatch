@@ -180,7 +180,8 @@ export function UndoToast({
         !instant && 'motion-safe:animate-[rm-toast-in_var(--dur-medium)_var(--ease-enter)]',
       )}
     >
-      <p className="min-w-0 truncate">{text}</p>
+      {/* Two lines at most, never cut on one: in the queue column a one-line cut hid the amount's VAT basis. */}
+      <p className="line-clamp-2 min-w-0">{text}</p>
       {!failed ? (
         <button
           type="button"
