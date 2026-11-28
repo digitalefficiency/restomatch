@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useReducer, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { getQueryKey } from '@trpc/react-query';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api'; // type-only (G-16 client-api-value-import safe)
 import { waits } from '@restomatch/ui-tokens';
@@ -21,6 +23,18 @@ export const DETAIL_SETTLE_MS = 120;
 export const SKELETON_HOLD_MS = 400; // = motion.duration.long of @restomatch/ui-tokens (400 ms); not a CSS duration
 /** `Skeleton delayed` appears once loading passes DS3-00's `skeleton-wait` (SPEC §9's one second), read by name. */
 const SKELETON_WAIT_MS = Number.parseInt(waits['skeleton-wait'], 10);
+
+/**
+ * A cached invoice detail may be shown without the J/K settle only while it is FRESH: within DETAIL_STALE_MS of its
+ * fetch and not invalidated. An older copy is stale for `useQuery` too, which refetches it on mount — so a held J
+ * across invoices cached minutes ago would fetch every one it passes (§5.13). `state` = the query's react-query state.
+ */
+export function freshInCache(
+  state: { data?: unknown; dataUpdatedAt: number; isInvalidated?: boolean } | null | undefined,
+  now: number,
+): boolean {
+  return state != null && state.data !== undefined && state.isInvalidated !== true && now - state.dataUpdatedAt < DETAIL_STALE_MS;
+}
 
 /** The value once it has held still for `ms` (the first value at once). */
 function useSettled(value: string | null, ms: number): string | null {
@@ -101,10 +115,14 @@ function readyOf(locale: 'he' | 'en', row: QueueItem, d: Detail): GapDocument {
 export function useGapDocument(current: QueueItem | null, next: QueueItem | null): GapDocument {
   const locale = useLocale();
   const utils = trpc.useUtils();
+  const queryClient = useQueryClient();
   const want = current?.invoiceId ?? null;
   const settled = useSettled(want, DETAIL_SETTLE_MS);
-  // An invoice already in the cache (a sibling's, or the prefetched next one) needs no wait and fetches nothing.
-  const cached = want != null && utils.invoices.detail.getData({ invoiceId: want }) !== undefined;
+  // An invoice fresh in the cache (a sibling's, or the prefetched next one) needs no wait and fetches nothing; a stale
+  // copy waits for the settle like any other invoice (useQuery would refetch it at once).
+  const cached =
+    want != null &&
+    freshInCache(queryClient.getQueryState(getQueryKey(trpc.invoices.detail, { invoiceId: want }, 'query')), Date.now());
   const queryId = cached ? want : settled;
   const q = trpc.invoices.detail.useQuery(
     { invoiceId: queryId ?? '' },

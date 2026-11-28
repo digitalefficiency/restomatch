@@ -12,16 +12,23 @@ import {
   BATCH_KEY,
   PAGE,
   askingRow,
+  batchFailSel,
+  batchFailureOf,
   batchMutationId,
   batchRefusalOf,
+  decideFailBack,
+  decideManyInput,
+  decisionCall,
   deskReducer,
   failureOutcome,
   focusAfterDecision,
+  howOr,
   initDeskState,
   isOpenRow,
   liveRows,
   nextOpenAfter,
   positionOf,
+  reopenCall,
   resolveCurrent,
   rowStateOf,
   rowsView,
@@ -30,7 +37,7 @@ import {
   type Decide,
   type DecisionError,
 } from './desk-state';
-import { announceDecided, batchToastText, decisionAmount, ilsText, toastText } from './desk-text';
+import { announceDecided, announceDecidedNoNext, batchToastText, decisionAmount, ilsText, toastText } from './desk-text';
 import type {
   DeskController,
   DeskControllerInput,
@@ -44,13 +51,25 @@ import { BULK_CAP_AGOROT, bulkSelection, groupByInvoice, groupPrimary, newClient
 import { DOUBLE_ACTIVATION_MS, UNDO_CAP_MS } from './undo-window';
 import { canEscalate, type WaiveReason } from './vocab';
 
+/** The undo toast's root (UndoToast, `data-testid="approvals-undo"`). */
+const UNDO_TOAST = '[data-testid="approvals-undo"]';
+
+/** Is focus inside `selector`? Read at the moment of the action, before anything re-renders. */
+function focusWithin(selector: string): boolean {
+  if (typeof document === 'undefined') return false;
+  const el = document.activeElement;
+  return el instanceof Element && el.closest(selector) != null;
+}
+
 /** Is focus in the desk's rows grid? Decides where a J/K/↑/↓ leaves focus (§5.2): rows → the new row; the bar and the
  *  narrow / landing evidence → it stays. Read at the keydown, before anything re-renders. */
 function focusInRows(): boolean {
-  if (typeof document === 'undefined') return false;
-  const el = document.activeElement;
-  return el instanceof Element && el.closest('[data-desk-rows]') != null;
+  return focusWithin('[data-desk-rows]');
 }
+
+/** What the next page brought for the gap after the last loaded one: its first new row (null: none came), or a
+ *  failed request (the server still holds more; nobody knows the next gap). */
+type NextPage = { ok: true; first: QueueItem | null } | { ok: false };
 
 /**
  * The approvals desk's controller (DS3-04 spec §2.7). Owns the data and the side effects — the six decision
@@ -60,8 +79,9 @@ function focusInRows(): boolean {
  *
  * Every decision calls the same procedure with the same input as before (§5.4): approve {discrepancyId,
  * expectedStatus, seenClaimAgorot}, reject {discrepancyId, reason, reasonCode}, escalate {discrepancyId, note},
- * decideMany {items, decision: 'accepted', clientMutationId}, reopen {discrepancyId}, reopenMany {discrepancyIds}.
- * A decision shows at once (optimistic) and rolls back exactly on failure.
+ * decideMany {items, decision: 'accepted', clientMutationId}, reopen {discrepancyId}, reopenMany {discrepancyIds} —
+ * built by the pure `decisionCall` / `decideManyInput` / `reopenCall` of desk-state.ts. A decision shows at once
+ * (optimistic) and rolls back exactly on failure.
  */
 export function useDesk(input: DeskControllerInput): DeskController {
   const { filters, viewerRole, mode, wide } = input;
@@ -92,6 +112,12 @@ export function useDesk(input: DeskControllerInput): DeskController {
       /* the optimistic numbers stay; the next decision retries */
     }
   }, [utils, filters]);
+  /** An optimistic change is about to move the totals: a refresh asked for before it would land server totals that
+   *  still count these rows, and a rollback would then add them back twice — it may no longer land. Every decision
+   *  settles with a refresh of its own (OK or failure), so the head is corrected right after. */
+  const holdSummary = () => {
+    summarySeq.current += 1;
+  };
 
   // The current gap = `?sel=` when it is open or decided elsewhere, else the first open row. Resolved, never written:
   // nothing touches the URL on load (consent-clearance:55, W1-04:248-259).
@@ -109,6 +135,8 @@ export function useDesk(input: DeskControllerInput): DeskController {
   const lastDecisionAt = useRef(0);
   /** One replay id per attempt on the same selection (decideMany's clientMutationId). */
   const batchAttempt = useRef<{ key: string; id: string } | null>(null);
+  /** Counts announcements: one built later (when the next page lands) never replaces a newer one. */
+  const announceSeq = useRef(0);
 
   /** `?sel=` through the table URL state (replaceState, other parameters kept); null removes it. */
   const writeSel = (id: string | null) => {
@@ -116,6 +144,10 @@ export function useDesk(input: DeskControllerInput): DeskController {
     updateUrl({ sel: id });
   };
   const setFocus = (focus: FocusIntent | null) => dispatch({ type: 'focus/set', focus });
+  const announce = (text: string) => {
+    announceSeq.current += 1;
+    dispatch({ type: 'announce', text });
+  };
 
   // No multi-select below 1280 px (§5.7, R13/P3): the selection clears when the window narrows.
   useEffect(() => {
@@ -150,27 +182,34 @@ export function useDesk(input: DeskControllerInput): DeskController {
     const next = nextId ? (st.items.find((x) => x.id === nextId) ?? null) : null;
     const countBefore = st.summary.count; // the announcer's "נותרו" counts from before the decision (list.tsx:261)
     const advance = currentRef.current?.id === d.id;
+    // No loaded gap comes next, but the server holds more: the queue is not empty — the next page brings the next gap.
+    const awaitingPage = nextId == null && st.hasMore;
+    // Where `?sel=` went because of this decision: the next loaded gap, or the next page's first gap once the
+    // controller brought it up. A failure rolls back while `?sel=` still names it (the user has not moved).
+    let landedOn: string | null = nextId;
     dispatch({ type: 'decide/start', ids: [d.id], how, result: doneLabel });
+    holdSummary();
+    let nextPage: Promise<NextPage> | null = null;
     if (advance) {
       writeSel(nextId);
-      setFocus(focusAfterDecision({ how, origin, nextId }));
-      if (nextId == null) continueOnNextPage((id) => focusAfterDecision({ how, origin, nextId: id }));
+      setFocus(focusAfterDecision({ how, origin, nextId, hasMore: st.hasMore }));
+      if (awaitingPage) {
+        nextPage = continueOnNextPage(
+          (id) => focusAfterDecision({ how, origin, nextId: id }),
+          (id) => {
+            landedOn = id;
+          },
+        );
+      }
     }
     const sentAt = Date.now();
+    const req = decisionCall(d, action);
     const call: Promise<unknown> =
-      action.procedure === 'approve'
-        ? approve.mutateAsync({
-            discrepancyId: d.id,
-            expectedStatus: d.resolutionStatus as 'open' | 'escalated',
-            seenClaimAgorot: d.claimAgorot,
-          })
-        : action.procedure === 'reject'
-          ? reject.mutateAsync({
-              discrepancyId: d.id,
-              reason: action.reason,
-              reasonCode: action.reasonCode,
-            })
-          : escalate.mutateAsync({ discrepancyId: d.id, note: action.note });
+      req.procedure === 'approve'
+        ? approve.mutateAsync(req.input)
+        : req.procedure === 'reject'
+          ? reject.mutateAsync(req.input)
+          : escalate.mutateAsync(req.input);
     call.then(
       () => {
         const amount = decisionAmount(d, amountKind);
@@ -188,10 +227,24 @@ export function useDesk(input: DeskControllerInput): DeskController {
             bulk: false,
           },
         });
-        dispatch({
-          type: 'announce',
-          text: announceDecided(t, locale, doneLabel, d, amount, next, remainingAfter(countBefore), singleKeysEnabled()),
-        });
+        const remaining = remainingAfter(countBefore);
+        if (nextPage) {
+          // The next gap is the next page's first: name it once the page has landed — "אין עוד פערים" only when the
+          // page brought no new gap, and no claim at all when it failed.
+          const seq = announceSeq.current;
+          void nextPage.then((p) => {
+            if (seq !== announceSeq.current) return; // a newer announcement has spoken since
+            announce(
+              p.ok
+                ? announceDecided(t, locale, doneLabel, d, amount, p.first, remaining, singleKeysEnabled())
+                : announceDecidedNoNext(t, locale, doneLabel, d, amount, singleKeysEnabled()),
+            );
+          });
+        } else if (awaitingPage) {
+          announce(announceDecidedNoNext(t, locale, doneLabel, d, amount, singleKeysEnabled()));
+        } else {
+          announce(announceDecided(t, locale, doneLabel, d, amount, next, remaining, singleKeysEnabled()));
+        }
         void refreshSummary();
       },
       (err: unknown) => {
@@ -203,12 +256,13 @@ export function useDesk(input: DeskControllerInput): DeskController {
           outcome,
           retry: outcome.kind === 'error' ? { action, doneLabel, amountKind } : null,
         });
-        if (advance && selRef.current === nextId) {
-          // The user has not moved: back to the failed gap, its bar speaks (§5.3).
-          writeSel(d.id);
-          setFocus(outcome.kind === 'elsewhere' ? { to: 'hide' } : { to: 'primary' });
+        // The user has not moved: back to the failed gap, its bar speaks (§5.3).
+        const back = decideFailBack({ advance, sel: selRef.current, landedOn, id: d.id, outcome: outcome.kind });
+        if (back) {
+          writeSel(back.sel);
+          setFocus(back.focus);
         }
-        if (outcome.kind !== 'error' && outcome.kind !== 'forbidden') void refreshSummary();
+        void refreshSummary(); // every outcome: the server's totals replace whatever landed while it was in flight
       },
     );
   }
@@ -228,66 +282,78 @@ export function useDesk(input: DeskControllerInput): DeskController {
   /**
    * Bulk approve (exec-desktop-08): ONE server call, all-or-nothing. The server refuses a blocking row and any
    * invoice over ₪200 on its own; the UI never offers those (BatchBar / group primary), so a refusal here is a race.
+   * Only rows still open join (exactly the rows batch/start marks, so a rollback restores exactly them).
    */
-  function decideBatch(rows: QueueItem[], origin: BatchOrigin): void {
+  function decideBatch(rows: QueueItem[], origin: BatchOrigin, how: How): void {
     const st = stateRef.current;
-    if (rows.length === 0 || st.inFlight.has(BATCH_KEY)) return;
+    const open = rows.filter((r) => isOpenRow(st, r.id));
+    if (open.length === 0 || st.inFlight.has(BATCH_KEY)) return;
     if (Date.now() - lastDecisionAt.current < DOUBLE_ACTIVATION_MS) return;
     lastDecisionAt.current = Date.now();
-    const ids = rows.map((r) => r.id);
+    const ids = open.map((r) => r.id);
     batchAttempt.current = batchMutationId(batchAttempt.current, ids, newClientMutationId);
     const clientMutationId = batchAttempt.current.id;
-    const sumAgorot = rows.reduce((n, r) => n + (r.claimable ? Math.max(0, r.claimAgorot) : 0), 0);
+    const sumAgorot = open.reduce((n, r) => n + (r.claimable ? Math.max(0, r.claimAgorot) : 0), 0);
     const verb = origin === 'group' ? t('desk.groupApproveDone') : t('decision.approved');
     const cur = currentRef.current;
     const advance = cur != null && ids.includes(cur.id);
     const target = advance ? nextOpenAfter(st, ids[ids.length - 1]!, new Set(ids)) : (cur?.id ?? null);
+    const awaitingPage = advance && target == null && st.hasMore;
+    // Where `?sel=` went (as decide()): a group refusal returns while `?sel=` still names it.
+    let landedOn: string | null = target;
     dispatch({ type: 'batch/start', ids, origin, result: t('decision.approved') });
+    holdSummary();
     if (advance) writeSel(target);
-    setFocus(target ? { to: 'row', id: target } : { to: 'empty' });
-    if (advance && target == null) continueOnNextPage((id) => ({ to: 'row', id }));
-    const sentAt = Date.now();
-    decideMany
-      .mutateAsync({
-        items: rows.map((r) => ({
-          discrepancyId: r.id,
-          expectedStatus: r.resolutionStatus as 'open' | 'escalated',
-        })),
-        decision: 'accepted',
-        clientMutationId,
-      })
-      .then(
-        () => {
-          batchAttempt.current = null;
-          const text = batchToastText(t, locale, rows.length, sumAgorot);
-          dispatch({
-            type: 'batch/ok',
-            ids,
-            undo: { text, sentAt, capAt: sentAt + UNDO_CAP_MS, instant: false, failed: false, busy: false, ids, bulk: true },
-          });
-          dispatch({ type: 'announce', text: `${verb} · ${text}` });
-          void refreshSummary();
-        },
-        (err: unknown) => {
-          lastDecisionAt.current = 0;
-          const code = (err as DecisionError | null)?.data?.code;
-          const unknown = code !== 'CONFLICT' && code !== 'FORBIDDEN' && code !== 'BAD_REQUEST';
-          const note =
-            code === 'CONFLICT'
-              ? t('desk.batchConflict')
-              : code === 'FORBIDDEN' || code === 'BAD_REQUEST'
-                ? t('desk.batchError')
-                : t('desk.batchUnknown');
-          dispatch({ type: 'batch/fail', ids, origin, note });
-          if (origin === 'group' && advance && selRef.current === target && ids[0]) {
-            // The user has not moved: back to the refused invoice's first gap, its bar shows the note.
-            writeSel(ids[0]);
-            setFocus({ to: 'primary' });
-          }
-          // Network / server error: the batch may or may not have committed.
-          if (unknown) void reloadQueue();
+    setFocus(target ? { to: 'row', id: target } : awaitingPage ? { to: 'stay' } : { to: 'empty' });
+    if (awaitingPage) {
+      void continueOnNextPage(
+        (id) => ({ to: 'row', id }),
+        (id) => {
+          landedOn = id;
         },
       );
+    }
+    const sentAt = Date.now();
+    decideMany.mutateAsync(decideManyInput(open, clientMutationId)).then(
+      () => {
+        batchAttempt.current = null;
+        const text = batchToastText(t, locale, open.length, sumAgorot);
+        dispatch({
+          type: 'batch/ok',
+          ids,
+          undo: {
+            text,
+            sentAt,
+            capAt: sentAt + UNDO_CAP_MS,
+            instant: how !== 'pointer', // key and keyboard changes never animate (§4.10)
+            failed: false,
+            busy: false,
+            ids,
+            bulk: true,
+          },
+        });
+        announce(`${verb} · ${text}`);
+        void refreshSummary();
+      },
+      (err: unknown) => {
+        lastDecisionAt.current = 0;
+        const failure = batchFailureOf(err as DecisionError | null);
+        const note = t(failure.note);
+        dispatch({ type: 'batch/fail', ids, origin, note });
+        const back = batchFailSel({ origin, advance, sel: selRef.current, target: landedOn, ids });
+        if (back != null) {
+          // The user has not moved: back to the refused invoice's first gap, its bar shows the note.
+          writeSel(back);
+          setFocus({ to: 'primary' });
+        }
+        // A selection's note sits in the BatchBar, which is no live region and goes once a reload clears the
+        // selection (batchUnknown): the announcer says it.
+        if (origin === 'selection') announce(note);
+        // Network / server error: the batch may or may not have committed — reload (it refreshes the totals too).
+        if (failure.unknown) void reloadQueue();
+        else void refreshSummary();
+      },
+    );
   }
 
   /* ───────────────────────── undo ───────────────────────── */
@@ -296,21 +362,23 @@ export function useDesk(input: DeskControllerInput): DeskController {
     const u = stateRef.current.undo;
     if (!u || u.failed || u.busy) return;
     const first = u.ids[0];
-    if (!first) return;
+    const req = reopenCall(u);
+    if (!first || !req) return;
     if (Date.now() >= u.capAt) {
-      dispatch({ type: 'undo/expire', sentAt: u.sentAt }); // never ask the server after the cap
+      // Never ask the server after the cap. The toast goes: a click or Enter on its button had focus inside it, and so
+      // had a Z pressed there — focus moves on (§5.3), never to body.
+      expireUndo({ hadFocus: how !== 'key' || focusWithin(UNDO_TOAST) });
       return;
     }
     dispatch({ type: 'undo/start', sentAt: u.sentAt });
-    const call: Promise<unknown> = u.bulk
-      ? reopenMany.mutateAsync({ discrepancyIds: u.ids })
-      : reopen.mutateAsync({ discrepancyId: first });
+    const call: Promise<unknown> =
+      req.procedure === 'reopenMany' ? reopenMany.mutateAsync(req.input) : reopen.mutateAsync(req.input);
     call.then(
       () => {
         dispatch({ type: 'undo/ok', ids: u.ids, sentAt: u.sentAt, how });
         writeSel(first);
         setFocus({ to: 'row', id: first });
-        dispatch({ type: 'announce', text: t('undo.undone') });
+        announce(t('undo.undone'));
         void refreshSummary();
       },
       () => dispatch({ type: 'undo/fail', sentAt: u.sentAt, text: t('undo.failed') }),
@@ -370,17 +438,21 @@ export function useDesk(input: DeskControllerInput): DeskController {
    * The last loaded gap is gone (decided, or hidden) while the server holds more: load the next page and bring its
    * first gap up — unless the user moved meanwhile. On narrow and on the landing there is no LoadMore button (the rows
    * are desk-only), so without this the next page would be out of reach (today's list shows LoadMore at every width).
+   * `onGo(id)` runs just before the first gap is brought up (the caller's rollback follows it). Resolves with what the
+   * page brought (the announcer names that first gap).
    */
-  function continueOnNextPage(focusFor: (id: string) => FocusIntent): void {
-    if (!stateRef.current.hasMore) return;
-    fetchMore().then(
-      ({ fresh }) => {
-        const first = fresh[0];
-        if (first && selRef.current == null) go(first.id, null, focusFor(first.id));
+  function continueOnNextPage(focusFor: (id: string) => FocusIntent, onGo?: (id: string) => void): Promise<NextPage> {
+    if (!stateRef.current.hasMore) return Promise.resolve({ ok: true, first: null });
+    return fetchMore().then(
+      ({ fresh }): NextPage => {
+        const first = fresh[0] ?? null;
+        if (first && selRef.current == null) {
+          onGo?.(first.id);
+          go(first.id, null, focusFor(first.id));
+        }
+        return { ok: true, first };
       },
-      () => {
-        /* the empty state stays; the queue head still counts what the server holds */
-      },
+      (): NextPage => ({ ok: false }), // the empty state stays; the queue head still counts what the server holds
     );
   }
 
@@ -391,14 +463,16 @@ export function useDesk(input: DeskControllerInput): DeskController {
     dispatch({ type: 'nav', motion, focus });
   }
 
-  function move(delta: 1 | -1, how: How, via: 'key' | 'nav'): void {
+  function move(delta: 1 | -1, how: How, via: 'key' | 'nav', from?: string): void {
     const st = stateRef.current;
     const cur = currentRef.current;
     const keyFromRows = via === 'key' && focusInRows();
     const focusFor = (id: string): FocusIntent =>
       via === 'nav' ? { to: 'navFallback', from: delta > 0 ? 'next' : 'prev' } : keyFromRows ? { to: 'row', id } : { to: 'stay' };
     const motion: Motion = how === 'pointer' ? (delta > 0 ? 'next' : 'prev') : null;
-    const target = stepOpen(st, cur?.id ?? null, delta);
+    // A key on another row's cell or checkbox steps from that row, as list.tsx:486-488 stepped from the focused card.
+    const fromId = typeof from === 'string' ? from : (cur?.id ?? null);
+    const target = stepOpen(st, fromId, delta);
     if (target) {
       go(target, motion, focusFor(target));
       return;
@@ -406,11 +480,11 @@ export function useDesk(input: DeskControllerInput): DeskController {
     if (delta > 0 && st.hasMore) {
       // The last live row with more on the server: load, then step (§5.1). The reasons row closes now (R9).
       if (st.asking) dispatch({ type: 'ask/close' });
-      const from = selRef.current;
+      const selBefore = selRef.current;
       fetchMore().then(
         ({ fresh }) => {
           const first = fresh[0]; // a new row is open: nobody here decided it yet
-          if (first && selRef.current === from) go(first.id, motion, focusFor(first.id));
+          if (first && selRef.current === selBefore) go(first.id, motion, focusFor(first.id));
         },
         () => {
           /* nothing new arrived: the gap stays */
@@ -422,6 +496,17 @@ export function useDesk(input: DeskControllerInput): DeskController {
   function select(id: string): void {
     if (!isOpenRow(stateRef.current, id)) return; // done and elsewhere rows: a click does nothing (Q4)
     go(id, null, undefined);
+  }
+
+  /** Enter / O on a row cell (§5.2): the evidence heading, through the focus chain. A row that is open and not current
+   *  is selected first — its heading renders with the selection, and the intent is applied after that render. */
+  function focusHeading(id?: string): void {
+    const cur = currentRef.current;
+    if (typeof id === 'string' && id !== cur?.id && isOpenRow(stateRef.current, id)) {
+      go(id, null, { to: 'heading' });
+      return;
+    }
+    setFocus({ to: 'heading' });
   }
 
   /* ───────────────────────── the bar's actions ───────────────────────── */
@@ -491,22 +576,23 @@ export function useDesk(input: DeskControllerInput): DeskController {
     dispatch({ type: 'escalate/open', id: cur.id, origin });
   }
 
-  function sendEscalation(note: string | undefined): void {
+  function sendEscalation(note: string | undefined, how?: How): void {
     const st = stateRef.current;
     const e = st.escalateFor;
     dispatch({ type: 'escalate/close' });
     if (!e) return;
     const row = st.items.find((x) => x.id === e.id);
-    // The Sheet's send button: a keyboard-like intent (no pointer motion), focus per focusAfterDecision (§5.3).
-    if (row) decide(row, { procedure: 'escalate', note }, t('decision.escalated'), 'delta', 'keyboard', e.origin);
+    // The Sheet's send button: keyboard-like unless the view says it was a pointer click; focus per
+    // focusAfterDecision (§5.3).
+    if (row) decide(row, { procedure: 'escalate', note }, t('decision.escalated'), 'delta', howOr(how, 'keyboard'), e.origin);
   }
 
-  function retry(): void {
+  function retry(how?: How): void {
     const st = stateRef.current;
     const cur = currentRef.current;
     const r = cur ? st.retry[cur.id] : undefined;
-    // "נסו שוב" sits in the bar's alert: the same decision again, focus as for a keyboard bar action.
-    if (cur && r) decide(cur, r.action, r.doneLabel, r.amountKind, 'keyboard', 'bar');
+    // "נסו שוב" sits in the bar's alert: the same decision again, focus as for a bar action of that kind.
+    if (cur && r) decide(cur, r.action, r.doneLabel, r.amountKind, howOr(how, 'keyboard'), 'bar');
   }
 
   function hideElsewhere(): void {
@@ -516,8 +602,9 @@ export function useDesk(input: DeskControllerInput): DeskController {
     const nextId = nextOpenAfter(st, cur.id);
     dispatch({ type: 'elsewhere/hide', id: cur.id });
     writeSel(nextId);
-    setFocus(nextId ? { to: 'row', id: nextId } : { to: 'empty' });
-    if (nextId == null) continueOnNextPage((id) => ({ to: 'row', id }));
+    // No loaded gap next but more on the server: not empty — focus stays until the next page brings its first gap.
+    setFocus(nextId ? { to: 'row', id: nextId } : st.hasMore ? { to: 'stay' } : { to: 'empty' });
+    if (nextId == null) void continueOnNextPage((id) => ({ to: 'row', id }));
   }
 
   /* ───────────────────────── bulk selection ───────────────────────── */
@@ -529,7 +616,7 @@ export function useDesk(input: DeskControllerInput): DeskController {
     if (!row || !isOpenRow(st, id) || row.canAct === false) return;
     const why = batchRefusalOf(row);
     if (why) {
-      dispatch({ type: 'announce', text: why === 'block' ? t('desk.batchBlock') : t('desk.batchVat') });
+      announce(why === 'block' ? t('desk.batchBlock') : t('desk.batchVat'));
       return;
     }
     dispatch({ type: 'check/toggle', id });
@@ -551,17 +638,17 @@ export function useDesk(input: DeskControllerInput): DeskController {
           : null;
   const selectionDisabled = bulk.disabled || vatPicked || batchBusy;
 
-  function approveChecked(): void {
+  function approveChecked(how?: How): void {
     if (mode !== 'desk' || selectionDisabled || bulk.rows.length === 0) return;
-    decideBatch(bulk.rows, 'selection');
+    decideBatch(bulk.rows, 'selection', howOr(how, 'pointer'));
   }
 
-  function approveInvoice(invoiceId: string): void {
+  function approveInvoice(invoiceId: string, how?: How): void {
     const rows = liveRows(stateRef.current).filter((x) => x.invoiceId === invoiceId);
     const g = groupByInvoice(rows)[0];
     // §5.8: never with a block row or a VAT gap (R6), only when the group primary is allowed (≤ the cap, ₪ > 0).
     if (!g || rows.some((r) => batchRefusalOf(r) != null || decisionBlockOf(r) != null) || !groupPrimary(g).ok) return;
-    decideBatch(rows, 'group');
+    decideBatch(rows, 'group', howOr(how, 'pointer'));
   }
 
   /* ───────────────────────── the view's data ───────────────────────── */
@@ -594,6 +681,7 @@ export function useDesk(input: DeskControllerInput): DeskController {
     summary: s.summary,
     hasMore: s.hasMore,
     loadingMore: s.loadingMore,
+    loadingNext: current == null && s.loadingMore && s.hasMore,
     siblings,
     note: current ? (s.notes[current.id] ?? null) : null,
     elsewhereText: current ? (s.elsewhere.get(current.id)?.text ?? null) : null,
@@ -637,6 +725,7 @@ export function useDesk(input: DeskControllerInput): DeskController {
       const cur = currentRef.current;
       if (cur) setFocus({ to: 'row', id: cur.id });
     },
+    focusHeading,
     consumeFocus: () => setFocus(null),
   };
 }

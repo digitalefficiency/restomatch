@@ -6,6 +6,7 @@ import { countWords } from '@/lib/copy/words';
 import { costOf, headParts, type CostForm } from '../desk-facts';
 import {
   announceDecided,
+  announceDecidedNoNext,
   basisText,
   batchToastText,
   costText,
@@ -319,6 +320,29 @@ describe('announceDecided (§5.12)', () => {
   it('no amount (a ₪0 claim): the title alone', () => {
     const text = announceDecided(he, 'he', he('decision.approved'), BASE, null, null, 0, false);
     expect(text).toBe('נוסף לבקשת הזיכוי · בירה מהחבית. אין עוד פערים');
+  });
+});
+
+describe('announceDecidedNoNext: the next page did not load, so the queue is not called empty', () => {
+  it('"{verb} · {what}": the title and the amount with its basis, no count, never "אין עוד פערים"', () => {
+    const text = announceDecidedNoNext(he, 'he', he('decision.approved'), BASE, { agorot: 10480n, basis: 'excl' }, false);
+    expect(plain(text)).toBe(`נוסף לבקשת הזיכוי · בירה מהחבית · ${plain(ilsHe(104.8))} לפני מע״מ`);
+    expect(text).not.toContain('אין עוד פערים');
+    expect(text).not.toContain('נותר');
+    expect(announceDecidedNoNext(en, 'en', en('decision.approved'), BASE, { agorot: 10480n, basis: 'excl' }, false)).toBe(
+      `${en('decision.approved')} · Draught beer · ₪104.80 before VAT`,
+    );
+  });
+  it('no amount: the verb and the title; the undo key follows only while single keys are on (R15)', () => {
+    expect(announceDecidedNoNext(he, 'he', he('decision.approved'), BASE, null, false)).toBe('נוסף לבקשת הזיכוי · בירה מהחבית');
+    const on = announceDecidedNoNext(he, 'he', he('decision.approved'), BASE, null, true);
+    expect(on).toBe(`נוסף לבקשת הזיכוי · בירה מהחבית ${he('desk.sr.undoKey')}`);
+  });
+  it('the same "what" as announceDecided', () => {
+    const amount = { agorot: 10480n, basis: 'excl' as const };
+    const full = announceDecided(he, 'he', he('decision.approved'), BASE, amount, null, 0, false);
+    const only = announceDecidedNoNext(he, 'he', he('decision.approved'), BASE, amount, false);
+    expect(full.startsWith(`${only}.`)).toBe(true);
   });
 });
 

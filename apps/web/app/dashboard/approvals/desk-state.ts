@@ -1,12 +1,16 @@
 /**
  * The approvals desk's state machine (DS3-04 spec §2.6; eng.md §2.2-§2.5). Pure: state and an action in, a new state
- * out — no React, no tRPC, no URL. `use-desk.ts` owns the side effects (the six mutations, `?sel=`, the summary
- * refresh) and dispatches these transitions; the views never read this module.
+ * out — no React, no tRPC client, no URL. `use-desk.ts` owns the side effects (the six mutations, `?sel=`, the summary
+ * refresh) and dispatches these transitions; the views never read this module. The pure halves of those side effects
+ * live here too, so they are tested field by field: the six mutations' inputs (spec §5.4, typed against the router)
+ * and where `?sel=` returns after a failure.
  *
  * Rows are never removed: a decided row is `done` while its undo lives, then `hidden`, so a failure or an undo puts it
  * back exactly where it was (server order is never changed). Every summary move goes through `adjustSummary`, in
  * integer agorot, and a rollback adds back exactly what the start took away (R11: `decideMany` is atomic).
  */
+import type { inferRouterInputs } from '@trpc/server';
+import type { AppRouter } from '@restomatch/api'; // type-only (G-16 client-api-value-import safe)
 import type { he as approvalsHe } from '@/lib/i18n/messages/approvals/he';
 import type { Translator } from '@/lib/i18n/translate';
 import { conflictText, parseAmountChanged } from './conflicts';
@@ -27,6 +31,8 @@ import type {
 import { parseDecidedConflict, resolutionLabel, type WaiveReason } from './vocab';
 
 type T = Translator<typeof approvalsHe>;
+/** The six decision procedures' inputs, as the router declares them (tsc checks every builder below against them). */
+type ApprovalsInput = inferRouterInputs<AppRouter>['approvals'];
 
 /** = the server page (page.tsx myQueue limit 50; [invoiceId]/page.tsx 50): "has more" is right on first paint. */
 export const PAGE = 50;
@@ -287,11 +293,141 @@ export function askingRow(s: DeskState): QueueItem | null {
 }
 
 /** Focus after a decision (§5.3): no next gap → the empty state; a keyboard-activated bar button, or a shortcut pressed
- *  with focus on the bar (R15) → the next primary; else the next row (narrow and single resolve a row to the primary). */
-export function focusAfterDecision(p: { how: How; origin: Origin; nextId: string | null }): FocusIntent {
-  if (p.nextId == null) return { to: 'empty' };
+ *  with focus on the bar (R15) → the next primary; else the next row (narrow and single resolve a row to the primary).
+ *  `hasMore` (optional, default false): no LOADED gap is next but the server holds more — the queue is not empty, so
+ *  focus stays (→ the fallback chain if its element goes) until the next page brings its first gap up. */
+export function focusAfterDecision(p: { how: How; origin: Origin; nextId: string | null; hasMore?: boolean }): FocusIntent {
+  if (p.nextId == null) return p.hasMore ? { to: 'stay' } : { to: 'empty' };
   if (p.origin === 'bar' && p.how !== 'pointer') return { to: 'primary' };
   return { to: 'row', id: p.nextId };
+}
+
+/** A `how` handed over by a caller, or the fallback: a view may pass a click handler's event where `how` is optional
+ *  (`onClick={c.retry}`), and only the three `How` words count. */
+export function howOr(x: unknown, fallback: How): How {
+  return x === 'pointer' || x === 'keyboard' || x === 'key' ? x : fallback;
+}
+
+// ── the mutation inputs (spec §5.4: the same procedure with the same input as list.tsx) ───────────────
+
+/** The row fields a decision's input reads. */
+type DecidedRow = Pick<QueueItem, 'id' | 'resolutionStatus' | 'claimAgorot'>;
+
+/** Claim / hold the copy: `approve` with the status and the claim the decider saw (list.tsx:244-248). */
+export function approveInput(row: DecidedRow): ApprovalsInput['approve'] {
+  return {
+    discrepancyId: row.id,
+    expectedStatus: row.resolutionStatus as 'open' | 'escalated',
+    seenClaimAgorot: row.claimAgorot,
+  };
+}
+
+/** Review / pay as billed: `reject` with the reason text and its code (list.tsx:250-254). */
+export function rejectInput(
+  row: Pick<QueueItem, 'id'>,
+  reason: string,
+  reasonCode: WaiveReason | 'reviewed',
+): ApprovalsInput['reject'] {
+  return { discrepancyId: row.id, reason, reasonCode };
+}
+
+/** Escalate: `escalate` with the Sheet's note — the key is sent even when the note is undefined (list.tsx:255). */
+export function escalateInput(row: Pick<QueueItem, 'id'>, note: string | undefined): ApprovalsInput['escalate'] {
+  return { discrepancyId: row.id, note };
+}
+
+/** Bulk / group approve: ONE `decideMany`, all-or-nothing, with the attempt's replay id (list.tsx:418-430). */
+export function decideManyInput(
+  rows: ReadonlyArray<Pick<QueueItem, 'id' | 'resolutionStatus'>>,
+  clientMutationId: string,
+): ApprovalsInput['decideMany'] {
+  return {
+    items: rows.map((r) => ({
+      discrepancyId: r.id,
+      expectedStatus: r.resolutionStatus as 'open' | 'escalated',
+    })),
+    decision: 'accepted',
+    clientMutationId,
+  };
+}
+
+export type DecisionCall =
+  | { procedure: 'approve'; input: ApprovalsInput['approve'] }
+  | { procedure: 'reject'; input: ApprovalsInput['reject'] }
+  | { procedure: 'escalate'; input: ApprovalsInput['escalate'] };
+
+/** One decision → its procedure and input. */
+export function decisionCall(row: DecidedRow, action: Decide): DecisionCall {
+  switch (action.procedure) {
+    case 'approve':
+      return { procedure: 'approve', input: approveInput(row) };
+    case 'reject':
+      return { procedure: 'reject', input: rejectInput(row, action.reason, action.reasonCode) };
+    case 'escalate':
+      return { procedure: 'escalate', input: escalateInput(row, action.note) };
+  }
+}
+
+export type ReopenCall =
+  | { procedure: 'reopen'; input: ApprovalsInput['reopen'] }
+  | { procedure: 'reopenMany'; input: ApprovalsInput['reopenMany'] };
+
+/** Undo → `reopen` its one gap, or `reopenMany` every gap of a bulk / group decision (list.tsx:320, :329). Null when
+ *  the undo names no gap. */
+export function reopenCall(u: Pick<UndoView, 'ids' | 'bulk'>): ReopenCall | null {
+  const first = u.ids[0];
+  if (first === undefined) return null;
+  return u.bulk
+    ? { procedure: 'reopenMany', input: { discrepancyIds: u.ids } }
+    : { procedure: 'reopen', input: { discrepancyId: first } };
+}
+
+// ── rolling back after a failure ─────────────────────────────────────────────────────────────
+
+/**
+ * A failed decision: `?sel=` returns to the failed gap and focus goes to its bar (§5.3: "הסתירו" for decided
+ * elsewhere, else its primary) — only when the decision moved the current gap away (`advance`) and the user has not
+ * moved since: `?sel=` still names `landedOn`, the gap the decision itself went to (the next loaded gap, or the next
+ * page's first gap once the controller brought it up; null while that page is still loading). Null: nothing moves.
+ */
+export function decideFailBack(p: {
+  advance: boolean;
+  sel: string | null;
+  landedOn: string | null;
+  id: string;
+  outcome: FailureOutcome['kind'];
+}): { sel: string; focus: FocusIntent } | null {
+  if (!p.advance || p.sel !== p.landedOn) return null;
+  return { sel: p.id, focus: p.outcome === 'elsewhere' ? { to: 'hide' } : { to: 'primary' } };
+}
+
+/**
+ * A refused batch → the gap `?sel=` returns to (R11, §2.6): origin `group`, when the batch moved the current gap away
+ * and `?sel=` still names `target` (where the batch went: the next loaded gap, or the next page's first gap once it
+ * landed), → the group's first gap, whose bar shows the note. A selection's refusal leaves the current gap where it is
+ * (the BatchBar note speaks, §5.3). Null: `?sel=` stays.
+ */
+export function batchFailSel(p: {
+  origin: BatchOrigin;
+  advance: boolean;
+  sel: string | null;
+  target: string | null;
+  ids: readonly string[];
+}): string | null {
+  if (p.origin !== 'group' || !p.advance || p.sel !== p.target) return null;
+  return p.ids[0] ?? null;
+}
+
+/** A refused `decideMany` → its note (as list.tsx:441-449); `unknown`: the batch may or may not have committed, so the
+ *  queue reloads. */
+export function batchFailureOf(err: DecisionError | null | undefined): {
+  note: 'desk.batchConflict' | 'desk.batchError' | 'desk.batchUnknown';
+  unknown: boolean;
+} {
+  const code = err?.data?.code;
+  if (code === 'CONFLICT') return { note: 'desk.batchConflict', unknown: false };
+  if (code === 'FORBIDDEN' || code === 'BAD_REQUEST') return { note: 'desk.batchError', unknown: false };
+  return { note: 'desk.batchUnknown', unknown: true };
 }
 
 /** A failed decision → its outcome, in today's order: amount changed, escalated to me (owner), decided elsewhere,

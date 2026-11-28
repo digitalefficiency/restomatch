@@ -82,6 +82,10 @@ export interface DeskController {
   summary: QueueSummary; // optimistic server totals
   hasMore: boolean;
   loadingMore: boolean;
+  /** No current gap while the next page loads (the last loaded gap was decided or hidden and the server holds more):
+   *  the queue is not empty, so the evidence shows loading, not DeskEmpty's "הכול מטופל". Optional for plain-object
+   *  controllers; useDesk always sets it. */
+  loadingNext?: boolean;
   siblings: QueueItem[]; // live rows of current's invoice (incl. current)
   note: RowNote | null;
   elsewhereText: string | null;
@@ -105,7 +109,9 @@ export interface DeskController {
   motion: Motion;
 
   select(id: string): void; // row click / focus adoption; replaces ?sel=; closes asking
-  move(delta: 1 | -1, how: How, via: 'key' | 'nav'): void; // closes asking first
+  /** Closes asking first. `from` (optional): step from that row instead of the current one — a J/K pressed on another
+   *  row's cell or checkbox moves from where focus is. */
+  move(delta: 1 | -1, how: How, via: 'key' | 'nav', from?: string): void;
   /** The variant's primary: claim / hold copy / review; on a `link` row it opens /dashboard/invoices/{invoiceId}
    *  (router.push, no decision — key 1 does what it does today, P11a). Ignored while decisionBlockOf(current). */
   claim(how: How, origin: Origin): void;
@@ -113,19 +119,26 @@ export interface DeskController {
   closeReasons(): void;
   pay(code: WaiveReason, reason: string, how: How): void; // decides asking.id only; no-op when not asking
   requestEscalate(origin: Origin): void;
-  escalate(note: string | undefined): void;
+  /** The Sheet's send. `how` (optional, default 'keyboard'): a pointer send moves focus to the next row (§5.3). */
+  escalate(note: string | undefined, how?: How): void;
   closeEscalate(): void;
   undoLast(how: How): void;
   expireUndo(info: { hadFocus: boolean }): void;
   toggleChecked(id: string): void;
   clearChecked(): void;
-  approveChecked(): void;
-  approveInvoice(invoiceId: string): void;
+  /** `how` (optional, default 'pointer'): the bulk undo toast slides in only after a pointer approve (§4.10). */
+  approveChecked(how?: How): void;
+  /** `how` as approveChecked. */
+  approveInvoice(invoiceId: string, how?: How): void;
   hideElsewhere(): void;
-  retry(): void;
+  /** "נסו שוב". `how` (optional, default 'keyboard'): a pointer retry moves focus to the next row (§5.3). */
+  retry(how?: How): void;
   loadMore(): void;
   setKeysOpen(open: boolean): void;
   focusQueue(): void; // emits { to:'row', id: current.id }
+  /** Enter / O on a row cell: emits { to:'heading' } (→ the fallback chain), selecting that row first when it is open
+   *  and not current. Optional for plain-object controllers; useDesk always sets it. */
+  focusHeading?(id?: string): void;
   consumeFocus(): void;
 }
 /** `wide` = useMediaQuery('(min-width: 1280px)', true), computed once in list.tsx: the controller clears the bulk

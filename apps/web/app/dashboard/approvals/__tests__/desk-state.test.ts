@@ -6,6 +6,7 @@ import {
   PAGE,
   adjustSummary,
   askingRow,
+  batchFailSel,
   batchMutationId,
   batchRefusalOf,
   deskReducer,
@@ -406,6 +407,12 @@ describe('bulk and group decisions are optimistic, with an exact rollback (R11)'
     expect(s.notes.E2?.kind).toBe('batchError');
     expect(s.batchNote).toBeNull();
     expect(isOpenRow(s, 'E1')).toBe(true);
+    // …and the current gap returns to the group's first gap while the user has not moved (use-desk applies it).
+    const target = nextOpenAfter(s0(), 'E2', new Set(['E1', 'E2']));
+    expect(target).toBe('V');
+    expect(batchFailSel({ origin: 'group', advance: true, sel: target, target, ids: ['E1', 'E2'] })).toBe('E1');
+    expect(batchFailSel({ origin: 'group', advance: true, sel: 'R', target, ids: ['E1', 'E2'] })).toBeNull();
+    expect(batchFailSel({ origin: 'selection', advance: true, sel: target, target, ids: ['E1', 'E2'] })).toBeNull();
   });
 });
 

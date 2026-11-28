@@ -145,9 +145,7 @@ export function announceDecided(
   remaining: number,
   singleKeys: boolean,
 ): string {
-  const what = [rowTitle(t, locale, decided), amount ? `${ilsText(locale, amount.agorot)} ${basisText(t, amount.basis)}` : null]
-    .filter(Boolean)
-    .join(' · ');
+  const what = decidedWhat(t, locale, decided, amount);
   const said = next
     ? t('desk.sr.decided', {
         verb,
@@ -156,6 +154,34 @@ export function announceDecided(
         next: [discrepancyLabel(t, next.type), itemName(locale, next)].filter(Boolean).join(', '),
       })
     : t('desk.sr.decidedLast', { verb, what });
+  return withUndoKey(t, said, singleKeys);
+}
+
+/**
+ * The announcer when the next gap is not known — the server holds more but its next page did not load: "{verb} ·
+ * {what}" (the undo key after it while single keys are on). Never `desk.sr.decidedLast` ("אין עוד פערים"): the queue
+ * is not empty. Composed with " · " as the bulk announcement is (§5.12: "{verb} · {desk.toast.batchDone}").
+ */
+export function announceDecidedNoNext(
+  t: T,
+  locale: Locale,
+  verb: string,
+  decided: QueueItem,
+  amount: { agorot: bigint; basis: AmountBasis } | null,
+  singleKeys: boolean,
+): string {
+  return withUndoKey(t, `${verb} · ${decidedWhat(t, locale, decided, amount)}`, singleKeys);
+}
+
+/** The decided gap in the announcer: its title and the amount with its basis (R7d). */
+function decidedWhat(t: T, locale: Locale, decided: QueueItem, amount: { agorot: bigint; basis: AmountBasis } | null): string {
+  return [rowTitle(t, locale, decided), amount ? `${ilsText(locale, amount.agorot)} ${basisText(t, amount.basis)}` : null]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+/** R15: while single keys are on (the store, read by the caller at that moment) the undo key follows. */
+function withUndoKey(t: T, said: string, singleKeys: boolean): string {
   return singleKeys ? `${said} ${t('desk.sr.undoKey')}` : said;
 }
 
