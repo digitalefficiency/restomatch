@@ -209,15 +209,18 @@ self.addEventListener('notificationclick', (event) => {
   const target = safeTarget(event.notification.data && event.notification.data.url);
   event.waitUntil(
     self.clients.matchAll({ type: 'window' }).then((wins) => {
-      // A click grants ONE window interaction: navigate first (it needs none),
-      // focus after; only a window this registration controls can be
-      // navigated, so matchAll lists just those. navigate() can still reject:
-      // then the unspent interaction opens the card in a new window.
+      // A click grants ONE short-lived window interaction. matchAll lists only
+      // windows this registration controls (so navigate() can act on them):
+      // focus() first, while the grant is fresh (a slow page load must not
+      // outlast it), then navigate() to the card. A null or rejected
+      // navigate (an offline error page, a cross-origin redirect) is left as
+      // is: never a second window after a focus. No such window → open one.
       for (const w of wins) {
         if (new URL(w.url).origin !== self.location.origin || typeof w.navigate !== 'function') continue;
-        return w.navigate(target)
-          .then((c) => (c ? c.focus().catch(() => c) : self.clients.openWindow(target)))
-          .catch(() => self.clients.openWindow(target));
+        return Promise.resolve(typeof w.focus === 'function' ? w.focus() : w)
+          .catch(() => w)
+          .then((f) => (f && typeof f.navigate === 'function' ? f : w).navigate(target))
+          .catch(() => null);
       }
       return self.clients.openWindow(target);
     }),
@@ -227,13 +230,18 @@ self.addEventListener('notificationclick', (event) => {
 const MANIFEST_PATH = '/pwa/manifest.webmanifest';
 // offline.html's one action leads into receiving (the receiving shell's
 // fallback: its snapshot serves the board). Every role launches the app,
-// though, so the launch page's offline copy retries the launch instead.
+// though: the launch page's offline copy keeps that link only when this
+// phone holds the receiving board's snapshot (written only for roles that
+// open receiving, owner-stamped, purged on sign-out), so a receiver's cold
+// offline start still reaches the board. Otherwise it retries the launch.
 const RECEIVING_RETRY = 'href="/dashboard/receiving?source=pwa"';
 const LAUNCH_RETRY = 'href="/dashboard?source=pwa"';
 async function offlineLaunch() {
   const hit = await caches.match('/pwa/offline.html');
   if (!hit) return Response.error();
-  const html = (await hit.text()).split(RECEIVING_RETRY).join(LAUNCH_RETRY);
+  const board = await caches.open(SNAPSHOT_CACHE).then((c) => c.match('/dashboard/receiving', { ignoreSearch: true })).catch(() => null);
+  const text = await hit.text();
+  const html = board ? text : text.split(RECEIVING_RETRY).join(LAUNCH_RETRY);
   return new Response(html, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } });
 }
 

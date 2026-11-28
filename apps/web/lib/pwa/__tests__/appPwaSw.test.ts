@@ -96,11 +96,13 @@ async function loadWorker(scope = `${ORIGIN}/dashboard`, fetchImpl: (r: unknown)
     return responded ? await (responded as Promise<Response>) : null;
   };
   /** A window whose focus() spends the click's one interaction, like Chromium. */
-  const win = (url: string, navigate: (u: string) => Promise<unknown>, controlled = true): Win => {
-    const w: Win = { url, controlled, navigate, focus: async () => (spend(), w) };
+  const win = (url: string, navigate: (u: string) => Promise<unknown>, controlled = true): Win & { focused: number } => {
+    const w: Win & { focused: number } = { url, controlled, navigate, focused: 0, focus: async () => (spend(), (w.focused += 1), w) };
     return w;
   };
-  return { run, caches: c, shown, opened, badge, win, setWindows: (w: Win[]) => void (windows = w) };
+  /** The click's grant runs out (Chromium: about 10 s), e.g. during a slow page load. */
+  const expireGrant = () => void (token = 0);
+  return { run, caches: c, shown, opened, badge, win, expireGrant, setWindows: (w: Win[]) => void (windows = w) };
 }
 
 function shareRequest(form: FormData) {
@@ -322,12 +324,20 @@ describe('two registrations, one script (W3-03b)', () => {
     const body = await page.text();
     expect(body).toContain('אין חיבור לאינטרנט');
     // Every role launches the app; not every role can open receiving: the launch's offline page retries the launch.
-    expect(body).toContain('href="/dashboard?source=pwa"');
-    expect(body).not.toContain('/dashboard/receiving');
+    expect(body).toContain('href="/dashboard?source=pwa"'); // no receiving snapshot on this phone
     // The receiving shell's own fallback keeps the way into the board (its snapshot).
     const shell = await loadWorker(`${ORIGIN}/dashboard/receiving`, async () => Promise.reject(new TypeError('offline')));
     await (await shell.caches.open('rm-receiver-v2')).put('/pwa/offline.html', new Response(html));
     expect(await (await nav(shell, '/dashboard/receiving/x'))!.text()).toContain('href="/dashboard/receiving?source=pwa"');
+  });
+  it("a receiver's cold offline start: with the receiving board's snapshot on the phone, the launch page links into it", async () => {
+    const html = readFileSync(join(__dirname, '../../../public/pwa/offline.html'), 'utf8');
+    const w = await loadWorker(`${ORIGIN}/dashboard`, async () => Promise.reject(new TypeError('offline')));
+    await (await w.caches.open('rm-receiver-v2')).put('/pwa/offline.html', new Response(html));
+    await (await w.caches.open('rm-receiver-snapshot-v1')).put('/dashboard/receiving', new Response('<html>board</html>'));
+    const body = await (await nav(w, '/dashboard'))!.text();
+    expect(body).toContain('href="/dashboard/receiving?source=pwa"');
+    expect(body).not.toContain('href="/dashboard?source=pwa"');
   });
   it('the manifest is network first (a deploy reaches the installed app), the precached copy offline', async () => {
     const get = (w: Awaited<ReturnType<typeof loadWorker>>) =>
@@ -365,32 +375,36 @@ describe('push + notification click (W3-03b)', () => {
     expect(w.shown.map((s) => (s.options.data as { url: string }).url)).toEqual(['/dashboard', '/dashboard', '/dashboard', '/dashboard']);
   });
 
-  it('a click navigates an open window to the exact card and focuses it, else opens one', async () => {
+  it('a click focuses an open window first (while the grant is fresh), then navigates it to the card; none → opens one', async () => {
     const w = await loadWorker();
     const close = vi.fn();
     await w.run('notificationclick', { notification: { close, data: { url: '/dashboard/approvals?invoice=1' } } });
     expect(close).toHaveBeenCalled();
     expect(w.opened).toEqual(['/dashboard/approvals?invoice=1']);
 
-    const focused = vi.fn();
+    // A slow page load: the grant runs out before navigate() resolves. Focus already happened.
     const navigate = vi.fn(async () => {
-      focused();
+      w.expireGrant();
       return open;
     });
     const open = w.win(`${ORIGIN}/dashboard/orders`, navigate);
     w.setWindows([open]);
     await w.run('notificationclick', { notification: { close, data: { url: '/dashboard/receiving/9' } } });
+    expect(open.focused).toBe(1);
     expect(navigate).toHaveBeenCalledWith('/dashboard/receiving/9');
     expect(w.opened).toHaveLength(1); // navigated in place, no second window
   });
 
-  it('navigate() rejects: the one window interaction is still unspent, so the card opens in a new window', async () => {
-    const w = await loadWorker();
-    const navigate = vi.fn(async () => Promise.reject(new TypeError("This service worker is not the client's active service worker.")));
-    w.setWindows([w.win(`${ORIGIN}/dashboard/orders`, navigate)]);
-    await w.run('notificationclick', { notification: { close: vi.fn(), data: { url: '/dashboard/approvals?invoice=7' } } });
-    expect(navigate).toHaveBeenCalled();
-    expect(w.opened).toEqual(['/dashboard/approvals?invoice=7']);
+  it('navigate() resolves null or rejects (offline error page, cross-origin redirect): no second window after the focus', async () => {
+    for (const navigate of [vi.fn(async () => null), vi.fn(async () => Promise.reject(new TypeError('navigation failed')))]) {
+      const w = await loadWorker();
+      const open = w.win(`${ORIGIN}/dashboard/orders`, navigate);
+      w.setWindows([open]);
+      await w.run('notificationclick', { notification: { close: vi.fn(), data: { url: '/dashboard/approvals?invoice=7' } } });
+      expect(open.focused).toBe(1);
+      expect(navigate).toHaveBeenCalledWith('/dashboard/approvals?invoice=7');
+      expect(w.opened).toEqual([]);
+    }
   });
 
   it("a window another registration controls (the receiving board, /login) is never navigated: a new window opens", async () => {

@@ -127,3 +127,42 @@ test('the installed app launches controlled, and offline its launch page is the 
     for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
   });
 });
+
+test("a receiver's cold offline start reaches the receiving board's snapshot from the launch page", async ({ page, context }) => {
+  test.setTimeout(120_000);
+  await page.goto('/dashboard/settings/notifications');
+  // Both registrations, as AppPwa + ReceiverPwa make them, and the board's snapshot as the receiving shell keeps it.
+  await page.evaluate(async () => {
+    await navigator.serviceWorker.register('/receiver-sw.js', { scope: '/dashboard' });
+    await navigator.serviceWorker.register('/receiver-sw.js', { scope: '/dashboard/receiving' });
+    await navigator.serviceWorker.ready;
+    const regs = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(
+      regs.map(
+        (r) =>
+          new Promise<void>((done) => {
+            const sw = r.installing ?? r.waiting ?? r.active;
+            if (!sw || sw.state === 'activated') return done();
+            sw.addEventListener('statechange', () => sw.state === 'activated' && done());
+          }),
+      ),
+    );
+    const snap = await caches.open('rm-receiver-snapshot-v1');
+    await snap.put('/dashboard/receiving', new Response('<!doctype html><title>board</title><meta charset="utf-8"><h1>לוח הקבלה (שמור)</h1>', { headers: { 'content-type': 'text/html; charset=utf-8' } }));
+  });
+  await context.setOffline(true);
+  try {
+    await page.goto('/dashboard?source=pwa');
+    await expect(page.getByRole('heading', { name: 'אין חיבור לאינטרנט' })).toBeVisible();
+    const retry = page.locator('a.retry');
+    await expect(retry).toHaveAttribute('href', '/dashboard/receiving?source=pwa');
+    await retry.click();
+    await expect(page.getByRole('heading', { name: 'לוח הקבלה (שמור)' })).toBeVisible();
+  } finally {
+    await context.setOffline(false);
+  }
+  await page.evaluate(async () => {
+    await caches.delete('rm-receiver-snapshot-v1');
+    for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
+  });
+});
