@@ -886,10 +886,24 @@ export async function computePayRunMonth(
     unpaidInvoicesSql(rid, { start: hero.monthStart, end: hero.monthEnd }),
   );
 
+  // "חסר מספר הקצאה": the same vatAtRisk() hold payRun.list applies (holdReasonsOf
+  // `missing_allocation`), so the home row / chain strip never count as payable what the
+  // pay-run page refuses to pay (MF-24950, train-C #321 gap).
+  const vat = await vatAtRisk(db, rid, 'all');
+  const vatByInvoice = new Map(vat.rows.map((r) => [r.invoiceId, r.vatAtRisk]));
+
   const groups = new Map<string, PayRunSupplier & { a: Record<string, number> }>();
   for (const row of rowsOf(res)) {
     const id = String(row.id);
-    const inv = invoiceOfRow(row, byInvoice.get(id) ?? null);
+    let inv = invoiceOfRow(row, byInvoice.get(id) ?? null);
+    if (
+      !inv.pendingLink &&
+      !inv.duplicate &&
+      (inv.status === 'pay' || inv.status === 'claim') &&
+      (vatByInvoice.get(id) ?? 0) > 0
+    ) {
+      inv = { ...inv, status: 'hold' };
+    }
     const key = row.supplier_id == null ? '' : String(row.supplier_id);
     let g = groups.get(key);
     if (!g) {

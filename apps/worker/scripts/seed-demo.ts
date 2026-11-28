@@ -795,7 +795,10 @@ async function main() {
   ).map(([en, qty, price]) => ({ p: productByEn.get(en), qty, price }));
   if (fish && eventItems.every((i) => i.p)) {
     const vat = fish.vatRate != null ? Number(fish.vatRate) : vatRate;
-    const deliveredAt = new Date(todayStart.getTime() - 27 * DAY_MS + 10 * 60 * 60 * 1000);
+    // 27 days ago, but never inside the current IL month (from the 28th that would be this
+    // month, and the home "ריצת התשלומים" row would move): clamped to the last day of last month.
+    const ilMonthStart = todayStart.getTime() - (Number(ilDate(todayStart).slice(8, 10)) - 1) * DAY_MS;
+    const deliveredAt = new Date(Math.min(todayStart.getTime() - 27 * DAY_MS, ilMonthStart - DAY_MS) + 10 * 60 * 60 * 1000);
     const orderedAt = new Date(deliveredAt.getTime() - 3 * DAY_MS);
     const priced = eventItems;
     const subtotal = r2(priced.reduce((a, i) => a + Math.round(i.qty * i.price * 100), 0) / 100);
