@@ -31,7 +31,7 @@ export async function BranchStrip({ kind, then }: { kind: Kind; then: string }) 
         {data.rows.map((r) => (
           <li
             key={r.restaurantId}
-            className={cn('flex flex-wrap items-center justify-between gap-2 py-2', r.isActive && 'bg-info/12 -mx-2 rounded-lg px-2')}
+            className={cn('flex flex-wrap items-center justify-between gap-2 py-2', r.isActive && 'bg-info-subtle -mx-2 rounded-lg px-2')}
             data-testid="branch-strip-row"
             data-branch={r.restaurantId}
           >
