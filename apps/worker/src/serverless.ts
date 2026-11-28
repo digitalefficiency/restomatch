@@ -1,6 +1,15 @@
 import { randomBytes } from 'node:crypto';
 import { hostname } from 'node:os';
-import { claimAnySerial, ocrJobHeadroomMs, queueDbUrl, queueSql, renewLocks, withRunScope, type Sql } from '@restomatch/queue';
+import {
+  CATALOG_IMPORT_JOB_HEADROOM_MS,
+  claimAnySerial,
+  ocrJobHeadroomMs,
+  queueDbUrl,
+  queueSql,
+  renewLocks,
+  withRunScope,
+  type Sql,
+} from '@restomatch/queue';
 import { registerCronSchedules } from './cron';
 import { CRON_SKIP_ENV, isCronSkipped, parseCronSkip, unknownCronSkipNames } from './cronSkip';
 import { useServerlessPools } from './db';
@@ -71,10 +80,14 @@ export interface RunQueuedJobsOptions {
   endsAt?: number;
   /** Tests: OCR_JOB_HEADROOM_MS (default from the environment). */
   ocrHeadroomMs?: number;
+  /** Tests: CATALOG_IMPORT_JOB_HEADROOM_MS. */
+  importHeadroomMs?: number;
 }
 
 /** The queue whose jobs are long and paid: claimed only with OCR_JOB_HEADROOM_MS left. */
 const OCR_QUEUE = 'ocr-invoice';
+/** Price-list imports: claimed only with CATALOG_IMPORT_JOB_HEADROOM_MS left. */
+const CATALOG_IMPORT_QUEUE = 'import-catalog';
 
 export interface RunQueuedJobsResult {
   ran: number;
@@ -127,7 +140,13 @@ export async function runQueuedJobs(opts: RunQueuedJobsOptions): Promise<RunQueu
       // Too little time left for a read: leave OCR queued for the next run
       // (the cron minute) instead of starting a paid call that gets cut off.
       const ocrFits = endsAt - Date.now() >= ocrHeadroom;
-      const queues = [...scope.queues].filter((q) => Object.hasOwn(JOB_HANDLERS, q) && (ocrFits || q !== OCR_QUEUE));
+      // Likewise a price-list import: claimed only with its run budget plus one
+      // chunk left, so the function's end never cuts a chunk (W3-10 round 3).
+      const importFits = endsAt - Date.now() >= (opts.importHeadroomMs ?? CATALOG_IMPORT_JOB_HEADROOM_MS);
+      const queues = [...scope.queues].filter(
+        (q) =>
+          Object.hasOwn(JOB_HANDLERS, q) && (ocrFits || q !== OCR_QUEUE) && (importFits || q !== CATALOG_IMPORT_QUEUE),
+      );
       if (queues.length === 0) {
         res.stoppedBy = 'budget';
         return;

@@ -124,6 +124,17 @@ class TxRollback extends Error {
   }
 }
 
+/**
+ * Work that must see the member transaction COMMITTED (G-04 Q4): queue writes go
+ * through the queue's own connection, so enqueuing inside the transaction would
+ * outlive a rollback and could run before the commit. A task gets a fresh
+ * tenant-scoped transaction; it runs only when the procedure succeeded, after
+ * its commit and before the response returns. Best effort: a failing task is
+ * logged and never fails the (already committed) mutation.
+ */
+export type AfterCommitTask = (db: Database) => Promise<unknown>;
+export type AfterCommit = (task: AfterCommitTask) => void;
+
 const memberProcedureBase = authedProcedure.meta({ tier: 'member' }).use(async ({ ctx, next }) => {
   if (!ctx.session.restaurantId || !ctx.session.role) {
     throw new TRPCError({
@@ -140,16 +151,33 @@ const memberProcedureBase = authedProcedure.meta({ tier: 'member' }).use(async (
   // (app.current_restaurant_id / app.current_user_id), so the RLS policies in
   // packages/db/drizzle/rls/ scope every statement underneath the app-layer
   // restaurantId filters. Errored procedures roll their writes back.
-  const runNext = (tx: Database) => next({ ctx: { ...ctx, db: tx, session } });
-  try {
-    return await withRestaurant(ctx.db, session.restaurantId, async (tx) => {
+  const afterCommitTasks: AfterCommitTask[] = [];
+  const afterCommit: AfterCommit = (task) => {
+    afterCommitTasks.push(task);
+  };
+  const runNext = (tx: Database) => next({ ctx: { ...ctx, db: tx, session, afterCommit } });
+  const inTenantTx = <T>(fn: (tx: Database) => Promise<T>) =>
+    withRestaurant(ctx.db, session.restaurantId, async (tx) => {
       await tx.execute(
         sql`select set_config('app.current_user_id', ${session.userId}, true)`,
       );
+      return fn(tx);
+    });
+  try {
+    const committed = await inTenantTx(async (tx) => {
       const result = await runNext(tx);
       if (!result.ok) throw new TxRollback(result);
       return result;
     });
+    for (const task of afterCommitTasks) {
+      try {
+        await inTenantTx(task);
+      } catch (err) {
+        console.error('[trpc] after-commit task failed (the mutation is committed)', err);
+        captureException(err);
+      }
+    }
+    return committed;
   } catch (err) {
     if (err instanceof TxRollback) {
       return err.result as Awaited<ReturnType<typeof runNext>>;
@@ -173,7 +201,9 @@ function requireRoles(allowed: ReadonlyArray<UserRole>, tier: Tier) {
 }
 
 export const ownerProcedure = requireRoles(['owner'], 'owner');
-export const managerProcedure = requireRoles(['owner', 'manager'], 'manager');
+/** Who passes managerProcedure (a UI flag that mirrors it derives from this, never repeats it). */
+export const MANAGER_PROCEDURE_ROLES: ReadonlyArray<UserRole> = ['owner', 'manager'];
+export const managerProcedure = requireRoles(MANAGER_PROCEDURE_ROLES, 'manager');
 export const receiverProcedure = requireRoles(['owner', 'manager', 'receiver'], 'receiver');
 export const bookkeeperProcedure = requireRoles(['owner', 'bookkeeper'], 'bookkeeper');
 export const chefProcedure = requireRoles(['owner', 'manager', 'chef'], 'chef');

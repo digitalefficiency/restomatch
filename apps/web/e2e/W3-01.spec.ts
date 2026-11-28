@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { DEMO_OWNER_EMAIL, DEMO_RESTAURANT_NAME } from './env';
 import { collectPageErrors, e2eSql } from './helpers';
@@ -8,7 +10,8 @@ import { collectPageErrors, e2eSql } from './helpers';
  *  - a branch with no invoices reads "אין נתונים" (T4), never ₪0 as a leak;
  *  - the scope chips narrow the matrix by URL (soft navigation, no reload);
  *  - worst branch → its biggest item in ≤2 clicks and 0 reloads
- *    (leak cell → 520 px peek → "פתיחת החשבונית").
+ *    (leak cell → 520 px peek → "פתיחת החשבונית");
+ *  - the "לפי סניף" strip on approvals and the pay run is axe-clean (he + en).
  */
 
 const PASSWORD = process.env.DEMO_PASSWORD ?? 'RestoMatch-Demo-2026!';
@@ -17,6 +20,7 @@ const SECOND_BRANCH = `${DEMO_RESTAURANT_NAME} — סניף W3-01`;
 let mainId = '';
 let secondId = '';
 let billingId = '';
+const AXE_SOURCE = readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8');
 
 async function signIn(context: BrowserContext, page: Page, email: string): Promise<void> {
   const base = test.info().project.use.baseURL!;
@@ -30,6 +34,23 @@ async function signIn(context: BrowserContext, page: Page, email: string): Promi
     maxRedirects: 0,
   });
   expect(res.status(), `password sign-in for ${email}`).toBeLessThan(400);
+}
+
+/** Serious/critical WCAG 2.x A/AA violations (the W1-04 helper: same tags, same exclusions). */
+async function axe(page: Page): Promise<string[]> {
+  await page.addScriptTag({ content: AXE_SOURCE });
+  return page.evaluate(async () => {
+    const w = window as unknown as {
+      axe: { run: (c: unknown, o: unknown) => Promise<{ violations: { id: string; impact: string; nodes: { target: string[] }[] }[] }> };
+    };
+    const res = await w.axe.run(
+      { exclude: [['nextjs-portal'], ['[data-testid=worker-status]']] },
+      { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] } },
+    );
+    return res.violations
+      .filter((v) => v.impact === 'critical' || v.impact === 'serious')
+      .flatMap((v) => v.nodes.map((n) => `${v.id} @ ${n.target.join(' ')}`));
+  });
 }
 
 /** Marks the document; a full reload drops the mark. */
@@ -155,4 +176,31 @@ test('W3-01 · the chain matrix: total row, T4 empty branch, scope chips, ≤2-c
   });
 
   expect(errors, 'no page errors').toEqual([]);
+});
+
+test('W3-01 · the "לפי סניף" strip is axe-clean on approvals and the pay run (he + en, 2 branches)', async ({ page, context }) => {
+  // The active row's "הסניף הפעיל" badge once sat on a doubled info tint (4.41:1, W1-04:325).
+  test.setTimeout(180_000);
+  await signIn(context, page, DEMO_OWNER_EMAIL);
+  await page.goto(`/dashboard/go?r=${mainId}&to=/dashboard`);
+  const base = test.info().project.use.baseURL!;
+  for (const locale of ['he', 'en'] as const) {
+    await context.addCookies([{ name: 'rm_locale', value: locale, url: base }]);
+    for (const [path, kind] of [
+      ['/dashboard/approvals', 'approvals'],
+      ['/dashboard/approvals/pay-run', 'payRun'],
+    ] as const) {
+      await test.step(`${locale} · ${path}`, async () => {
+        await page.goto(path);
+        await expect(page.locator('html')).toHaveAttribute('lang', locale);
+        const strip = page.getByTestId(`branch-strip-${kind}`);
+        await expect(strip).toBeVisible({ timeout: 120_000 });
+        await expect(strip.getByTestId('branch-strip-row')).toHaveCount(2);
+        // The active row (no switch button) is the node the contrast rule reads.
+        await expect(page.locator(`[data-testid="branch-strip-row"][data-branch="${mainId}"]`).getByRole('button')).toHaveCount(0);
+        await page.waitForLoadState('networkidle').catch(() => {});
+        expect(await axe(page), `axe on ${path} (${locale}) with the branch strip`).toEqual([]);
+      });
+    }
+  }
 });

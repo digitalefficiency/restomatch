@@ -90,7 +90,10 @@ export function AllocationField({ invoiceId }: { invoiceId: string }) {
             {data.allocationNumber}
           </span>
         ) : null}
-        <StatusChip tone={STATE_TONE[state]} label={t(numberStateLine(state).key as never)} data-testid="allocation-state" />
+        {/* StatusChip takes no test id: the wrapper carries it. */}
+        <span data-testid="allocation-state">
+          <StatusChip tone={STATE_TONE[state]} label={t(numberStateLine(state).key as never)} />
+        </span>
         {data.canWrite && !editing ? (
           <Button variant="tertiary" size="sm" onClick={() => setEditing(true)} data-testid="allocation-edit">
             {t('field.edit')}
