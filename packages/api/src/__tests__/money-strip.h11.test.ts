@@ -86,17 +86,20 @@ describe('H-11 · receiver and chef get no ₪ (chef exempt on orders)', () => {
     expect(receiverPo).toEqual(ownerPo);
   });
 
-  it('orders.supplierMessagePreview + guardrail: receiver FORBIDDEN; chef allowed', async () => {
+  it('orders.supplierMessagePreview + guardrail: receiver FORBIDDEN; chef allowed; bookkeeper per tier', async () => {
     const preview = (role: Role) => callerFor(role).orders.supplierMessagePreview({ poId: A.poId });
     const guard = (role: Role) =>
       callerFor(role).orders.guardrail({ supplierId: A.supplierId, lines: [{ productId: A.productId, unitPriceExpected: 9 }] });
     await expect(preview('receiver')).rejects.toMatchObject({ code: 'FORBIDDEN' });
     await expect(guard('receiver')).rejects.toMatchObject({ code: 'FORBIDDEN' });
-    // The order-write roles (owner, manager, chef) are allowed; the bookkeeper's tier is W2-06's call, not H-11's.
     for (const role of ['owner', 'manager', 'chef'] as Role[]) {
       await expect(preview(role), role).resolves.toBeDefined();
       await expect(guard(role), role).resolves.toBeDefined();
     }
+    // The bookkeeper sees ₪ (H-11 lets her through): the preview is a member read, so she gets it.
+    await expect(preview('bookkeeper')).resolves.toBeDefined();
+    // The guardrail is an order-write check (orderWriteProcedure = owner/manager/chef), so her tier refuses it.
+    await expect(guard('bookkeeper')).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 
   it('catalog.items: receiver gets listPrice null; chef (order wizard) keeps it', async () => {
