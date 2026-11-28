@@ -101,11 +101,20 @@ export function useDesk(input: DeskControllerInput): DeskController {
 
   /** Server totals after a decision settles (counts only — page 1 is never refetched). */
   // Overlapping refreshes (two quick decisions): only the newest request may
-  // land, so an older, slower response never overwrites fresher tiles.
+  // land, so an older, slower response never overwrites fresher tiles. And every
+  // refresh is its own request: react-query dedups a fetch onto one already in
+  // flight, so an undo that settles while the approve's refresh still runs would
+  // get the approve's stale count and the seq guard would accept it — the
+  // in-flight request is cancelled first. These are main's makeSummaryRefresher
+  // semantics (#360, approvals/summaryRefresh.ts, not on this branch's base);
+  // when this branch meets main, this block becomes
+  //   useMemo(() => makeSummaryRefresher({ cancel, fetch, apply }), [utils, filters])
+  // with holdSummary bumping a seq the refresher shares (see the PR).
   const summarySeq = useRef(0);
   const refreshSummary = useCallback(async () => {
     const seq = ++summarySeq.current;
     try {
+      await utils.approvals.queueSummary.cancel(filters);
       const fresh = await utils.approvals.queueSummary.fetch(filters, { staleTime: 0 });
       if (seq === summarySeq.current) dispatch({ type: 'summary/set', summary: fresh });
     } catch {
