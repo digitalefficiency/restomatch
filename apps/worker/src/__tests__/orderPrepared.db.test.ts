@@ -211,3 +211,70 @@ describe('early cut-off, daily supplier (review fixes)', () => {
     expect(await sql`select id from purchase_orders where restaurant_id = ${rid} and supplier_id = ${dailySid} and status = 'draft'`).toHaveLength(0);
   });
 });
+
+describe("tomorrow's notice is held, not dropped; a re-run never adds A5 (orchestrator review 28.11)", () => {
+  let sunEarlySid = '';
+  let friEarlySid = '';
+  let tenAmSid = '';
+  beforeAll(async () => {
+    const mk = async (name: string, orderDays: number[], cutoff: string) => {
+      const sched = { windows: [{ orderDays, cutoff, fulfillment: { kind: 'lead_days', leadDays: 1 } }] };
+      const [s] = await sql<{ id: string }[]>`
+        insert into suppliers (restaurant_id, name, active, order_schedule) values (${rid}, ${name}, true, ${sql.json(sched)}) returning id`;
+      return s!.id;
+    };
+    sunEarlySid = await mk('ירקן ראשון', [0], '07:30');
+    friEarlySid = await mk('דגים ראשון', [0], '07:30');
+    tenAmSid = await mk('חלב עשר', [0], '10:00');
+  });
+
+  const queued = (supplierId: string) =>
+    sql<{ dedupe_key: string; status: string; scheduled_at: Date | null }[]>`
+      select dedupe_key, status, scheduled_at from notifications_outbox
+      where restaurant_id = ${rid} and dedupe_key like ${'au:A16:%'} and dedupe_key like ${`%:${supplierId}:%`}`;
+
+  it("Saturday 09:00, Sunday 07:30 cut-off: one notice per orderer, held to after Shabbat, before the cut-off", async () => {
+    await guide(sunEarlySid);
+    await setOption({ preparedOrderDraft: true });
+    // Sat 24.10 09:00 IL (IDT, UTC+3) = 06:00Z; Sunday's cut-off 07:30 IL (IST, UTC+2) = Sun 05:30Z.
+    await processOrderReminders(job({ restaurantId: rid, forDate: '2026-10-24T06:00:00Z' }));
+    const rows = await queued(sunEarlySid);
+    expect(rows).toHaveLength(3);
+    const deadline = new Date('2026-10-25T05:30:00Z').getTime();
+    for (const r of rows) {
+      expect(r.dedupe_key.startsWith('au:A16:2026-10-25:')).toBe(true);
+      expect(r.status).toBe('queued');
+      // held to Shabbat's end, Sat 19:00 IL (IDT) = 16:00Z, still before the cut-off
+      expect(new Date(r.scheduled_at!).toISOString()).toBe('2026-10-24T16:00:00.000Z');
+      expect(new Date(r.scheduled_at!).getTime()).toBeLessThan(deadline);
+    }
+  });
+
+  it('a person at the daily cap: moved to Sun 06:00, before a 07:30 cut-off → queued, not cancelled', async () => {
+    await guide(friEarlySid);
+    await setOption({ preparedOrderDraft: true });
+    // Sat 31.10 19:30 IL (IST, UTC+2) = 17:30Z, after Shabbat. Six alerts already today for the chef.
+    for (let i = 0; i < 6; i++) {
+      await sql`insert into notifications_outbox (restaurant_id, channel, target, body, status, payload, dedupe_key)
+                values (${rid}, 'email', ${`${TAG}-chef@example.test`}, 'x', 'sent', ${sql.json({ userId: uids.chef! })}, ${`cap-${i}-${process.pid}`})`;
+    }
+    await processOrderReminders(job({ restaurantId: rid, forDate: '2026-10-31T17:30:00Z' }));
+    const rows = await queued(friEarlySid);
+    expect(rows.length).toBe(3);
+    const chef = rows.find((r) => r.dedupe_key.includes(uids.chef!));
+    expect(chef).toBeDefined();
+    expect(chef!.status).toBe('queued');
+    // Sun 01.11 06:00 IL (IST) = 04:00Z, before the 07:30 cut-off (05:30Z)
+    expect(new Date(chef!.scheduled_at!).toISOString()).toBe('2026-11-01T04:00:00.000Z');
+  });
+
+  it('a re-run after the cut-off (10:00, re-run 10:30) sends no A5 on top of the "טיוטה מוכנה" notice', async () => {
+    await guide(tenAmSid);
+    await setOption({ preparedOrderDraft: true });
+    await processOrderReminders(job({ restaurantId: rid, forDate: SLOT })); // Sun 09:00 IL
+    expect((await queued(tenAmSid)).length).toBe(3);
+    await processOrderReminders(job({ restaurantId: rid, forDate: '2026-10-25T08:30:00Z' })); // Sun 10:30 IL
+    const a5 = (await rows()).filter((o) => o.dedupe_key.startsWith('au:A5:') && o.dedupe_key.includes(tenAmSid));
+    expect(a5).toEqual([]);
+  });
+});

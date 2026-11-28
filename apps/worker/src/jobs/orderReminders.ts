@@ -211,7 +211,7 @@ export async function processOrderReminders(job: WorkerJob<OrderRemindersJob>) {
     dueToday += missing.length;
 
     // AU-11 a · prepare today's draft for each due supplier whose cut-off is still ahead.
-    type Prepared = { poId: string; lines: number; cutoff: string | null; tomorrow: boolean };
+    type Prepared = { poId: string; lines: number; cutoff: string | null; tomorrow: boolean; deadline: Date | null };
     // Today's prepared draft REPLACES that supplier's A5 line; tomorrow's is an extra
     // message and never hides today's reminder.
     const preparedBySupplier = new Map<string, Prepared>();
@@ -234,7 +234,7 @@ export async function processOrderReminders(job: WorkerJob<OrderRemindersJob>) {
         );
         if (r.status === 'skipped' || r.lineCount === 0) continue;
         if (r.status === 'created') prepared += 1;
-        preparedBySupplier.set(s.id, { poId: r.poId, lines: r.lineCount, cutoff: w?.cutoff ?? null, tomorrow: false });
+        preparedBySupplier.set(s.id, { poId: r.poId, lines: r.lineCount, cutoff: w?.cutoff ?? null, tomorrow: false, deadline: null });
       }
       for (const s of early) {
         const w = s.orderSchedule?.windows?.find((x) => x.orderDays.includes(tomorrowWeekday));
@@ -255,7 +255,10 @@ export async function processOrderReminders(job: WorkerJob<OrderRemindersJob>) {
         );
         if (r.status === 'skipped' || r.lineCount === 0) continue;
         if (r.status === 'created') prepared += 1;
-        preparedTomorrow.set(s.id, { poId: r.poId, lines: r.lineCount, cutoff: w?.cutoff ?? null, tomorrow: true });
+        // Useful until tomorrow's cut-off (startOfIlDay(tomorrow) = endToday).
+        const cut = parseCutoff(w?.cutoff);
+        const deadline = new Date(endToday.getTime() + (cut ?? 0) * 60_000);
+        preparedTomorrow.set(s.id, { poId: r.poId, lines: r.lineCount, cutoff: w?.cutoff ?? null, tomorrow: true, deadline });
       }
     }
 
@@ -313,14 +316,34 @@ export async function processOrderReminders(job: WorkerJob<OrderRemindersJob>) {
         cutoff: p.cutoff,
         orderDay: p.tomorrow ? tomorrowKey : todayKey,
         tomorrow: p.tomorrow,
+        deadline: p.deadline,
         baseUrl: appBaseUrl(),
         now,
       });
       enqueued += res.enqueued;
     }
 
+    // Today's prepared drafts that already exist (a re-run after the cut-off skips the
+    // prepare step above, but its "טיוטה מוכנה" notice already went out): no A5 on top.
+    const preparedToday = new Set(
+      preparedOn
+        ? (
+            await db
+              .select({ supplierId: purchaseOrders.supplierId })
+              .from(purchaseOrders)
+              .where(
+                and(
+                  eq(purchaseOrders.restaurantId, restaurant.id),
+                  eq(purchaseOrders.status, 'draft'),
+                  sql`${purchaseOrders.sourceRef} like ${`au:A16:%:${todayKey}`}`,
+                ),
+              )
+          ).map((r) => r.supplierId)
+        : [],
+    );
+
     for (const s of missing) {
-      if (preparedBySupplier.has(s.id)) continue; // the prepared message replaced the A5 line
+      if (preparedBySupplier.has(s.id) || preparedToday.has(s.id)) continue; // the prepared message replaced the A5 line
       const window = s.orderSchedule?.windows?.find((w) => w.orderDays.includes(weekday));
       const told = (r: { userId: string; email: string }) =>
         legacyToday.has(legacyOrderReminderKey(s.id, todayKey, r.email)) ||

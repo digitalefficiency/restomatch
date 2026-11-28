@@ -693,10 +693,15 @@ export async function notifySendRescue(
 
 /**
  * The 09:00 "טיוטה מוכנה ל<ספק>" message (A16a), through G-06 `notify()` like
- * AU-04's A5 line: e-mail, quiet hours / Shabbat / ≤6 a day, and PERISHABLE —
- * past 12:00 of the same Israel day it is skipped, never queued. One per
- * supplier per person per order day: `au:A16:<orderDay>:<rid>:<sid>:<userId>:email`.
- * No ₪. Owner / manager / chef only.
+ * AU-04's A5 line: e-mail, quiet hours / Shabbat / ≤6 a day. One per supplier per
+ * person per order day: `au:A16:<orderDay>:<rid>:<sid>:<userId>:email`. No ₪.
+ * Owner / manager / chef only.
+ *
+ * Staleness: TODAY's message is perishable like A5 (past 12:00 of the same Israel
+ * day it is skipped / cancelled). TOMORROW's message (an early cut-off) is useful
+ * until tomorrow's cut-off, so `deadline` is that instant: it is skipped or
+ * cancelled only when notify() could deliver it no earlier than the deadline
+ * (e.g. Saturday 09:00 → held to Sat 19:00 for a Sunday 07:30 cut-off: sent).
  */
 export async function notifyPreparedDraft(
   db: Database,
@@ -710,12 +715,16 @@ export async function notifyPreparedDraft(
     cutoff: string | null;
     orderDay: string;
     tomorrow: boolean;
+    /** Tomorrow's message only: the order-day cut-off instant (or the order day's start). */
+    deadline?: Date | null;
     baseUrl: string;
     now: Date;
   },
 ): Promise<{ enqueued: number; skipped: 'quiet' | null }> {
+  const tooLate = (at: Date) =>
+    args.tomorrow && args.deadline ? at.getTime() >= args.deadline.getTime() : isPerishableSkip(args.now, at);
   const window = staffAlertWindow(args.now);
-  if (isPerishableSkip(args.now, window.open ? args.now : window.nextAllowedAt)) return { enqueued: 0, skipped: 'quiet' };
+  if (tooLate(window.open ? args.now : window.nextAllowedAt)) return { enqueued: 0, skipped: 'quiet' };
   const link = `${args.baseUrl}${autopilotDeepLink(args.restaurantId, args.poId)}`;
   const res = await notify(db, {
     restaurantId: args.restaurantId,
@@ -735,8 +744,9 @@ export async function notifyPreparedDraft(
       return { subject: title, body: `${title}\n${t.preparedCta}: ${link}` };
     },
   });
-  // A perishable row the daily cap pushed past noon is cancelled, as sendBrief does.
-  const stale = res.rows.filter((r) => r.id && !r.deduped && r.scheduledAt && isPerishableSkip(args.now, r.scheduledAt)).map((r) => r.id!);
+  // A row the send window or daily cap pushed past its usefulness is cancelled
+  // (today's: past noon, as sendBrief does; tomorrow's: at or after the cut-off).
+  const stale = res.rows.filter((r) => r.id && !r.deduped && r.scheduledAt && tooLate(r.scheduledAt)).map((r) => r.id!);
   if (stale.length > 0) {
     await db
       .update(notificationsOutbox)
