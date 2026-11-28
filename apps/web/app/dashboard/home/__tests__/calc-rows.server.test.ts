@@ -70,13 +70,17 @@ describe('the rows prove the hero: one grid, every amount in one column, G-16 ma
     expect(markup).toContain('7 פערים · לפני מע״מ');
     expect(markup).toContain('פער אחד · סכום המע״מ');
     expect(markup).toContain('בסיס המע״מ מצוין ליד כל שורה.');
+    // Mixed: no single basis under the total.
+    expect(markup).not.toContain('data-testid="hero-calc-basis"');
   });
 
-  it('one basis only: no captions, no note', () => {
+  it('one basis only: said once, under the total — no per-row captions, no note', () => {
     query.result = ok({ ...LAB, hero: { ...LAB.hero, leakIls: 757.11 }, byType: LAB.byType.slice(0, 3) });
     const markup = html({ heroAgorot: 75711 });
     expect(markup).not.toContain('· לפני מע״מ');
     expect(markup).not.toContain('בסיס המע״מ');
+    expect(markup).toMatch(/data-testid="hero-calc-total"[\s\S]*<\/div><p data-testid="hero-calc-basis" class="col-start-2 text-right text-caption text-fg-tertiary">לפני מע״מ<\/p>/);
+    expect(markup.match(/לפני מע״מ/g)).toHaveLength(1);
   });
 
   it('a capped month: the cap row in words (never a hand-built minus) and the cap marker on the total', () => {

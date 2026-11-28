@@ -39,7 +39,8 @@ export interface CalcRowsProps {
  * total); otherwise the panel says the sum changed since the page loaded and offers a refresh.
  *
  * One grid for every row and the total (v2 A8): the amounts share one column, their digits
- * physically right-aligned; the dotted leader is decoration. G-16 markers: rows
+ * physically right-aligned; the dotted leader is decoration. The VAT basis is said once, under the
+ * total, when every row has the same one; per row (with a note) when they mix. G-16 markers: rows
  * `data-money-row-of="hero-calc"`, the total `data-money-sum-of="hero-calc"` (+ the cap).
  */
 export function CalcRows({ month, heroMonthStart, heroAgorot, basisByType, basisWords, locale }: CalcRowsProps) {
@@ -88,7 +89,10 @@ export function CalcRows({ month, heroMonthStart, heroAgorot, basisByType, basis
 
   const gaps = report.byType.reduce((sum, row) => sum + row.count, 0);
   const basisOf = (type: string): CalcBasis => basisByType[type] ?? 'excl';
-  const mixed = new Set(report.byType.map((row) => basisOf(row.type))).size > 1;
+  // One basis for every row: said once, under the total. Mixed: each row says its own, and a note says so.
+  const bases = [...new Set(report.byType.map((row) => basisOf(row.type)))];
+  const mixed = bases.length > 1;
+  const single = bases.length === 1 ? bases[0]! : null;
   const totalAgorot = agorotOf(report.hero.leakIls);
   const capAgorot = agorotOf(report.capAdjustmentIls);
   const leader = <span aria-hidden="true" className="min-w-2 flex-1 -translate-y-1 border-b border-dotted border-line-strong opacity-55" />;
@@ -139,6 +143,11 @@ export function CalcRows({ month, heroMonthStart, heroAgorot, basisByType, basis
             <Money value={report.hero.leakIls} context="line" split locale={locale} />
           </span>
         </div>
+        {single ? (
+          <p data-testid="hero-calc-basis" className="col-start-2 text-right text-caption text-fg-tertiary">
+            {basisWords[single]}
+          </p>
+        ) : null}
       </div>
     </div>
   );
