@@ -32,13 +32,17 @@ const DOT_OF_TONE: Record<NeedTone, NeedDot> = { danger: 'leak', warn: 'warn', n
  * Row 0's verb wears the filled primary look at rest; while focus is on another row's link, that
  * row's verb takes it and row 0's goes quiet (owner decision D7, v4 H6): one filled verb at any
  * moment, CSS only. `data-primary` stays on row 0 (the IA meter counts the page at rest).
+ *  - Every verb has the same box height (32 px; 44 on a phone), so focus moving the filled look
+ *    between rows never changes a row's height.
+ *  - Only the ONE filled verb carries the (transparent) border, so forced colours draw that one as a
+ *    button and leave every quiet verb as a word.
  */
-const VERB = 'inline-flex items-center gap-0.5 rounded-control border border-transparent text-body-sm font-medium transition-colors duration-micro ease-standard';
+const VERB = 'inline-flex min-h-8 items-center gap-0.5 rounded-control text-body-sm font-medium transition-colors duration-micro ease-standard max-sm:min-h-11';
 const VERB_PRIMARY =
-  'min-h-8 bg-primary-bold px-3 text-on-bold max-sm:min-h-11 max-sm:px-4 group-has-[[data-needs-row]>a:not([data-primary-row]):focus-visible]/needs:min-h-6 group-has-[[data-needs-row]>a:not([data-primary-row]):focus-visible]/needs:bg-transparent group-has-[[data-needs-row]>a:not([data-primary-row]):focus-visible]/needs:px-0 group-has-[[data-needs-row]>a:not([data-primary-row]):focus-visible]/needs:text-primary';
-const VERB_QUIET = 'min-h-6 text-primary';
+  'border border-transparent bg-primary-bold px-3 text-on-bold max-sm:px-4 group-has-[[data-needs-row]>a:not([data-primary-row]):focus-visible]/needs:border-0 group-has-[[data-needs-row]>a:not([data-primary-row]):focus-visible]/needs:bg-transparent group-has-[[data-needs-row]>a:not([data-primary-row]):focus-visible]/needs:px-0 group-has-[[data-needs-row]>a:not([data-primary-row]):focus-visible]/needs:text-primary';
+const VERB_QUIET = 'text-primary';
 const VERB_FOLLOWS =
-  'group-focus-visible/row:min-h-8 group-focus-visible/row:bg-primary-bold group-focus-visible/row:px-3 group-focus-visible/row:text-on-bold';
+  'group-focus-visible/row:border group-focus-visible/row:border-transparent group-focus-visible/row:bg-primary-bold group-focus-visible/row:px-3 group-focus-visible/row:text-on-bold';
 const ARROW_PRIMARY = 'hidden group-has-[[data-needs-row]>a:not([data-primary-row]):focus-visible]/needs:inline-block';
 const ARROW_FOLLOWS = 'group-focus-visible/row:hidden';
 
@@ -90,8 +94,9 @@ export function NeedsYou({
           {title}
         </h2>
         {basisChip ? (
-          <span data-testid="needs-you-basis" className="rounded-pill bg-surface-sunken px-2 text-caption font-medium text-fg-secondary">
-            {basisChip}
+          // The shared neutral chip (a basis, not a state: no marker).
+          <span data-testid="needs-you-basis" className="flex">
+            <StatusChip tone="neutral" label={basisChip} icon={null} />
           </span>
         ) : null}
       </div>
@@ -176,8 +181,12 @@ function NeedBody({ row, primary, follows }: { row: NeedRow; primary: boolean; f
             {row.sub}
             {row.pill ? (
               <>
-                {row.sub ? ' · ' : null}
-                <StatusChip tone="danger" emphasis="bold" label={row.pill} className="align-middle" />
+                {row.sub ? ' ' : null}
+                {/* The separator travels with the pill (never left at a line's end); the pill never breaks inside. */}
+                <span className="whitespace-nowrap">
+                  {row.sub ? '· ' : null}
+                  <StatusChip tone="danger" emphasis="bold" label={row.pill} className="align-middle" />
+                </span>
               </>
             ) : null}
           </span>
@@ -188,17 +197,18 @@ function NeedBody({ row, primary, follows }: { row: NeedRow; primary: boolean; f
           </span>
         ) : null}
       </span>
-      <span className="flex flex-col items-end gap-1.5">
-        {/* One column for every row's amount; its digits physically right-aligned (SPEC §3). */}
+      {/* One column for every row's amount, the same fixed width in the shown list and behind "עוד"
+          (two lists, one line-up); its digits physically right-aligned (SPEC §3). */}
+      <span className="flex w-28 flex-col items-end gap-1.5">
         <span className="self-stretch text-right text-lg font-medium text-fg" data-testid={tid('-value')}>
-          {row.agorot !== null ? <Money agorot={row.agorot} context="inline" decimals={row.decimals} split /> : <bdi>{row.countText}</bdi>}
+          {row.agorot !== null ? <Money agorot={row.agorot} context="inline" decimals={row.decimals} split /> : <bdi className="tabular-nums">{row.countText}</bdi>}
         </span>
         {row.basis ? (
           <span className="-mt-1.5 self-stretch text-right text-caption text-fg-tertiary" data-testid={tid('-basis')}>
             {row.basis}
           </span>
         ) : null}
-        {/* The verb's slot keeps the filled look's height, so focus moving between rows never moves a row. */}
+        {/* The verb's slot: every verb is as tall as the filled one, so focus moving between rows never moves a row. */}
         <span className="flex min-h-8 items-center">
           <span data-primary={primary ? '' : undefined} className={cn(VERB, primary ? VERB_PRIMARY : VERB_QUIET, !primary && follows && VERB_FOLLOWS)}>
             {row.verb}

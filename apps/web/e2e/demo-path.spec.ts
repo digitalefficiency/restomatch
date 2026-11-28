@@ -476,13 +476,15 @@ test('B · owner: hero ₪, leak detective, approvals, claims, report, chain, br
     n.spend = num(await hero.getByTestId('leak-hero-base').innerText());
     // The split boxes are desktop-only (the phone reads them as one sentence): read the DOM text.
     // The hero split is by payment status (unpaid / paid invoices) and adds up to the hero.
-    // DS3-03: with one part under ₪0.50 the split is one sentence (hero-split-single) and has no figures to read.
+    // DS3-03: with one part at exactly ₪0 the split is one sentence (hero-split-single) and has no figures to read.
     if ((await hero.getByTestId('hero-split-single').count()) === 0) {
       n.unpaid = num((await hero.getByTestId('hero-unpaid').textContent())!.replace(m.overview.hero.unpaid, ''));
       n.paid = num((await hero.getByTestId('hero-paid').textContent())!.replace(m.overview.hero.paid, ''));
     }
     // "מחכה לך": the decisions waiting for the viewer, in ₪ and count (the old count-only KPI is gone).
-    n.pendingApprovals = num(await page.getByTestId('needs-decide-sub').innerText());
+    // DS3-03: one gap reads "פער אחד" (needs.decideGaps, an ICU plural) — no digit to read.
+    const decideSub = await page.getByTestId('needs-decide-sub').innerText();
+    n.pendingApprovals = /^\s*פער אחד/.test(decideSub.replace(BIDI, ' ')) ? 1 : num(decideSub);
     n.decide = num(await page.getByTestId('needs-decide-value').innerText());
     expect(n.leak, 'hero leak > 0 (the demo needs a number)').toBeGreaterThan(0);
     // The % is leak ÷ spend, rounded to one decimal (no target line: R-14 default).

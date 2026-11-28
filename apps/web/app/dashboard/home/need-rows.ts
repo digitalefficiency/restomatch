@@ -25,13 +25,16 @@ export interface BasisWords {
 /**
  * The basis each money row is measured on BY CONSTRUCTION (v2 B1): the decision queue is before
  * VAT, the pay run sums invoice totals including VAT, VAT-at-risk is a VAT amount. Credit-request
- * rows add up requests of any basis (a duplicate is claimed incl. VAT, a VAT gap is a VAT amount),
- * so they state none until the task spine splits them (request R2).
+ * rows add up requests of any basis (vatBasisOf: a duplicate is claimed incl. VAT, a VAT gap is a
+ * VAT amount, the rest before VAT), so they say exactly that beside their amount (`needs.basisMixed`)
+ * until the task spine splits them (request R2).
  */
-const BASIS_OF: Partial<Record<Task['type'], keyof BasisWords>> = {
+const BASIS_OF: Partial<Record<Task['type'], keyof BasisWords | 'mixed'>> = {
   decision: 'excl',
   payment_due: 'incl',
   allocation_missing: 'vat',
+  claim_to_send: 'mixed',
+  credit_to_match: 'mixed',
 };
 
 /**
@@ -87,17 +90,17 @@ export function needRowsOf(tasks: readonly Task[], { t, locale, sideMoney, basis
 
   const rows = pairs.map(({ task, row }): NeedRow => {
     const out: NeedRow = { ...row, dot: needDotOf(task) };
-    if (task.type === 'decision' && task.blocking > 0) {
+    if (task.type === 'decision') {
       const d = task.detail ?? {};
-      // The count of gaps (a formatted figure in a plain placeholder, as taskRow passes it), the
-      // review part as taskRow joins it; the blockers move into the pill, a number for its ICU plural.
-      out.sub = [t('needs.decide.sub', { count: n(task.count) }), Number(d.toReview) > 0 ? t('needs.decide.review', { count: n(d.toReview) }) : null]
+      // The count of gaps as an ICU plural on a number ("פער אחד" · "5 פערים"; taskRow and the bell
+      // keep decide.sub), the review part as taskRow joins it; the blockers move into the pill.
+      out.sub = [t('needs.decideGaps', { count: Number(task.count ?? 0) }), Number(d.toReview) > 0 ? t('needs.decide.review', { count: n(d.toReview) }) : null]
         .filter(Boolean)
         .join(' · ');
-      out.pill = t('needs.blocking', { count: task.blocking });
+      if (task.blocking > 0) out.pill = t('needs.blocking', { count: task.blocking });
     }
     const b = BASIS_OF[task.type];
-    if (!allExcl && row.agorot !== null && b) out.basis = basis[b];
+    if (!allExcl && row.agorot !== null && b) out.basis = b === 'mixed' ? t('needs.basisMixed') : basis[b];
     return out;
   });
 

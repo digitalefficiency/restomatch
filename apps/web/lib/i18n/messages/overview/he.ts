@@ -116,13 +116,18 @@ export const he = {
   },
   needs: {
     title: 'מחכה לך',
-    zero: 'הכול מטופל ✓',
-    zeroCaught: 'הכול מטופל ✓ · אין החלטות פתוחות',
+    // No ✓ in the words: the card draws the round green tick beside them (T3).
+    zero: 'הכול מטופל',
+    zeroCaught: 'הכול מטופל · אין החלטות פתוחות',
     more: 'עוד {count}',
     /** "עוד" at the foot of the card: how many rows wait behind it (a number). */
     moreTasks: '{count, plural, one {עוד משימה אחת} two {עוד שתי משימות} other {עוד # משימות}}',
     /** The solid pill on the decision row (T2): how many of its gaps block a payment (a number). */
     blocking: '{count, plural, one {# חוסם תשלום} other {# חוסמים תשלום}}',
+    /** The decision row's count of gaps on the home card (a number; the bell keeps decide.sub). */
+    decideGaps: '{count, plural, one {פער אחד} other {# פערים}}',
+    /** Under a credit-request amount: the requests are claimed on different VAT bases. */
+    basisMixed: 'לפי בסיס המע״מ של כל בקשה',
     decide: {
       label: 'ממתין להחלטה שלך',
       sub: '{count} פערים',
@@ -155,7 +160,7 @@ export const he = {
     othersLine: 'אצלך הכול מטופל · {count} ממתינים אצל {who} · {amount}',
     othersLineCount: 'אצלך הכול מטופל · {count} ממתינים אצל {who}',
     who: { owner: 'הבעלים', manager: 'המנהלים', bookkeeper: 'הנהלת החשבונות', receiver: 'הקבלה', chef: 'המטבח' },
-    staffZero: 'אצלך הכול מטופל ✓',
+    staffZero: 'אצלך הכול מטופל',
     failed: 'חלק מהמשימות לא נטענו · נסו שוב',
     lateValue: '{count} באיחור',
   },

@@ -286,11 +286,11 @@ describe('owner home, a leak month (the lab, 21.11)', () => {
     expect(blockOf(needs, 'needs-decide-sub')).toMatch(/data-pill="solid"/);
   });
 
-  it('"מחכה לך": mixed VAT bases → no chip, each amount states its basis (credit requests none yet)', async () => {
+  it('"מחכה לך": mixed VAT bases → no chip, each amount states its basis (credit requests: each at its own)', async () => {
     const needs = blockOf(await home('owner'), 'needs-you');
     expect(needs).not.toContain('data-testid="needs-you-basis"');
     expect(textOf(blockOf(needs, 'needs-decide-basis'))).toBe('לפני מע״מ');
-    expect(needs).not.toContain('data-testid="needs-claimsUnsent-basis"');
+    expect(textOf(blockOf(needs, 'needs-claimsUnsent-basis'))).toBe('לפי בסיס המע״מ של כל בקשה');
     expect(textOf(blockOf(needs, 'needs-payRun-basis'))).toBe('כולל מע״מ');
   });
 

@@ -115,7 +115,9 @@ test.describe('owner: one figure on the home row, the badge and the bell', () =>
     const link = page.locator('aside a[href="/dashboard/approvals"], nav a[href="/dashboard/approvals"]').first();
     // The badge words are the link's description (aria-describedby → a hidden span), not its name.
     // Same count as the home row (the lab seed alone: 4; another spec's parity rows add info rows, never ₪).
-    const rowCount = Number(/(\d+)\s*פערים/.exec(((await page.getByTestId('needs-decide-sub').innerText()) ?? '').replace(BIDI, ''))?.[1]);
+    // DS3-03: one gap reads "פער אחד" (needs.decideGaps, an ICU plural), more read "N פערים".
+    const gaps = /(?:(\d[\d,]*)\s*פערים|פער אחד)/.exec(((await page.getByTestId('needs-decide-sub').innerText()) ?? '').replace(BIDI, ''));
+    const rowCount = gaps ? (gaps[1] ? Number(gaps[1].replace(/,/g, '')) : 1) : Number.NaN;
     expect(rowCount).toBe(summary.count);
     await expect(link.locator('[data-nav-badge]')).toBeVisible({ timeout: 20_000 });
     const descId = (await link.getAttribute('aria-describedby')) ?? 'none';

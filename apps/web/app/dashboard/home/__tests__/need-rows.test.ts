@@ -37,7 +37,9 @@ const task = (p: Partial<Task>): Task =>
   }) as Task;
 
 const decision = task({});
-const claims = task({ type: 'claim_to_send', entityId: 'claims:unsent', ilsAgorot: 47_899, count: 10, blocking: 0, tone: 'warn', deepLink: '/dashboard/recovery' });
+// The tones the task spine really sends (packages/api/src/tasks/sources): requests to send are not late yet (neutral), an overdue follow-up is amber.
+const claims = task({ type: 'claim_to_send', entityId: 'claims:unsent', ilsAgorot: 47_899, count: 10, blocking: 0, tone: 'neutral', deepLink: '/dashboard/recovery' });
+const followUp = task({ type: 'credit_to_match', entityId: 'claims:waiting', ilsAgorot: 12_000, count: 2, blocking: 0, tone: 'warn', deepLink: '/dashboard/recovery' });
 const payRun = task({ type: 'payment_due', entityId: 'payrun:month', ilsAgorot: 929_646, count: 10, blocking: 0, tone: 'neutral', deepLink: '/dashboard/approvals/pay-run' });
 const vat = task({ type: 'allocation_missing', entityId: 'vat:open', ilsAgorot: 1_300, count: 3, blocking: 0, tone: 'danger', detail: { daysLeft: 5 } });
 const docs = task({ type: 'doc_review', entityId: 'docs:lines', ilsAgorot: null, count: 2, blocking: 0, tone: 'warn', deepLink: '/dashboard/invoices' });
@@ -52,7 +54,9 @@ describe('the dot says what the row means (v2 B3)', () => {
   });
   it('what merely waits is grey; everything else that waits for handling is amber', () => {
     expect(needDotOf(payRun)).toBe('neutral');
-    expect(needDotOf(claims)).toBe('warn');
+    expect(needDotOf(claims)).toBe('neutral');
+    expect(needDotOf(followUp)).toBe('warn');
+    expect(rowsOf([claims, followUp]).rows.map((r) => r.dot)).toEqual(['neutral', 'warn']);
   });
 });
 
@@ -64,11 +68,18 @@ describe('the decision row: the blockers become the solid pill inside its sub li
     // W2-08 reads the count of gaps from the start of the same element.
     expect(/(\d+)\s*פערים/.exec(row!.sub!)?.[1]).toBe('5');
   });
-  it('one blocker reads in the singular; no blocker, no pill and the spine’s own words', () => {
+  it('one blocker reads in the singular; no blocker, no pill and the count line alone', () => {
     expect(rowsOf([task({ blocking: 1 })]).rows[0]!.pill).toBe('1 חוסם תשלום');
     const calm = rowsOf([task({ blocking: 0, tone: 'warn', detail: {} })]).rows[0]!;
     expect(calm.pill).toBeUndefined();
     expect(calm.sub).toBe('5 פערים');
+  });
+  it('the count of gaps is an ICU plural on a number: one gap reads "פער אחד", never "1 פערים"', () => {
+    expect(rowsOf([task({ count: 1, blocking: 0, detail: {} })]).rows[0]!.sub).toBe('פער אחד');
+    expect(rowsOf([task({ count: 1, blocking: 1, detail: { toReview: 1 } })]).rows[0]!.sub).toBe('פער אחד · 1 לבדיקה (ללא ₪)');
+    expect(rowsOf([task({ count: 2, blocking: 0, detail: {} })]).rows[0]!.sub).toBe('2 פערים');
+    const en = (count: number) => needRowsOf([task({ count, blocking: 0, detail: {} })], { t: createTranslator('en', overview), locale: 'en', sideMoney: side, basis: BASIS }).rows[0]!.sub;
+    expect([en(1), en(3)]).toEqual(['1 discrepancy', '3 discrepancies']);
   });
   it('the figures are the task’s own, untouched; formatted counts keep their separators', () => {
     const [row] = rowsOf([task({ count: 1234, ilsAgorot: 123_456_78 })]).rows;
@@ -96,10 +107,13 @@ describe('the VAT basis is said beside every amount, never two bases under one l
     expect(rowsOf([vat]).rows[0]!.basis).toBe('סכום המע״מ');
     expect(rowsOf([vat]).chip).toBeNull();
   });
-  it('credit requests can mix bases (until request R2): no caption, and no chip either', () => {
-    const { rows, chip } = rowsOf([decision, claims]);
+  it('credit requests mix bases (until request R2): their amount says so, and there is no chip', () => {
+    const { rows, chip } = rowsOf([decision, claims, followUp]);
     expect(chip).toBeNull();
-    expect(rows.map((r) => r.basis)).toEqual(['לפני מע״מ', undefined]);
+    expect(rows.map((r) => r.basis)).toEqual(['לפני מע״מ', 'לפי בסיס המע״מ של כל בקשה', 'לפי בסיס המע״מ של כל בקשה']);
+    // Alone in the card they still are no single basis: no chip, the caption under the amount.
+    expect(rowsOf([claims]).chip).toBeNull();
+    expect(rowsOf([claims]).rows[0]!.basis).toBe('לפי בסיס המע״מ של כל בקשה');
   });
   it('the rows behind "עוד" count too: the chip is decided over every row', () => {
     const many = [decision, docs, task({ type: 'doc_review', entityId: 'docs:b', ilsAgorot: null }), payRun];

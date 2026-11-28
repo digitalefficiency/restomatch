@@ -41,7 +41,7 @@ export function NeedsMore({ label, preview, children }: { label: string; preview
         <button
           {...fold.buttonProps}
           data-focus="inset"
-          className="inline-flex min-h-8 shrink-0 items-center gap-1 whitespace-nowrap rounded-control px-2 text-body-sm font-medium text-fg-secondary transition-colors duration-micro ease-standard hover:bg-surface-hover hover:text-fg max-sm:min-h-11"
+          className="inline-flex min-h-8 shrink-0 items-center gap-1 whitespace-nowrap rounded-control px-2 text-body-sm font-medium text-fg-secondary transition-colors duration-micro ease-standard hover:bg-surface-hover hover:text-fg max-sm:min-h-11 [@media(pointer:coarse)]:min-h-11"
         >
           {label}
           <ChevronDown className={cn('h-4 w-4 shrink-0 transition-transform duration-short ease-standard', fold.open && 'rotate-180')} aria-hidden="true" />
