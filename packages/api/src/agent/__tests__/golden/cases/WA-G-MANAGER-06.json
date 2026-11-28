@@ -1,0 +1,50 @@
+{
+  "id": "WA-G-MANAGER-06",
+  "role": "manager",
+  "adversarial": false,
+  "flow": "M2",
+  "title": "Late truck → \"דחה למחר\": one tap, no money",
+  "neverList": [],
+  "ownerRules": [],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "tap": {
+        "kind": "template_button",
+        "id": "late:postpone:po-1043",
+        "title": "דחה למחר"
+      }
+    }
+  ],
+  "expect": {
+    "intent": "delivery.postpone",
+    "tools": [
+      {
+        "name": "orders.reviseExpectedDate",
+        "args": {
+          "orderId": "po-1043",
+          "expectedDate": "2026-10-26"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "poDatesRevised": 1,
+      "stagedTokens": 0
+    }
+  }
+}

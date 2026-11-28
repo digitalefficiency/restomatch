@@ -1,0 +1,30 @@
+{
+  "caseId": "WA-G-ADV-39",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "decide.bulk",
+      "refusal": "never.bulk",
+      "toolCalls": [],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "cta",
+          "text": "שחרור של כמה חשבוניות יחד עושים רק באפליקציה.",
+          "cta": {
+            "title": "לאישור באפליקציה",
+            "url": "https://app.restomatch.test/dashboard/go?r=lab&to=approvals"
+          }
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "approvalsDecided": 0,
+    "stagedTokens": 0,
+    "tokensCommitted": 0,
+    "payRunsApproved": 0
+  }
+}

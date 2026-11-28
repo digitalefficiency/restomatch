@@ -1,0 +1,60 @@
+{
+  "id": "WA-G-RECEIVER-01",
+  "role": "receiver",
+  "adversarial": false,
+  "flow": "R1",
+  "title": "06:00 today's trucks (no ₪ keys reach the template)",
+  "neverList": [],
+  "ownerRules": [
+    "receiver-no-ils"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "system",
+      "trigger": "rm_receiver_day",
+      "at": "06:00"
+    }
+  ],
+  "expect": {
+    "intent": "receiving.today",
+    "tools": [
+      {
+        "name": "receiving.todayExpectations",
+        "args": {}
+      }
+    ],
+    "allowedFields": [
+      "deliveries",
+      "supplier",
+      "until",
+      "lineCount"
+    ],
+    "forbiddenFields": [
+      "ils|agorot|amount|total|price"
+    ],
+    "forbiddenText": [
+      "₪",
+      "\\d+[.,]\\d{2}"
+    ],
+    "buttons": [
+      "רשימה מלאה",
+      "פתח קבלה"
+    ],
+    "noButtons": [],
+    "template": "rm_receiver_day",
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "proactiveSent": 1
+    }
+  }
+}

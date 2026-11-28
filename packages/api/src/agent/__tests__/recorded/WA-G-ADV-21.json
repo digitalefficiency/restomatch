@@ -1,0 +1,42 @@
+{
+  "caseId": "WA-G-ADV-21",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "queue.mine",
+      "toolCalls": [
+        {
+          "name": "approvals.queueSummary",
+          "args": {},
+          "result": {
+            "count": 4,
+            "totalIls": 1412
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "4 פערים מחכים להחלטה, בסך 1,412 ₪. נמשיך מחר בבוקר, או עכשיו:",
+          "buttons": [
+            {
+              "id": "brief:decide",
+              "title": "להחלטות עכשיו"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "intent": null,
+      "toolCalls": [],
+      "outbound": []
+    }
+  ],
+  "staged": [],
+  "state": {
+    "proactiveSent": 0
+  }
+}
