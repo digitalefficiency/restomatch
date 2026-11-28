@@ -84,7 +84,16 @@ export function ReceiptSummary({
                   </p>
                 </div>
                 <p className="shrink-0 text-end text-lg font-bold tabular-nums text-ink">
-                  {missing ? td('delivery.count.missingTag') : m ? td('delivery.count.received', { qty: qty(m.qtyReceived, l.poUnit) }) : '—'}
+                  {missing ? (
+                    td('delivery.count.missingTag')
+                  ) : m ? (
+                    td('delivery.count.received', { qty: qty(m.qtyReceived, l.poUnit) })
+                  ) : (
+                    // G-04 Q3: closed without a count — no quantity check on this line. Neutral, no ₪.
+                    <span className="text-base font-medium text-muted" data-testid="summary-not-counted">
+                      {td('delivery.count.heldNotCounted')}
+                    </span>
+                  )}
                   {m?.condition === 'damaged' ? <span className="block text-sm text-warn">{td('delivery.count.damagedTag')}</span> : null}
                   {m?.method === 'bulk_as_ordered' ? (
                     <span className="block text-sm font-normal text-muted" data-testid="summary-bulk-tag">
