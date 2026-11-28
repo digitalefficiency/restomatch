@@ -24,20 +24,9 @@ export const en: BriefCopy = {
     open: 'Open',
   },
   lateTruck: {
-    managerSubject: (s) => `The delivery from ${s} has not arrived`,
-    managerLine: (s, ref, d, late, l) =>
-      `Order ${ref} from ${s} was planned for ${d} and has not arrived (${days(late)}, ${lines(l)}).`,
-    sendToSupplier: 'Message the supplier:',
-    whatsapp: 'WhatsApp',
-    email: 'Email',
-    noContact: 'No supplier contact details · add them on the supplier card',
-    openPo: 'View the order',
     supplierText: (s, ref, d, r) =>
       `שלום ${s}, ההזמנה ${ref} שתוכננה ל-${d} עדיין לא הגיעה. מתי צפוי המשלוח? תודה, ${r}`,
     supplierSubject: (ref) => `ההזמנה ${ref}: מתי צפוי המשלוח?`,
-    receiverSubject: (s) => `The delivery from ${s} is late`,
-    receiverLine: (s, d) => `The delivery from ${s} is late (planned for ${d}). The manager is following up with the supplier.`,
-    receiverCta: 'Open receiving',
   },
   matchAlert: {
     subject: (n, s) => (n === 1 ? `A new gap on an invoice from ${s}` : `${n} new gaps on an invoice from ${s}`),
