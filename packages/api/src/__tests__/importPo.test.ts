@@ -177,6 +177,15 @@ describe('importPurchaseOrder — re-import safety (orders audit P2)', () => {
     await expect(imp()).rejects.toMatchObject({ code: 'CONFLICT' });
   });
 
+  it('G-04 Q4: promotedFromDraft only when a re-import turns an existing DRAFT into sent', async () => {
+    const draft = await imp({ totalEstimated: 999 }); // failed checksum → draft for review
+    expect(draft).toMatchObject({ status: 'draft', created: true, promotedFromDraft: false });
+    const fixed = await imp();
+    expect(fixed).toMatchObject({ poId: draft.poId, status: 'sent', created: false, promotedFromDraft: true });
+    const again = await imp();
+    expect(again).toMatchObject({ status: 'sent', promotedFromDraft: false });
+  });
+
   it('a negative (misread) quantity is a BAD_REQUEST, not a 500', async () => {
     await expect(
       imp({ lines: [{ sku: '1', rawDescription: 'בצל', qty: -3, unit: 'ק״ג', unitPrice: 4, lineTotal: -12 }] }),

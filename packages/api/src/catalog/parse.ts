@@ -273,6 +273,18 @@ export function parseNumeric(raw: string | undefined | null, decimal: DecimalSty
   return cell.kind === 'ok' ? cell.value : null;
 }
 
+/**
+ * A pack-size cell. pack_size is NUMERIC(12,3) with CHECK pack_size > 0, so a
+ * cell that is zero once rounded to 3 dp ("0", "0.0004") carries no pack: it is
+ * read like a blank / unreadable cell (null), never stored as 0.000 — which
+ * would fail the CHECK and roll back the whole file.
+ */
+export function parsePackSize(raw: string | undefined | null): number | null {
+  const n = parseNumeric(raw);
+  if (n == null || !Number.isFinite(n) || Math.round(n * 1000) <= 0) return null;
+  return n;
+}
+
 /** Is the price list quoted before VAT ('ex', the default) or including it ('inc')? */
 export type VatBasis = 'ex' | 'inc';
 
@@ -382,7 +394,7 @@ export function analyzeCatalogRows(table: ParsedTable, mapping: CatalogImportMap
       unit: get(row, mapping.unit),
       listPrice,
       barcodeEan: get(row, mapping.barcode),
-      packSize: parseNumeric(get(row, mapping.packSize)),
+      packSize: parsePackSize(get(row, mapping.packSize)),
     });
   });
   return { rows, held, decimal };
