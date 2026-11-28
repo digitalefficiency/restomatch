@@ -29,6 +29,8 @@ import {
   type DueDateSource,
 } from '../lib/dueDate';
 import { featureEnabled } from '../lib/features';
+import { assertCanApproveForPayment } from '../approvals/payApproval';
+import { invoiceMachine } from '../lifecycle/machines';
 import { canActOn } from '../lib/roles';
 import { vatAtRisk } from '../vat/vatAtRisk';
 
@@ -563,6 +565,23 @@ const UNMARK_PAID_INPUT = z.object({
   clientMutationId: z.string().min(8).max(80),
 });
 
+/** The statuses `approve_for_payment` leaves from (lifecycle edge, not a literal list). */
+const NEEDS_PAY_APPROVAL: readonly string[] = invoiceMachine.edges.approve_for_payment.from;
+
+/**
+ * G-15b gate for a mark-paid batch: every invoice that still needs `approve_for_payment`
+ * goes through `assertCanApproveForPayment` (throws on the first owner-only one).
+ */
+export async function assertOwnerPayApprovals(
+  db: Database,
+  who: { restaurantId: string; role: UserRole },
+  statusById: ReadonlyMap<string, string>,
+): Promise<void> {
+  for (const [invoiceId, status] of statusById) {
+    if (NEEDS_PAY_APPROVAL.includes(status)) await assertCanApproveForPayment(db, who, invoiceId);
+  }
+}
+
 /**
  * Every item must be one of the caller's invoices. A foreign or unknown id is
  * NOT_FOUND for the whole batch (all-or-nothing) — never a hint that it exists.
@@ -792,13 +811,18 @@ export const payRunRouter = router({
    * Marking paid NEVER deletes a claim (lib/claims keeps a paid invoice's claims).
    */
   markPaid: financeProcedure.input(MARK_PAID_INPUT).mutation(async ({ ctx, input }) => {
-    await assertOwnInvoices(
+    const current = await assertOwnInvoices(
       ctx.db,
       ctx.session.restaurantId,
       input.items.map((i) => i.invoiceId),
     );
     if (!markPaidEnabled())
       throw new TRPCError({ code: 'NOT_IMPLEMENTED', message: 'payRun.markPaidOff' });
+    // G-15b owner rule (11.11): an invoice that still has to pass approve_for_payment on its way
+    // to paid (≥ the pay-approval amount incl. VAT, or a new supplier) is owner-only →
+    // FORBIDDEN `payment.ownerApprovalRequired`. Already-approved invoices skip it. At the γ write
+    // this moves into the same tx, right before the transition, and the decision goes on the audit row.
+    await assertOwnerPayApprovals(ctx.db, { restaurantId: ctx.session.restaurantId, role: ctx.session.role }, current);
     // AU-14 pre-flight guard, before anything is written, for the whole batch: a bank-detail
     // change the owner has not confirmed or a confirmed copy → PRECONDITION_FAILED (always on,
     // AD12); a soft flag not acknowledged → PRECONDITION_FAILED. The acknowledged kinds go into
