@@ -839,11 +839,15 @@ describe('G-14 Q3 round 3: one allocator — live claims first, on every screen'
     const s = await seed();
     const { invoiceId, matchRunId } = await run(s, '20.00');
     // A binding cap with every tier but live claims: a decided claim, a tolerated and a rejected waiver, open rows.
-    await insertD(s, { matchRunId, type: 'QTY_SHORT', deltaAmount: '4.00', resolutionStatus: 'accepted', resolvedAt: new Date(), resolvedBy: s.managerId });
-    await insertD(s, { matchRunId, deltaAmount: '3.00', resolutionStatus: 'accepted', ruleId: 'minor-info' });
-    await insertD(s, { matchRunId, deltaAmount: '5.00', resolutionStatus: 'rejected', resolvedAt: new Date(), resolvedBy: s.managerId });
-    await insertD(s, { matchRunId, deltaAmount: '6.00' });
-    await insertD(s, { matchRunId, type: 'QTY_OVER', deltaAmount: '7.00', resolutionStatus: 'escalated', requiresRole: 'owner' });
+    // Distinct created_at a second apart: the line's ISO createdAt keeps milliseconds only, while SQL orders by
+    // microseconds — rows inserted in the same millisecond would tie in the mirror (a persisted line never
+    // goes through it; a proposal's lines always have distinct createdAt).
+    const at = (k: number) => new Date(Date.UTC(2026, 9, 1, 8, 0, k));
+    await insertD(s, { matchRunId, createdAt: at(1), type: 'QTY_SHORT', deltaAmount: '4.00', resolutionStatus: 'accepted', resolvedAt: new Date(), resolvedBy: s.managerId });
+    await insertD(s, { matchRunId, createdAt: at(2), deltaAmount: '3.00', resolutionStatus: 'accepted', ruleId: 'minor-info' });
+    await insertD(s, { matchRunId, createdAt: at(3), deltaAmount: '5.00', resolutionStatus: 'rejected', resolvedAt: new Date(), resolvedBy: s.managerId });
+    await insertD(s, { matchRunId, createdAt: at(4), deltaAmount: '6.00' });
+    await insertD(s, { matchRunId, createdAt: at(5), type: 'QTY_OVER', deltaAmount: '7.00', resolutionStatus: 'escalated', requiresRole: 'owner' });
     const leak = (await computeInvoiceLeak(db, s.restaurantId, invoiceId))!;
     const persisted = claimableLines(leak);
     const handBuilt = claimableLines({ ...leak, lines: leak.lines.map(({ ledger: _l, ...l }) => l) });
