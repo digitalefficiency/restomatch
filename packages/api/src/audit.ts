@@ -31,6 +31,10 @@ type AuditDb = Pick<Database, 'insert'>;
  * values are part of the audit contract and must not be renamed.
  */
 export type AuditAction =
+  // W3-10: price-list imports (written by catalog/commit.ts and catalog/revert.ts).
+  | 'catalog.import_committed'
+  | 'catalog.import_reverted'
+  | 'catalog.import_chunk_committed'
   // Platform admin (cross-tenant, owner connection)
   | 'admin.plan_assigned'
   | 'admin.overrides_set'

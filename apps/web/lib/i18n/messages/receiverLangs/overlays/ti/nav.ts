@@ -139,6 +139,7 @@ export const nav: Shape<typeof he> = {
     items: '{count} ኣቕሓታት',
     atRisk: '{amount} ኣብ ሓደጋ',
     owed: '{amount} ክፉት ክረዲት',
+    unchecked: '{amount} ገና ኣይተፈተሸን',
     blocking: 'ክፍሊት የዕግት',
   },
   bell: {

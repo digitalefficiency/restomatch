@@ -28,6 +28,7 @@ import { areConvertible } from '@restomatch/matching';
 import { sameUnit } from '../lib/unitPrice';
 import type { CatalogRow } from './parse';
 import { toPriceUnits } from '../lib/parseMoneyCell';
+import { recordAudit } from '../audit';
 
 /*
  * G-08: the thresholds (auto ≥ 0.95 with a fitting unit/pack, review floor 0.6,
@@ -41,13 +42,72 @@ export interface CommitArgs {
   sourceImportId?: string | null;
   /** Who committed (inline tRPC import); null for the background worker. Stamped on the audit row. */
   userId?: string | null;
+  /**
+   * A background import commits in chunks, each in its own transaction (W3-10
+   * review round 2): this call is chunk `index` of `count`. Its record is a
+   * `catalog.import_chunk_committed` row; the worker writes the one
+   * `catalog.import_committed` summary (what AU-13 reads) after the last chunk.
+   */
+  chunk?: { index: number; count: number; size: number };
+  /**
+   * Which of the unit / pack columns the import maps (round 4: unit and pack
+   * are one basis). Unmapped → the row keeps its existing unit AND pack. Default:
+   * both mapped.
+   */
+  columns?: { unit: boolean; packSize: boolean };
+}
+
+/**
+ * W3-10 round 4 · the unit and pack a row will store — one basis, decided
+ * together:
+ *  - a new row: the file's values;
+ *  - a blank price cell: the existing price basis stays (unit and pack);
+ *  - a priced row: a unit cell (mapped, readable) gives the unit; a pack cell
+ *    (mapped, readable) gives the pack. A blank / unreadable cell, or an
+ *    unmapped column, carries no information (round 5): the existing unit
+ *    stays, and the existing pack stays while the unit is the same unit
+ *    (sameUnit: יח' = יח׳) — a new unit with an old pack would be a different
+ *    quantity, so then the pack is dropped. Unmapped / blank unit and pack:
+ *    both kept, together.
+ * Shared by the commit (what it writes and what the unit / pack fit checks) and
+ * the preview (what it shows as kept / changed).
+ */
+export function storedBasis(
+  existing: { unit: string | null; packSize: string | null } | null,
+  row: { unit: string | null; packSize: number | null; listPrice: number | null },
+  columns: { unit: boolean; packSize: boolean } = { unit: true, packSize: true },
+): { unit: string | null; packSize: string | null } {
+  if (!existing) return { unit: row.unit, packSize: packString(row.packSize) };
+  if (row.listPrice == null) return { unit: existing.unit, packSize: existing.packSize };
+  const unit = columns.unit && row.unit != null ? row.unit : existing.unit;
+  const unitChanged = !sameUnitOrBlank(unit, existing.unit);
+  const packSize =
+    columns.packSize && row.packSize != null ? packString(row.packSize) : unitChanged ? null : existing.packSize;
+  return { unit, packSize };
+}
+
+/**
+ * W3-10 round 3 · the one lock that orders a supplier's catalog writes: every
+ * commit (inline, and each worker chunk), the summary, and every revert take
+ * it, always after their own catalog_imports row (no lock cycle). Returns the
+ * commit-order stamp (`clock_timestamp()` read under the lock, µs, as text):
+ * "later than" between imports compares these, never transaction-start times.
+ */
+export async function lockSupplierCatalog(db: Database, restaurantId: string, supplierId: string): Promise<string> {
+  await db.execute(sql`select pg_advisory_xact_lock(hashtext(${`catalog-revert:${restaurantId}:${supplierId}`}))`);
+  const [r] = (await db.execute(sql`select clock_timestamp()::text as t`)) as unknown as Array<{ t: string }>;
+  return r!.t;
 }
 
 /** W3-10 · the audit action AU-13's priceListDiff reads (one row per committed import). */
 export const IMPORT_COMMITTED_AUDIT_ACTION = 'catalog.import_committed';
+/** W3-10 · one chunk of a background import (its revert data; AU-13 never reads it). */
+export const IMPORT_CHUNK_AUDIT_ACTION = 'catalog.import_chunk_committed';
 
-/** One list-price change in a committed import (NUMERIC strings, as stored). */
+/** One list-price change in a committed import (NUMERIC strings, as stored). AU-13 reads these. */
 export interface ImportPriceChange {
+  /** The supplier_catalog_items row. */
+  itemId?: string;
   productId: string | null;
   name: string;
   sku: string | null;
@@ -55,6 +115,34 @@ export interface ImportPriceChange {
   newListPrice: string;
   unit: string | null;
 }
+
+/** The fields an import writes on a catalog row, as stored (NUMERIC strings): what a revert restores. */
+export interface ItemSnapshot {
+  listPrice: string | null;
+  unit: string | null;
+  packSize: string | null;
+  productId: string | null;
+  active: boolean;
+  supplierNameRaw: string;
+  barcodeEan: string | null;
+}
+
+/**
+ * W3-10 · one pre-existing row this commit wrote, merged per row (first
+ * `before`, last `after`): what a revert restores, together. A row whose
+ * values would not change is never written, so it is never here (round 2).
+ */
+export interface ImportRowChange {
+  itemId: string;
+  name: string;
+  sku: string | null;
+  before: ItemSnapshot & { updatedAt: string; observedAt: string | null; sourceImportId: string | null };
+  /** As stored by this commit's last write (RETURNING), including its `updatedAt` stamp. */
+  after: ItemSnapshot & { updatedAt: string };
+}
+
+/** The record shape a revert accepts (older records carry no per-row snapshot). */
+export const IMPORT_RECORD_VERSION = 2;
 
 /** Why a suggested link needs a person ("בדיקה"). */
 export type ReviewReason = Exclude<LinkReviewReason, 'UNKNOWN_UNIT'>;
@@ -83,16 +171,18 @@ export interface AmbiguousRow {
   suggestions: Array<{ productId: string; canonicalName: string; confidence: number; matchedBy: string }>;
 }
 
-/** Write progress to the import row every this many rows (background imports). */
-const PROGRESS_EVERY = 25;
-
 export interface CommitResult {
   created: number;
+  /** Existing rows this commit wrote (a value changed). */
   updated: number;
+  /** Existing rows the file lists with nothing new: not written, not restamped, not owned. */
+  unchanged: number;
   createdProducts: number;
   ambiguous: AmbiguousRow[];
   /** Existing rows whose list price changed (also written to the audit row). */
   priceChanges: ImportPriceChange[];
+  /** Rows whose file cell had no price: their existing price was kept, not wiped. */
+  keptPriceOnBlank: number;
 }
 
 /**
@@ -129,12 +219,45 @@ export async function commitCatalogRows(
       `[catalog.commit] supplier ${supplierId} does not belong to restaurant ${restaurantId} — refusing to commit`,
     );
   }
+  // Serialize with reverts (and other commits) of this supplier (round 3).
+  const lockedAt = await lockSupplierCatalog(db, restaurantId, supplierId);
 
   let created = 0;
   let updated = 0;
+  let unchanged = 0;
   let createdProducts = 0;
   const ambiguous: AmbiguousRow[] = [];
-  const priceChanges: ImportPriceChange[] = [];
+  /**
+   * Every write of this commit asks for its own stamp (commitAt + 1 ms per
+   * write) and records the one actually stored (RETURNING — the 0031 trigger
+   * replaces a stamp equal to the old updated_at with now()). A revert restores
+   * a row only while it still carries that exact stamp; any other write moves it.
+   */
+  const commitAt = new Date();
+  let writeSeq = 0;
+  const stamp = () => new Date(commitAt.getTime() + writeSeq++);
+  /** Rows this commit inserted, with the stored stamp of their last write. */
+  const createdStamps = new Map<string, string>();
+  /** Pre-existing rows written, merged per row (first before, last after). */
+  const rowChanges = new Map<string, ImportRowChange>();
+  /** Rows this commit inserted (a revert turns them off). */
+  const createdItemIds: string[] = [];
+  let keptPriceOnBlank = 0;
+  /**
+   * Rows a revert turned off, with the stamp that revert left (round 2): a
+   * re-import turns one back on only while it is still exactly as the revert
+   * left it — a row a person turned off since stays off.
+   */
+  const revertedOff = new Set(
+    (
+      (await db.execute(sql`
+        select d ->> 'itemId' as id, d ->> 'updatedAt' as at
+          from audit_log, jsonb_array_elements(coalesce(after -> 'deactivatedItems', '[]'::jsonb)) d
+         where restaurant_id = ${restaurantId} and action = 'catalog.import_reverted'
+           and after ->> 'supplierId' = ${supplierId}
+      `)) as unknown as Array<{ id: string; at: string }>
+    ).map((r) => `${r.id}|${r.at}`),
+  );
 
   for (const row of rows) {
     // 1. Existing catalog item for this supplier? By SKU when present, else by
@@ -153,6 +276,13 @@ export async function commitCatalogRows(
         productId: supplierCatalogItems.productId,
         listPrice: supplierCatalogItems.listPrice,
         unit: supplierCatalogItems.unit,
+        packSize: supplierCatalogItems.packSize,
+        active: supplierCatalogItems.active,
+        supplierNameRaw: supplierCatalogItems.supplierNameRaw,
+        barcodeEan: supplierCatalogItems.barcodeEan,
+        updatedAt: supplierCatalogItems.updatedAt,
+        observedAt: supplierCatalogItems.observedAt,
+        sourceImportId: supplierCatalogItems.sourceImportId,
       })
       .from(supplierCatalogItems)
       .where(
@@ -162,8 +292,14 @@ export async function commitCatalogRows(
           existingFilter,
         ),
       )
-      .orderBy(asc(supplierCatalogItems.createdAt))
+      .orderBy(asc(supplierCatalogItems.createdAt), asc(supplierCatalogItems.id))
       .limit(1);
+
+    // The unit and pack this row will store: the unit / pack fit judges these,
+    // not the raw file cells (round 4: an unlinked case/12 row with no unit /
+    // pack columns is a case/12, never a per-unit match).
+    const basis = storedBasis(existing ?? null, row, args.columns);
+    const fitRow: CatalogRow = { ...row, unit: basis.unit, packSize: basis.packSize == null ? null : Number(basis.packSize) };
 
     // 2. Resolve the canonical product.
     let productId: string | null = existing?.productId ?? null;
@@ -202,7 +338,7 @@ export async function commitCatalogRows(
       let productUnit: string | null = null;
       let fitReasons: FitReason[] = [];
       if (top && top.confidence >= REVIEW_FLOOR) {
-        const fit = await unitPackFit(db, restaurantId, supplierId, top.productId, row);
+        const fit = await unitPackFit(db, restaurantId, supplierId, top.productId, fitRow);
         productUnit = fit.productUnit;
         fitReasons = fit.reasons;
       }
@@ -219,7 +355,7 @@ export async function commitCatalogRows(
         pendingReview = {
           supplierNameRaw: row.supplierNameRaw,
           supplierSku: row.supplierSku,
-          unit: row.unit,
+          unit: basis.unit,
           productId: top.productId,
           canonicalName: top.canonicalName,
           productUnit,
@@ -244,7 +380,8 @@ export async function commitCatalogRows(
             // asserted above, so this FK can never cross restaurants.
             supplierId,
             canonicalName: row.supplierNameRaw,
-            defaultUnit: row.unit,
+            // The unit the row will store (round 5), not a blank / unmapped cell.
+            defaultUnit: basis.unit,
             barcodeEan: row.barcodeEan,
             embedding,
           })
@@ -257,52 +394,101 @@ export async function commitCatalogRows(
     }
 
     // 3. Upsert the priced catalog item.
-    const itemValues = {
-      restaurantId,
-      supplierId,
-      productId,
-      supplierSku: row.supplierSku,
-      supplierNameRaw: row.supplierNameRaw,
-      unit: row.unit,
-      packSize: row.packSize == null ? null : row.packSize.toString(),
-      listPrice: row.listPrice == null ? null : row.listPrice.toString(),
-      barcodeEan: row.barcodeEan,
-      sourceImportId: args.sourceImportId ?? null,
-      observedAt: new Date(),
-      updatedAt: new Date(),
-    };
+    const blankPrice = row.listPrice == null;
+    if (blankPrice && existing?.listPrice != null) keptPriceOnBlank += 1;
     let itemId: string;
     if (existing) {
-      await db
-        .update(supplierCatalogItems)
-        .set(itemValues)
-        .where(eq(supplierCatalogItems.id, existing.id));
-      itemId = existing.id;
-      updated += 1;
-      // W3-10 · a list-price change, compared in integer price units (1/100 agorot).
-      const newListPrice = itemValues.listPrice;
-      if (
-        existing.listPrice != null &&
-        newListPrice != null &&
-        toPriceUnits(Number(existing.listPrice)) !== toPriceUnits(Number(newListPrice))
-      ) {
-        priceChanges.push({
-          productId,
-          name: row.supplierNameRaw,
-          sku: row.supplierSku,
-          oldListPrice: existing.listPrice,
-          newListPrice,
-          unit: row.unit ?? existing.unit ?? null,
-        });
+      // What this row would store. A blank / unreadable price cell keeps
+      // everything that defines the existing price (round 2); unit and pack are
+      // one basis (storedBasis, round 4).
+      const next: ItemSnapshot = {
+        listPrice: blankPrice ? existing.listPrice : String(row.listPrice),
+        unit: basis.unit,
+        packSize: basis.packSize,
+        productId,
+        // A row an earlier revert turned off comes back when a file lists it
+        // again, but only while it is exactly as that revert left it.
+        active:
+          existing.active || revertedOff.has(`${existing.id}|${existing.updatedAt.toISOString()}`),
+        supplierNameRaw: row.supplierNameRaw,
+        // A blank barcode cell never wipes a barcode the row has.
+        barcodeEan: row.barcodeEan ?? existing.barcodeEan,
+      };
+      if (sameSnapshot(existing, next)) {
+        // Nothing new: no write, no restamp, no ownership (round 2). The row
+        // keeps its owner and its times, so expected-price logic is unmoved.
+        unchanged += 1;
+        itemId = existing.id;
+      } else {
+        const [stored] = await db
+          .update(supplierCatalogItems)
+          .set({
+            ...next,
+            sourceImportId: args.sourceImportId ?? null,
+            observedAt: commitAt,
+            updatedAt: stamp(),
+          })
+          .where(and(eq(supplierCatalogItems.id, existing.id), eq(supplierCatalogItems.restaurantId, restaurantId)))
+          .returning(STORED);
+        if (!stored) throw new Error('failed to update catalog item');
+        itemId = existing.id;
+        updated += 1;
+        const after = toAfter(stored);
+        if (createdStamps.has(existing.id)) {
+          // Inserted earlier in this same commit: the revert turns it off by its last stamp.
+          createdStamps.set(existing.id, after.updatedAt);
+        } else {
+          // Record this row's written fields, merged per row: the first write
+          // keeps `before`, every later write moves `after`.
+          const prev = rowChanges.get(existing.id);
+          if (prev) {
+            prev.after = after;
+            prev.name = row.supplierNameRaw;
+          } else {
+            rowChanges.set(existing.id, {
+              itemId: existing.id,
+              name: row.supplierNameRaw,
+              sku: row.supplierSku,
+              before: {
+                listPrice: existing.listPrice,
+                unit: existing.unit,
+                packSize: existing.packSize,
+                productId: existing.productId,
+                active: existing.active,
+                supplierNameRaw: existing.supplierNameRaw,
+                barcodeEan: existing.barcodeEan,
+                updatedAt: existing.updatedAt.toISOString(),
+                observedAt: existing.observedAt ? existing.observedAt.toISOString() : null,
+                sourceImportId: existing.sourceImportId,
+              },
+              after,
+            });
+          }
+        }
       }
     } else {
       const [ins] = await db
         .insert(supplierCatalogItems)
-        .values(itemValues)
-        .returning({ id: supplierCatalogItems.id });
+        .values({
+          restaurantId,
+          supplierId,
+          productId,
+          supplierSku: row.supplierSku,
+          supplierNameRaw: row.supplierNameRaw,
+          unit: row.unit,
+          packSize: packString(row.packSize),
+          listPrice: row.listPrice == null ? null : String(row.listPrice),
+          barcodeEan: row.barcodeEan,
+          sourceImportId: args.sourceImportId ?? null,
+          observedAt: commitAt,
+          updatedAt: stamp(),
+        })
+        .returning({ id: supplierCatalogItems.id, updatedAt: supplierCatalogItems.updatedAt });
       if (!ins) throw new Error('failed to insert catalog item');
       itemId = ins.id;
       created += 1;
+      createdItemIds.push(ins.id);
+      createdStamps.set(ins.id, ins.updatedAt.toISOString());
     }
     if (pendingReview) ambiguous.push({ itemId, ...pendingReview });
 
@@ -323,10 +509,10 @@ export async function commitCatalogRows(
       });
     }
 
-    // Determinate progress for a background import (the worker's writes are
-    // visible to the progress card; inline commits finish before anyone looks).
-    const done = created + updated;
-    if (args.sourceImportId && done % PROGRESS_EVERY === 0) {
+    // Determinate progress for a background import written in one call (a
+    // chunked import writes its cumulative progress after each chunk instead).
+    const done = created + updated + unchanged;
+    if (args.sourceImportId && !args.chunk && done % PROGRESS_EVERY === 0) {
       await db
         .update(catalogImports)
         .set({ createdItems: created, updatedItems: updated })
@@ -334,19 +520,157 @@ export async function commitCatalogRows(
     }
   }
 
-  // W3-10 · one audit row per committed import: the record AU-13's priceListDiff
-  // reads ({ supplierId, priceChanges }) and the trail a revert works from.
-  // Append-only (audit_log is immutable); written even when no price moved.
-  await db.insert(auditLog).values({
+  // Every written row is recorded (a row is written only when a value moves).
+  const changes = [...rowChanges.values()];
+  // AU-13's list-price changes: both sides priced and different (integer price units).
+  const priceChanges: ImportPriceChange[] = changes
+    .filter(
+      (c) =>
+        c.before.listPrice != null && c.after.listPrice != null && !samePrice(c.before.listPrice, c.after.listPrice),
+    )
+    .map((c) => ({
+      itemId: c.itemId,
+      productId: c.after.productId,
+      name: c.name,
+      sku: c.sku,
+      oldListPrice: c.before.listPrice!,
+      newListPrice: c.after.listPrice!,
+      unit: c.after.unit ?? c.before.unit,
+    }));
+
+  // One audit row per committed import (or per chunk of a background import):
+  // the record AU-13's priceListDiff reads ({ supplierId, priceChanges }) and
+  // everything a revert needs (rowChanges with before/after snapshots, the
+  // created rows with their stamps, commitAt). Append-only; written even when
+  // nothing moved.
+  await recordAudit(db, {
     restaurantId,
+    userId: args.userId ?? null,
+    action: args.chunk ? IMPORT_CHUNK_AUDIT_ACTION : IMPORT_COMMITTED_AUDIT_ACTION,
+    entityType: 'catalog_import',
+    entityId: args.sourceImportId ?? null,
+    after: {
+      revertVersion: IMPORT_RECORD_VERSION,
+      ...(args.chunk ? { chunk: args.chunk } : {}),
+      commitAt: commitAt.toISOString(),
+      lockedAt,
+      supplierId,
+      created,
+      updated,
+      unchanged,
+      createdProducts,
+      keptPriceOnBlank,
+      priceChanges,
+      rowChanges: changes,
+      createdItemIds,
+      createdItems: createdItemIds.map((id) => ({ itemId: id, updatedAt: createdStamps.get(id)! })),
+    },
+  });
+
+  return { created, updated, unchanged, createdProducts, ambiguous, priceChanges, keptPriceOnBlank };
+}
+
+/** What a chunk record carries (the summary adds these up). */
+interface ChunkRecord {
+  chunk?: { index: number; count: number; size?: number };
+  created?: number;
+  updated?: number;
+  unchanged?: number;
+  createdProducts?: number;
+  keptPriceOnBlank?: number;
+  rowChanges?: ImportRowChange[];
+  createdItemIds?: string[];
+}
+
+/**
+ * W3-10 · the ONE `catalog.import_committed` record of a background import
+ * (what AU-13's priceListDiff announces), adding its chunks up — after the last
+ * chunk, or (`partial`) when the import ends failed part-way, so the rises that
+ * did go live are still announced. Its price changes are merged across chunks
+ * per row (round 3): the first chunk's `before`, the last chunk's `after`; a
+ * row this import created, or one with no price before it, is not a change. It
+ * carries no revert data (`chunked` = the chunk records the revert works from).
+ * Runs in the caller's transaction, under the supplier lock.
+ */
+export async function recordImportSummary(
+  db: Database,
+  args: { restaurantId: string; supplierId: string; importId: string; userId?: string | null; partial?: boolean },
+): Promise<{ created: number; updated: number; unchanged: number; createdProducts: number; chunks: number }> {
+  const lockTime = await lockSupplierCatalog(db, args.restaurantId, args.supplierId);
+  const recs = (
+    await db
+      .select({ after: auditLog.after })
+      .from(auditLog)
+      .where(
+        and(
+          eq(auditLog.entityType, 'catalog_import'),
+          eq(auditLog.entityId, args.importId),
+          eq(auditLog.restaurantId, args.restaurantId),
+          eq(auditLog.action, IMPORT_CHUNK_AUDIT_ACTION),
+        ),
+      )
+  )
+    .map((r) => (r.after ?? {}) as ChunkRecord)
+    .sort((x, y) => (x.chunk?.index ?? 0) - (y.chunk?.index ?? 0));
+  const sum = (k: 'created' | 'updated' | 'unchanged' | 'createdProducts' | 'keptPriceOnBlank') =>
+    recs.reduce((n, r) => n + (r[k] ?? 0), 0);
+  // The summary ranks where its chunks went live (round 4): a partial summary
+  // written later at finalize must not rank as the supplier's latest import.
+  const [maxChunk] = (await db.execute(sql`
+    select max((after ->> 'lockedAt')::timestamptz)::text as t from audit_log
+     where entity_type = 'catalog_import' and entity_id = ${args.importId}::uuid and restaurant_id = ${args.restaurantId}
+       and action = ${IMPORT_CHUNK_AUDIT_ACTION}
+  `)) as unknown as Array<{ t: string | null }>;
+  const lockedAt = maxChunk?.t ?? lockTime;
+  const createdHere = new Set(recs.flatMap((r) => r.createdItemIds ?? []));
+  const rows = new Map<string, ImportRowChange>();
+  for (const r of recs) {
+    for (const c of r.rowChanges ?? []) {
+      const prev = rows.get(c.itemId);
+      rows.set(c.itemId, prev ? { ...c, before: prev.before } : c);
+    }
+  }
+  const priceChanges: ImportPriceChange[] = [...rows.values()]
+    .filter(
+      (c) =>
+        !createdHere.has(c.itemId) &&
+        c.before.listPrice != null &&
+        c.after.listPrice != null &&
+        !samePrice(c.before.listPrice, c.after.listPrice),
+    )
+    .map((c) => ({
+      itemId: c.itemId,
+      productId: c.after.productId,
+      name: c.name,
+      sku: c.sku,
+      oldListPrice: c.before.listPrice!,
+      newListPrice: c.after.listPrice!,
+      unit: c.after.unit ?? c.before.unit,
+    }));
+  const totals = {
+    created: sum('created'),
+    updated: sum('updated'),
+    unchanged: sum('unchanged'),
+    createdProducts: sum('createdProducts'),
+  };
+  await recordAudit(db, {
+    restaurantId: args.restaurantId,
     userId: args.userId ?? null,
     action: IMPORT_COMMITTED_AUDIT_ACTION,
     entityType: 'catalog_import',
-    entityId: args.sourceImportId ?? null,
-    after: { supplierId, created, updated, createdProducts, priceChanges },
+    entityId: args.importId,
+    after: {
+      revertVersion: IMPORT_RECORD_VERSION,
+      chunked: recs.length,
+      ...(args.partial ? { partial: true } : {}),
+      lockedAt,
+      supplierId: args.supplierId,
+      ...totals,
+      keptPriceOnBlank: sum('keptPriceOnBlank'),
+      priceChanges,
+    },
   });
-
-  return { created, updated, createdProducts, ambiguous, priceChanges };
+  return { ...totals, chunks: recs.length };
 }
 
 /**
@@ -392,4 +716,67 @@ async function unitPackFit(
   const rowPack = row.packSize ?? 1;
   if (packs.length > 0 && packs.every((x) => Number(x.packSize ?? 1) !== rowPack)) reasons.push('PACK_MISMATCH');
   return { productUnit, reasons };
+}
+
+/** Two NUMERIC price strings (or nulls) are the same price in integer price units. */
+export function samePrice(a: string | null, b: string | null): boolean {
+  if (a == null || b == null) return a == null && b == null;
+  return toPriceUnits(Number(a)) === toPriceUnits(Number(b));
+}
+
+/** Write progress to the import row every this many rows (one-call background imports). */
+const PROGRESS_EVERY = 25;
+
+/** The stored columns a write returns: the row's snapshot and its stamp. */
+const STORED = {
+  listPrice: supplierCatalogItems.listPrice,
+  unit: supplierCatalogItems.unit,
+  packSize: supplierCatalogItems.packSize,
+  productId: supplierCatalogItems.productId,
+  active: supplierCatalogItems.active,
+  supplierNameRaw: supplierCatalogItems.supplierNameRaw,
+  barcodeEan: supplierCatalogItems.barcodeEan,
+  updatedAt: supplierCatalogItems.updatedAt,
+};
+
+function toAfter(r: ItemSnapshot & { updatedAt: Date }): ImportRowChange['after'] {
+  return {
+    listPrice: r.listPrice,
+    unit: r.unit,
+    packSize: r.packSize,
+    productId: r.productId,
+    active: r.active,
+    supplierNameRaw: r.supplierNameRaw,
+    barcodeEan: r.barcodeEan,
+    updatedAt: r.updatedAt.toISOString(),
+  };
+}
+
+/** pack_size is numeric(12,3): round to what is stored, so the record and the guard agree (round 2). */
+export function packString(pack: number | null | undefined): string | null {
+  return pack == null ? null : (Math.round(pack * 1000) / 1000).toFixed(3);
+}
+
+/** The same pack size at the stored scale (3); no pack is a pack of 1 (round 5). */
+export function samePack(a: string | null, b: string | null): boolean {
+  const n = (v: string | null) => (v == null ? 1000 : Math.round(Number(v) * 1000));
+  return n(a) === n(b);
+}
+
+/** One unit (sameUnit: יח' = יח׳), or both none. A spelling-only difference is no change (round 5). */
+export function sameUnitOrBlank(a: string | null, b: string | null): boolean {
+  return a == null || b == null ? a == null && b == null : sameUnit(a, b);
+}
+
+/** Would writing `b` over `a` change anything stored? */
+export function sameSnapshot(a: ItemSnapshot, b: ItemSnapshot): boolean {
+  return (
+    samePrice(a.listPrice, b.listPrice) &&
+    sameUnitOrBlank(a.unit, b.unit) &&
+    samePack(a.packSize, b.packSize) &&
+    (a.productId ?? null) === (b.productId ?? null) &&
+    a.active === b.active &&
+    a.supplierNameRaw === b.supplierNameRaw &&
+    (a.barcodeEan ?? null) === (b.barcodeEan ?? null)
+  );
 }

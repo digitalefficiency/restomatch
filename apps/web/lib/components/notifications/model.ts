@@ -37,6 +37,8 @@ export interface BadgeWords {
   atRisk: (amount: string) => string;
   /** Claims: the recovery page's "זיכויים פתוחים" figure. */
   owed: (amount: string) => string;
+  /** Link (W3-10): spend not price-checked yet: neither at risk nor owed. */
+  unchecked: (amount: string) => string;
   blocking: string;
 }
 
@@ -46,7 +48,7 @@ export function badgeAria(label: string, b: NavBadgeValue | undefined, locale: L
   const parts = [label, w.items(cappedCount(b.count, locale))];
   if (b.ilsAgorot !== null && b.ilsAgorot > 0) {
     const amount = formatIls(b.ilsAgorot / 100, { locale });
-    parts.push(b.money === 'owed' ? w.owed(amount) : w.atRisk(amount));
+    parts.push(b.money === 'owed' ? w.owed(amount) : b.money === 'unchecked' ? w.unchecked(amount) : w.atRisk(amount));
   }
   if (b.block) parts.push(w.blocking);
   return parts.join(', ');

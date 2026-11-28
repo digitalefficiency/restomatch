@@ -173,7 +173,9 @@ function requireRoles(allowed: ReadonlyArray<UserRole>, tier: Tier) {
 }
 
 export const ownerProcedure = requireRoles(['owner'], 'owner');
-export const managerProcedure = requireRoles(['owner', 'manager'], 'manager');
+/** Who passes managerProcedure (a UI flag that mirrors it derives from this, never repeats it). */
+export const MANAGER_PROCEDURE_ROLES: ReadonlyArray<UserRole> = ['owner', 'manager'];
+export const managerProcedure = requireRoles(MANAGER_PROCEDURE_ROLES, 'manager');
 export const receiverProcedure = requireRoles(['owner', 'manager', 'receiver'], 'receiver');
 export const bookkeeperProcedure = requireRoles(['owner', 'bookkeeper'], 'bookkeeper');
 export const chefProcedure = requireRoles(['owner', 'manager', 'chef'], 'chef');

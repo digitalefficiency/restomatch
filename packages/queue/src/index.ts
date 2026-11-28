@@ -62,7 +62,25 @@ export async function withDeadline<T>(p: Promise<T>, ms: number, onTimeout: () =
  * terminal one is dead-lettered at once (TERMINAL_JOB_ERROR, apps/worker
  * ocrInvoice.ts classifyOcrError).
  */
-export const MAX_ATTEMPTS: Readonly<Record<string, number>> = { 'match-invoice': 3, 'ocr-invoice': 2 };
+export const MAX_ATTEMPTS: Readonly<Record<string, number>> = {
+  'match-invoice': 3,
+  'ocr-invoice': 2,
+  // W3-10 round 3: an import commits chunk by chunk and resumes after the last
+  // recorded chunk, so a retry never redoes work; it also covers a job that ran
+  // before the request that queued it had committed (import not found yet).
+  'import-catalog': 3,
+};
+
+/** W3-10 round 3: an import-catalog run hands the rest to a fresh job after this long. */
+export const CATALOG_IMPORT_RUN_BUDGET_MS = 90_000;
+/** The time one chunk may take (250 rows at ~25–55 ms/row measured locally, with production margin). */
+export const CATALOG_IMPORT_CHUNK_ALLOWANCE_MS = 60_000;
+/**
+ * An import-catalog job is claimed only with this much of its invocation left
+ * (the run budget plus one chunk), like OCR_JOB_HEADROOM_MS: a run is never cut
+ * off by the function's maxDuration mid-chunk.
+ */
+export const CATALOG_IMPORT_JOB_HEADROOM_MS = CATALOG_IMPORT_RUN_BUDGET_MS + CATALOG_IMPORT_CHUNK_ALLOWANCE_MS;
 
 /** Default for OCR_JOB_HEADROOM_MS: a Claude read takes ≈ 10–40 s, its retry path more. */
 export const OCR_JOB_HEADROOM_DEFAULT_MS = 120_000;
@@ -207,11 +225,22 @@ export interface CatalogImportQueueJob {
   importId: string;
   file: { filename: string; base64?: string; text?: string };
   mapping: Record<string, string | undefined>;
+  /**
+   * W3-10 round 4: when the import was first queued (ISO). A continuation is
+   * queued with run_at = this, so it stays ahead of jobs queued after it.
+   */
+  queuedAt?: string;
 }
 
-/** Enqueue an 'import-catalog' job (same contract as enqueueOcrInvoice). */
-export async function enqueueCatalogImport(payload: CatalogImportQueueJob): Promise<boolean> {
-  return enqueue(CATALOG_IMPORT_QUEUE, payload);
+/**
+ * Enqueue an 'import-catalog' job (same contract as enqueueOcrInvoice). A
+ * continuation passes `runAt` (the original queuedAt) to keep its place.
+ */
+export async function enqueueCatalogImport(
+  payload: CatalogImportQueueJob,
+  opts: { runAt?: Date } = {},
+): Promise<boolean> {
+  return enqueue(CATALOG_IMPORT_QUEUE, payload, opts.runAt ? { runAt: opts.runAt } : {});
 }
 
 export type { OcrInvoiceJob };

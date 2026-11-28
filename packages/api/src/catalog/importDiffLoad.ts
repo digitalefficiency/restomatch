@@ -19,7 +19,7 @@ const unitKey = (col: ReturnType<typeof sql>) =>
  */
 export async function loadCurrentForDiff(db: Database, rid: string, supplierId: string): Promise<CurrentCatalogRow[]> {
   const rows = (await db.execute(sql`
-    select sci.id, sci.supplier_sku, sci.supplier_name_raw, sci.list_price, sci.active,
+    select sci.id, sci.supplier_sku, sci.supplier_name_raw, sci.list_price, sci.active, sci.unit, sci.pack_size,
            coalesce((
              select sum(il.qty_billed)
                from invoice_lines il
@@ -39,5 +39,7 @@ export async function loadCurrentForDiff(db: Database, rid: string, supplierId: 
     priceUnits: r.list_price == null ? null : toPriceUnits(Number(r.list_price)),
     monthlyQty: Number(r.monthly_qty),
     active: r.active === true,
+    unit: r.unit == null ? null : String(r.unit),
+    packSize: r.pack_size == null ? null : String(r.pack_size),
   }));
 }
