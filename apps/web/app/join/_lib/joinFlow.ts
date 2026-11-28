@@ -1,5 +1,5 @@
 import 'server-only';
-import { createHash, createHmac, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import {
   and,
   count,
@@ -150,6 +150,20 @@ export async function loadInvite(token: string, now = Date.now()): Promise<Invit
 }
 
 /**
+ * Server-side only: the invited address (unmasked), restaurant and locale of a
+ * valid invite — what the sign-in-link e-mail needs. Never sent to the client.
+ */
+export async function joinContact(
+  token: string,
+  now = Date.now(),
+): Promise<{ email: string; restaurantName: string | null; locale: 'he' | 'en' } | null> {
+  const row = await inviteRowByToken(token);
+  if (!row || stateOf(row, now) !== 'valid') return null;
+  const view = await loadInvite(token, now);
+  return { email: row.email, restaurantName: view.restaurantName, locale: view.locale ?? 'he' };
+}
+
+/**
  * Canonical form of `users.email` in SQL — the same rules as @restomatch/api
  * canonicalizeEmail (strip +tag; Gmail ignores dots, googlemail = gmail), so an
  * alias of an address that already has a password is treated as that account.
@@ -213,10 +227,19 @@ const windowFailId = (addr: string) => `join-fail:${addr}`;
 const totalFailId = (addr: string) => `join-failtotal:${addr}`;
 const sendId = (addr: string) => `join-send:${addr}`;
 const sendDayId = (addr: string) => `join-send-d:${addr}`;
+/** Per-INVITATION attempt counters: every attempt, with or without a live code. */
+const invWindowFailId = (invId: string) => `join-fail-inv:${invId}`;
+const invTotalFailId = (invId: string) => `join-failtotal-inv:${invId}`;
 
 export type IssueResult =
   | { ok: true; code: string; email: string; locale: 'he' | 'en' | null }
-  | { ok: false; reason: Exclude<InviteState, 'valid'> | 'hasPassword' | 'rate' };
+  | { ok: false; reason: Exclude<InviteState, 'valid'> | 'rate' }
+  /**
+   * An existing account: no code is sent (the caller e-mails a sign-in link). A
+   * decoy row is written when not throttled. `throttled` = the per-address send
+   * cap is hit (same cap as a new address); the caller answers like a sent e-mail.
+   */
+  | { ok: false; reason: 'hasPassword'; throttled: boolean };
 
 /**
  * Mint a fresh code for a valid invite (any earlier code dies). The CALLER sends
@@ -226,24 +249,66 @@ export async function issueJoinCode(token: string, now = Date.now()): Promise<Is
   const row = await inviteRowByToken(token);
   const state = stateOf(row, now);
   if (!row || state !== 'valid') return { ok: false, reason: state === 'valid' ? 'notFound' : state };
-  if (await accountExists(row.email)) return { ok: false, reason: 'hasPassword' };
-  // Per-address send cap (durable; reserve, then count — holds when the limiter fails open).
+  // Per-address send cap FIRST, for existing and new addresses alike, so the cap
+  // is no account oracle. Durable (holds when the limiter fails open). Count
+  // first: at the cap, return throttled WITHOUT inserting, so a token holder
+  // cannot keep the cap up for free (review r2 finding 2).
   const addr = joinAddressKey(row.email);
-  await authDb.insert(verificationTokens).values([
-    { identifier: sendId(addr), token: randomUUID(), expires: new Date(now + 15 * 60 * 1000) },
-    { identifier: sendDayId(addr), token: randomUUID(), expires: new Date(now + 24 * 60 * 60 * 1000) },
-  ]);
-  const [sent15, sentDay] = await Promise.all([countLive(sendId(addr), now), countLive(sendDayId(addr), now)]);
-  if (sent15 > JOIN_CODE_SENDS_PER_15_MIN || sentDay > JOIN_CODE_SENDS_PER_DAY) return { ok: false, reason: 'rate' };
+  const sendCaps = [JOIN_CODE_SENDS_PER_15_MIN, JOIN_CODE_SENDS_PER_DAY];
+  const sendIds = [sendId(addr), sendDayId(addr)];
+  // ONE transaction under the address's send lock: count; insert the send
+  // markers only when below BOTH caps; and write the code row in the same
+  // transaction, so overlapping sends can't leave two code rows behind (review
+  // r3). Parallel sends queue on the lock, so exactly as many pass as the cap
+  // allows, and a throttled send writes nothing. A lock timeout counts as
+  // throttled (answered like a sent e-mail; nothing is sent).
+  const existing = await accountExists(row.email);
   const code = generateCode();
-  await authDb.transaction(async (tx) => {
-    await tx.delete(verificationTokens).where(eq(verificationTokens.identifier, codeId(row.id)));
-    await tx.insert(verificationTokens).values({
-      identifier: codeId(row.id),
-      token: codeDigest(row, code),
-      expires: new Date(now + JOIN_CODE_TTL_MS),
+  let throttled: boolean;
+  try {
+    throttled = await authDb.transaction(async (tx) => {
+      await lockAddress(tx, 'send', addr);
+      const counts = await Promise.all(sendIds.map((id) => countLive(id, now, tx)));
+      // A throttled send leaves the code rows untouched, for both kinds of address.
+      if (counts.some((c, i) => c >= sendCaps[i]!)) return true;
+      await tx.insert(verificationTokens).values([
+        { identifier: sendId(addr), token: randomUUID(), expires: new Date(now + 15 * 60 * 1000) },
+        { identifier: sendDayId(addr), token: randomUUID(), expires: new Date(now + 24 * 60 * 60 * 1000) },
+      ]);
+      // Unthrottled: a code row is written either way, with the same TTL. A new
+      // address gets the real code. An existing account (the caller e-mails it a
+      // sign-in link) gets a DECOY: a random digest no 6-digit code can match.
+      // So completeJoin reads and charges the same counters in both cases: no
+      // cross-invite account oracle (review r2 finding 1). Even if a decoy
+      // matched, completeJoin refuses an existing account (B5).
+      //
+      // A decoy never replaces a live row: a real code minted before the account
+      // appeared keeps its token (completeJoin refuses it with 'hasPassword';
+      // main's B5 asserts this across a resend). Its expiry moves to now + TTL,
+      // exactly as a resend's fresh code would.
+      if (existing) {
+        const refreshed = await tx
+          .update(verificationTokens)
+          .set({ expires: new Date(now + JOIN_CODE_TTL_MS) })
+          .where(and(eq(verificationTokens.identifier, codeId(row.id)), gt(verificationTokens.expires, new Date(now))))
+          .returning({ identifier: verificationTokens.identifier });
+        if (refreshed.length > 0) return false;
+      }
+      await tx.delete(verificationTokens).where(eq(verificationTokens.identifier, codeId(row.id)));
+      await tx.insert(verificationTokens).values({
+        identifier: codeId(row.id),
+        token: existing ? randomBytes(32).toString('hex') : codeDigest(row, code),
+        expires: new Date(now + JOIN_CODE_TTL_MS),
+      });
+      return false;
     });
-  });
+  } catch (err) {
+    if (!isLockTimeout(err)) throw err;
+    throttled = true;
+  }
+  // The caller answers a throttled send like a sent e-mail and sends nothing.
+  if (throttled) return existing ? { ok: false, reason: 'hasPassword', throttled: true } : { ok: false, reason: 'rate' };
+  if (existing) return { ok: false, reason: 'hasPassword', throttled: false };
   return {
     ok: true,
     code,
@@ -252,8 +317,33 @@ export async function issueJoinCode(token: string, now = Date.now()): Promise<Is
   };
 }
 
-async function countLive(identifier: string, now: number): Promise<number> {
-  const [r] = await authDb
+type Tx = Parameters<Parameters<typeof authDb.transaction>[0]>[0];
+type Conn = typeof authDb | Tx;
+
+/** How long a locked transaction waits for the address lock before giving up. */
+export const JOIN_LOCK_TIMEOUT = '3s';
+
+/** Postgres lock_not_available (55P03): the lock wait hit lock_timeout. */
+function isLockTimeout(err: unknown): boolean {
+  const e = err as { code?: string; cause?: { code?: string } } | null;
+  return e?.code === '55P03' || e?.cause?.code === '55P03';
+}
+
+/**
+ * Serialise every count-then-insert on one address (review r3): a transaction-
+ * scoped advisory lock, so parallel sends or guesses cannot all pass the
+ * pre-count. Released at commit/rollback.
+ */
+async function lockAddress(tx: Tx, scope: 'send' | 'attempt', addr: string): Promise<void> {
+  // A transaction only: on the pool an xact lock would be a silent no-op. Bounded
+  // wait: a frozen holder can't block the address or pin the auth pool; the
+  // caller maps a timeout to its ceiling answer.
+  await tx.execute(sql.raw(`set local lock_timeout = '${JOIN_LOCK_TIMEOUT}'`));
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`join-${scope}:${addr}`}, 0))`);
+}
+
+async function countLive(identifier: string, now: number, db: Conn = authDb): Promise<number> {
+  const [r] = await db
     .select({ c: count() })
     .from(verificationTokens)
     .where(and(eq(verificationTokens.identifier, identifier), gt(verificationTokens.expires, new Date(now))));
@@ -297,27 +387,60 @@ export async function completeJoin(
   const policy = passwordPolicyError(input.password);
   if (policy) return { ok: false, reason: 'policy', message: policy };
 
+  // Attempt ceilings (security review of the /join oracle branch, finding 1):
+  //  - PER INVITATION, every attempt (live code or not): ≤ 5 per 10 min and
+  //    ≤ 20 over the invite's life. These are the only counters an attempt
+  //    with NO live code touches, so a token holder posting guesses without
+  //    a code (an existing account never gets one) can neither read nor spend
+  //    the address's budget in other restaurants.
+  //  - PER ADDRESS (B5), only while a code is LIVE: ≤ 5 per 10 min, ≤ 20 per
+  //    7 days, shared by every invite to the mailbox, so resend / revoke +
+  //    re-invite cannot reset real guessing. Each such burst costs the mailbox
+  //    an e-mail (a code had to be sent), as in the base.
+  // Already at a ceiling → answer 'locked' WITHOUT inserting more markers.
   const code = String(input.code ?? '').replace(/\D/g, '');
   const [stored] = await authDb
     .select({ token: verificationTokens.token, expires: verificationTokens.expires })
     .from(verificationTokens)
     .where(and(eq(verificationTokens.identifier, codeId(row.id)), gt(verificationTokens.expires, new Date(now))))
     .limit(1);
-  if (!stored) return { ok: false, reason: 'noCode' };
-
-  // Reserve the attempt first, then count (concurrent guesses can't overshoot).
-  // Keyed on the ADDRESS: resend / revoke + re-invite cannot reset it (B5).
   const addr = joinAddressKey(row.email);
-  await authDb.insert(verificationTokens).values([
-    { identifier: windowFailId(addr), token: randomUUID(), expires: new Date(now + JOIN_CODE_TTL_MS) },
-    { identifier: totalFailId(addr), token: randomUUID(), expires: new Date(now + JOIN_CODE_TOTAL_WINDOW_MS) },
-  ]);
-  const [inWindow, total] = await Promise.all([countLive(windowFailId(addr), now), countLive(totalFailId(addr), now)]);
-  if (inWindow > JOIN_CODE_MAX_ATTEMPTS || total > JOIN_CODE_MAX_TOTAL_ATTEMPTS) {
+  const ids = stored
+    ? [invWindowFailId(row.id), invTotalFailId(row.id), windowFailId(addr), totalFailId(addr)]
+    : [invWindowFailId(row.id), invTotalFailId(row.id)];
+  const caps = [JOIN_CODE_MAX_ATTEMPTS, JOIN_CODE_MAX_TOTAL_ATTEMPTS, JOIN_CODE_MAX_ATTEMPTS, JOIN_CODE_MAX_TOTAL_ATTEMPTS];
+  const killAndLock = async (): Promise<CompleteResult> => {
     // Too many guesses: the current code dies too, so a lucky late guess can't land.
     await authDb.delete(verificationTokens).where(eq(verificationTokens.identifier, codeId(row.id)));
     return { ok: false, reason: 'locked' };
+  };
+  // One transaction under the address's attempt lock: count, and reserve only
+  // when below every ceiling. Parallel guesses queue on the lock, so a burst on
+  // one live code adds at most the window cap to the address total (review r3).
+  const expiresOf = (id: string) =>
+    id === invWindowFailId(row.id) || id === windowFailId(addr)
+      ? new Date(now + JOIN_CODE_TTL_MS)
+      : id === invTotalFailId(row.id)
+        ? row.expiresAt
+        : new Date(now + JOIN_CODE_TOTAL_WINDOW_MS);
+  let atCeiling: boolean;
+  try {
+    atCeiling = await authDb.transaction(async (tx) => {
+      await lockAddress(tx, 'attempt', addr);
+      const counts = await Promise.all(ids.map((id) => countLive(id, now, tx)));
+      if (counts.some((c, i) => c >= caps[i]!)) return true;
+      await tx.insert(verificationTokens).values(ids.map((id) => ({ identifier: id, token: randomUUID(), expires: expiresOf(id) })));
+      return false;
+    });
+  } catch (err) {
+    if (!isLockTimeout(err)) throw err;
+    // Lock contention: refuse this attempt as 'locked' (nothing reserved, the
+    // live code is left alone, so a contention burst cannot kill it).
+    return { ok: false, reason: 'locked' };
   }
+  if (atCeiling) return killAndLock();
+
+  if (!stored) return { ok: false, reason: 'noCode' };
 
   const expected = Buffer.from(stored.token, 'hex');
   const given = Buffer.from(code.length === 6 ? codeDigest(row, code) : '00', 'hex');
@@ -340,10 +463,25 @@ export async function completeJoin(
   if (!created?.id) return { ok: false, reason: 'hasPassword' };
   await setUserPassword(created.id, input.password);
 
-  // The code is spent; the window markers go too. The 7-day address markers
-  // stay (an address that has joined no longer gets codes at all).
+  // The code is spent; the window markers and this invite's counters go too.
+  // The 7-day address markers stay (an address that has joined no longer gets
+  // codes at all, so they are never read for it again).
   await authDb
     .delete(verificationTokens)
-    .where(inArray(verificationTokens.identifier, [codeId(row.id), windowFailId(addr)]));
+    .where(
+      inArray(verificationTokens.identifier, [codeId(row.id), windowFailId(addr), invWindowFailId(row.id), invTotalFailId(row.id)]),
+    );
   return { ok: true, email };
+}
+
+/**
+ * What the PUBLIC /join page may learn from a completion attempt. "No live code"
+ * and "this address already has an account" both read as a wrong code, so a
+ * tenant owner who invites an address cannot tell whether it has a RestoMatch
+ * account (security review, /join existence oracle).
+ */
+export function publicCompleteReason(
+  reason: Extract<CompleteResult, { ok: false }>['reason'],
+): Exclude<Extract<CompleteResult, { ok: false }>['reason'], 'noCode' | 'hasPassword'> {
+  return reason === 'noCode' || reason === 'hasPassword' ? 'wrongCode' : reason;
 }

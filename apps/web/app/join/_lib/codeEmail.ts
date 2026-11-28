@@ -69,3 +69,50 @@ export async function deliverJoinCode(
   const { subject, html, text } = joinCodeEmail(input);
   await sendEmail({ to: input.to, subject, html, text });
 }
+
+/**
+ * For an invited address that ALREADY has a RestoMatch account: no code (a code
+ * never sets a password on an existing account, B5), just a link to sign in as
+ * usual and finish joining. The /join page shows the same "we sent you an
+ * e-mail" step either way, so the page is no account oracle (security review).
+ */
+export function joinSignInEmail(input: { url: string; restaurantName: string | null; locale: 'he' | 'en' }) {
+  const he = input.locale !== 'en';
+  const where = input.restaurantName ?? '';
+  const subject = he
+    ? `הוזמנתם להצטרף${where ? ` ל-${where}` : ' לצוות'} ב-RestoMatch`
+    : `You're invited to join${where ? ` ${where}` : ' the team'} on RestoMatch`;
+  const lead = he
+    ? 'לכתובת הזו כבר יש חשבון ב-RestoMatch. היכנסו כרגיל, וההצטרפות תושלם מיד:'
+    : 'This address already has a RestoMatch account. Sign in as usual to finish joining:';
+  const cta = he ? 'כניסה והצטרפות' : 'Sign in and join';
+  const tail = he ? 'לא ביקשתם? אפשר להתעלם מהמייל.' : "Didn't ask for it? You can ignore this e-mail.";
+  const dir = he ? 'rtl' : 'ltr';
+  const html = `<div dir="${dir}" style="font-family:Arial,sans-serif;font-size:16px;color:#1a1d21">
+<p>${esc(lead)}</p>
+<p><a href="${esc(input.url)}" style="display:inline-block;padding:12px 20px;background:#0b5cad;color:#ffffff;text-decoration:none;border-radius:8px">${esc(cta)}</a></p>
+<p style="color:#4a5058">${esc(tail)}</p></div>`;
+  const text = `${lead}\n\n${input.url}\n\n${tail}`;
+  return { subject, html, text };
+}
+
+/** Same runtime rule as deliverJoinCode: dev/lab print + JOIN_SIGNIN_FILE; production needs a provider. */
+export async function deliverJoinSignInLink(
+  input: { to: string; url: string; restaurantName: string | null; locale: 'he' | 'en' },
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  const production = env.NODE_ENV === 'production';
+  const configured = production && Boolean(env.RESEND_API_KEY) && isEmailConfigured();
+  if (!configured) {
+    if (production) throw new Error('join sign-in link: e-mail provider not configured');
+    console.log(`\n──────── JOIN SIGN-IN LINK ────────\nto: ${input.to}\nurl: ${input.url}\n───────────────────────────────────\n`);
+    const file = env.JOIN_SIGNIN_FILE ?? env.MAGIC_LINK_FILE?.replace('magic-link', 'join-signin');
+    if (file) {
+      const { writeFile } = await import('node:fs/promises');
+      await writeFile(file, JSON.stringify({ to: input.to, url: input.url, at: Date.now() }), 'utf8');
+    }
+    return;
+  }
+  const { subject, html, text } = joinSignInEmail(input);
+  await sendEmail({ to: input.to, subject, html, text });
+}
