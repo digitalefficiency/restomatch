@@ -154,20 +154,17 @@ export function LeakHero(p: LeakHeroProps) {
       {p.eyebrow ? <p className="mb-1 text-caption text-fg-tertiary">{p.eyebrow}</p> : null}
 
       {/* The ⓘ note anchors to this row, capped to its width so a phone never clips it. The label and
-          the period each keep one line; when both do not fit, the period moves under the label whole,
-          and the ⋯ menu stays at the end of the first line. */}
-      <div className="relative flex items-center gap-2.5">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2.5 gap-y-0.5">
-          {leaked ? <StatusDot tone="leak" /> : null}
-          <h2 id="leak-hero-label" className="whitespace-nowrap text-body font-medium text-fg">
-            {p.label}
-          </h2>
-          {p.period ? (
-            <span className="whitespace-nowrap text-body-sm text-fg-tertiary" data-testid="leak-hero-period">
-              {p.period}
-            </span>
-          ) : null}
-        </div>
+          the period each keep one line; when both do not fit, the period moves under the label whole. */}
+      <div className="relative flex flex-wrap items-center gap-x-2.5 gap-y-0.5">
+        {leaked ? <StatusDot tone="leak" /> : null}
+        <h2 id="leak-hero-label" className="whitespace-nowrap text-body font-medium text-fg">
+          {p.label}
+        </h2>
+        {p.period ? (
+          <span className="whitespace-nowrap text-body-sm text-fg-tertiary" data-testid="leak-hero-period">
+            {p.period}
+          </span>
+        ) : null}
         {p.calcNote ? <CalcNote note={p.calcNote} label={p.calcLabel} /> : null}
         {p.more && p.more.items.length > 0 ? <MoreMenu more={p.more} /> : null}
       </div>
