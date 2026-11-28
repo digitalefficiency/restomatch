@@ -1,0 +1,296 @@
+# INV · the invoices area
+
+**Status, 28.11.2026:** direction approved by the owner, every recommendation taken; implementation as separate
+work packages, one coding session and one draft pull request each. Nothing here ships without the owner's merge
+(`AGENTS.md`: pull requests only).
+
+## What this is
+
+The owner wrote that the invoices area is the most important part of the product for him, and that the main
+work there is the display and the approvals by role. A design proposal followed: four live mock-ups (the
+invoices list, the screen of one invoice, the approvals desk by role, the pay run), a switch above each that
+shows it as the owner, the manager and the bookkeeper see it, and a list of seven decisions with a
+recommendation beside each. The proposal was published in six versions, each after a round of independent
+review; Version 6 is in this folder.
+
+The owner's words on 28.11.2026:
+
+> קח את ההחלטות והמלצות ורוץ קדימה
+
+So: build the four screens, with every recommendation of the proposal as the decision.
+
+One thing arrives a step later than the owner was told. Deciding a gap from the invoice screen (decision 2) is
+its own package, `INV-05`, after approvals by role. The invoice screen itself comes in the first wave; until
+`INV-05` lands it keeps what it has today, one button that opens the approvals desk on that invoice. The reason
+is in the code: a decision on the invoice screen has to be the desk's own decision, mounted and not copied, and
+the desk becomes something a second screen can mount only in the approvals package (`WORKPLAN.md`, `INV-04`,
+slice 1).
+
+## What is in this folder
+
+| Path | What it is |
+| --- | --- |
+| `SPEC.md` | The design spec of the four screens: what every screen shares (the words, the status language, money, dates, keys, the decision), then each screen with its layout by width, its states, its exact Hebrew strings, and for each element whether it exists on `main`, which package builds it and from which server field. Binding for every package. |
+| `WORKPLAN.md` | The work packages `INV-00` … `INV-06`: goal, write boundary, seams, upstream, slices, acceptance, and the rules of the partition. Binding for every package. |
+| `KNOWN-ISSUES.md` | Where the mock-ups are looser than the product's rules or than the code allows. Read it before copying behaviour or wording from the reference. |
+| `OPEN-PRS.md` | The open pull requests whose files fall inside each package's boundary, as of 28.11.2026. |
+| `CHANGES.md` | Corrections to this folder made after the sessions started, newest first. It is created with the first correction. |
+| `packages.json` | The partition in a form a script reads: for each package what it owns, what it creates, its seams; the files given to nobody; the immutability list. Generated from `main@9dd26ef9`. |
+| `check-partition.cjs` | Checks `packages.json` against a checkout: no file owned twice, no immutable file inside a boundary or a seam. Writes nothing. |
+| `reference/reference.html` | The proposal page, Version 6, with the four mock-ups live, in one standalone page. **The visual and behavioural source of truth.** |
+| `reference/src/` | The sources of that page: `body.html` (the page), `inv-core.js` (the words and the store all four share), `inv-register.js`, `inv-invoice.js`, `inv-doc.js`, `inv-desk.js`, `inv-payrun.js`, `inv-page.js`, `inv.css`, `inv-doc.css`, `inv-r15.css`, `product.css` (the clean finish), `base.js`, `sprite.html`, `data.json` (the demo restaurant on 25.10.2026). |
+| `reference/PAGE-TEXT.he.md` | The Hebrew text of the proposal page as the owner read it: what changes on each screen and why, what is needed to build it, and the seven decisions. Its "היום" statements describe `main` as it was when the proposal was drawn; see the note at its top. |
+| `reference/checks/` | Eight scripts that drive the reference in a headless browser (`check.cjs`, `verify10.cjs` … `verify17.cjs`), with `launch.cjs` and a `README.md` that lists what each checks. They are executable descriptions of expected behaviour. |
+
+The look of everything here is the clean finish: `docs/ux/ds3/SPEC.md` stays binding in full.
+
+## Decisions: what is settled and what is not
+
+All seven were approved on 28.11.2026 with the page's recommendation.
+
+| # | Question on the proposal page | Status | What the packages do |
+| --- | --- | --- | --- |
+| 1 | Build the four screens? | **Approved.** | `INV-01` the invoice screen, `INV-02` the list, `INV-03` the pay run, `INV-04` approvals by role; `INV-00` the server reads and the shared words. |
+| 2 | Decide a gap from the invoice screen too? | **Approved:** the same actions and the same undo as the approvals desk. | `INV-04` (slice 1) makes the desk's one-gap decision something a second screen mounts; `INV-05` mounts it. Same procedure, same input, nothing implemented twice. |
+| 3 | May the owner decide a gap that waits for the manager? | **Approved:** keep it. | Nothing on the server: it already allows it and already records both roles. `INV-04` and `INV-05` say it on the screen ("גם אתם רשאים להחליט", "החלטתם במקום הניהול"); `INV-00` says it in the history. |
+| 4 | Names or roles in the history? | **Roles.** | `INV-00`'s history read returns roles and no name or user id; `INV-04` prints the role in the desk's history and in "כבר הוחלט". **Names need a human change** (row security). |
+| 5 | Hide "שולמו", and fix "ללא מספר הקצאה"? | **Approved.** | `INV-02`: "שולמו" appears only when the month has a paid invoice. `INV-00` and `INV-02`: "חסר מספר הקצאה" counts only invoices that must carry a number, by the pay run's own rule. A recorded payment **needs a human change** (the data structure). |
+| 6 | Does a warning at the manager keep holding the whole invoice? | **As today:** any open gap holds the invoice out of the pay run. | No change on the server. `INV-03` says it in words. |
+| 7 | Mark the gap's line on the supplier's document? | **In two steps.** Step one is in this batch; step two is **not**. | `INV-01`: the document beside the data, and the line "חפשו במסמך: {item}, מק״ט {sku}". Stored positions and a drawn mark on real documents are step two and are built by nobody here; they **need a human** (the reading service, its keys). |
+| small | After how many days is a gap old? | **No colour for an old gap.** | The oldest is sorted first and its days are written. Nobody adds a colour. |
+| small | The base of the percentage in the rules | **Unchanged**, and stated on the settings screen. | `INV-04` states the base in the card "מי מחליט על מה". The sentence on the settings screen itself is a request to DS3-06 (pull request 353), whose folder it is. A change of the base **needs a human change** (the approvals engine). |
+| kept | Three things two reviewers questioned | **Kept.** | The button "בקשת זיכוי · ₪amount"; the solid pill "חוסם תשלום"; the tinted row of the gap's line. |
+
+Where the owner has not spoken and a screen needs an answer, `SPEC.md` §8 gives the default each package
+builds and names in its pull request.
+
+**Needs a human change.** No package improvises any of these; each is a file of the immutability list, the
+data structure, a credential, or a branch that is not an `INV` session's. A package that meets one writes the
+need into its pull request and leaves that slice.
+
+- Names in the history (row security: `packages/db/drizzle/rls/0002_core_tenant_rls.sql`,
+  `packages/db/src/rls.ts`).
+- A recorded payment, "סמנו כשולם", and a "שולמו" place that means something in a real restaurant (payment
+  columns on invoices; pull requests 241 and 252). `payRun.markPaid` answers NOT_IMPLEMENTED today.
+- Linking a consolidated invoice to its delivery notes (the same pull request 241).
+- Days waiting that survive a re-match: a re-match replaces the gap rows, and nothing stores when a gap was
+  first seen.
+- The reminder "שלחו תזכורת" (`packages/api/src/notifications/outbox.ts`; `payRun.remind` answers
+  NOT_IMPLEMENTED).
+- Any change to a routing rule, to who decides what, or to the base of the percentage
+  (`packages/api/src/approvals/engine.ts`).
+- Step two of decision 7: line positions from the reading service (`packages/ocr`, another agent's), and a
+  check against a real reading, which needs keys only a person enters.
+- For the optional `INV-06`: reading the licence of the PDF library, and checking that it loads a file from the
+  real storage.
+- Taking current `main` into `claude/ds3-01-components` and into `claude/ds3-04-approvals-desk`: their own
+  sessions or the lead (`WORKPLAN.md`).
+
+**Never decided by the owner, so not built:** passing a gap on with one press and no note (the product's sheet
+stays); moving the invoice page under "חשבוניות" in the menu; removing from the list the month links, the
+export, the column menus, "להשלמת שורות" or "נכנסות"; removing from the pay run the month filter, the due
+sections, the selection or the branch strip; removing the bulk actions from the desk; "אתמול" and "השבוע" beside
+"הוחלט היום"; a filter of the queue by routing; a bulk or one-tap decision on the invoice screen; the owner's
+approval of a payment above an amount; a colour for an old gap; a stored divider width; a new feature flag for
+the list, the pay run or approvals by role.
+
+**In the mock-ups only:** the role switch "להציג כמו", the switch "המסמך", the note about the demo day, the
+notice that the pay run is off in the pilot, the drawn supplier documents and their invented suppliers.
+
+## Rules every package keeps
+
+`AGENTS.md` is binding in full: pull requests only; the immutability list; the ownership map; a retry cap of
+two; an artifact for every run. On top of it, for this batch:
+
+- **The immutability list is never inside a write boundary and never a seam.** The matching engine,
+  `packages/api/src/approvals/engine.ts`, the database schema and migrations, row security, the leads router,
+  the tRPC route handler, billing, the outbox and the scheduled jobs, `.github/workflows/*`, `.claude/agents/*`,
+  `AGENTS.md`, `OPERATING.md`. `packages.json` holds the list as paths.
+- **No schema change and no migration.** "מידע חדש מהשרת" means new read fields and read procedures on the
+  routers that exist, all of them in `INV-00`, which brings the tenant-security gate. No package changes a
+  decision procedure, who may decide what, or the undo window.
+- **One decision.** A gap decided from the invoice screen calls the same procedure with the same input as the
+  approvals desk. Who may decide what is the server's answer (`canAct` on the queue row); no screen works it
+  out again.
+- **Facts and words come from `INV-00`.** A screen does not compute who holds an invoice, since when, why,
+  whether it can be paid or which place it is in, and writes no role word or rule phrase of its own.
+- **No real OCR, e-mail, WhatsApp, storage provider or other credentialed service; no production database; no
+  secrets.**
+- **Two packages never own the same file.** A file two packages need has one owner and a written seam
+  (`WORKPLAN.md`).
+- **Nothing of step two** of decision 7: no stored position, no mark, no link between a row and a place on the
+  document.
+
+The owner's rules that the proposal was reviewed against, stated once:
+
+- **Light product only.** Calm and precise: a command centre for money, never alarming. Every text and
+  background pair passes WCAG AA (4.5:1); the reference holds 5:1.
+- **Emphasis tiers T1 to T4 keep their meaning** (`AGENTS.md`, "Design vocabulary").
+- **A money figure is never red.** Ink, muted, green or the brand colour only.
+- **Pending is never a warning.** Waiting to be linked, being read, waiting for the count and consolidated
+  invoices are neutral grey.
+- **Green is only for money that came back.** A fresh credit request is neutral.
+- **Colour only when money waits for a person:** red for what blocks a payment, amber for a warning that
+  waits, grey otherwise. A status is a dot or an icon and a word, never colour alone. No colour for an old gap.
+- **Words.** The word for a discrepancy is **"פער"**; the term is **"בקשת זיכוי"**. Never: נחסם, נחסך, הפסד,
+  חיסכון, חריגה, ריכוז, הפרש, ממצא, דרישה, תביעה, יעד, "1.5%". A bare "אישור" or "אשרו" never appears on a gap:
+  a button says its effect ("בקשת זיכוי · ₪X", "שלמו כפי שחויב"). The roles are **בעלים, ניהול, הנהלת
+  חשבונות**. Spell "הכול".
+- **Lengths.** A button: at most 4 words, a plural imperative ("שלמו כפי שחויב") or the name of what it creates
+  or opens ("בקשת זיכוי", "להחלטה"); never a singular imperative. A visible line: one sentence, at most 12
+  words. A toast: at most 8 words. Gender-neutral Hebrew, plural address.
+- **Money.** ₪ sits left of the digits; every ₪ goes through `formatIls()` or the shared money component;
+  **every amount states its VAT basis** ("לפני מע״מ", "כולל מע״מ") beside it or in its column head; numbers
+  are physically right-aligned in columns. Unknown is never ₪0; no "—" in a money cell.
+- **Dates** `dd.MM.yyyy`; date and time `dd.MM.yyyy · HH:mm`.
+- **Undo** is visible for 10 s; the server allows 15 s (`REOPEN_WINDOW_MS`) so that a press at the last moment
+  still lands; the screen never asks after 12 s. Change none of the three.
+- **Roles, not names,** wherever a person's act is shown.
+- **Show only what exists.** Never show as existing: a recorded payment, approval of a whole invoice, a second
+  approver, a named assignee, comments, attachments other than the scan, a "seen" flag, an editable due date,
+  an export history, reminders, delegation.
+- **One filled primary button per viewport, and never a paying action.** Touch targets at least 44 px on a
+  phone; desk text at least 12 px; type sizes 12, 13, 14, 16, 18, 20, 24, 28; radii 8 (control), 12 (card), 16
+  (overlay). No decoration that carries no information.
+- **Density.** The bookkeeper gets dense rows by default at a desk. On a phone the density is fixed.
+- **Widths.** Every screen works at 1440, 1280 and 1024 px and on a 390 px phone.
+- **Keyboard.** `[` and `]` step to the previous and the next invoice. Keys are read by the physical key, never
+  fire while typing, and the single-character ones follow the personal switch. Focus is always visible.
+  Reduced motion is respected.
+- **Receivers never see ₪; chefs see ₪ only where they do today.** Neither enters this area.
+- **No colour, size, radius, shadow, duration or easing is hard-coded outside the tokens.**
+- **Messages.** Hebrew and English in the same commit. The areas `invoices`, `approvals` and `payRun` have no
+  receiver-language overlays, so a new key there needs those two languages only; a new key in `nav`,
+  `components` or the listed parts of `common` would need all four overlay languages, and this batch adds none
+  there. No new message area.
+
+## How a package works
+
+1. **Read first:** `AGENTS.md`, `STATE.md`, this file, `SPEC.md`, your section of `WORKPLAN.md` and its "Rules
+   of the partition", `KNOWN-ISSUES.md`, `OPEN-PRS.md`, then `docs/ux/ds3/SPEC.md` for the look. Open
+   `reference/reference.html` at 1440 px and at 390 px and use the mock-up of your screen, as each of the three
+   roles. Read the mock-up's source for the exact words and behaviour.
+2. **Map before you change.** The proposal was drawn against `main` at `9dc0b934`, and the code maps behind
+   this folder were read at `83bda7d7`; `main` was at `9dd26ef9` when the folder was written and keeps moving.
+   Start from current `main`. List what exists on your screen, what differs and what is missing, and build only
+   the difference. Reuse and extend the shared components; do not create a parallel set. Keep every test id
+   that another spec reads.
+3. **Stay inside your write boundary** (`WORKPLAN.md`, `packages.json`). The only edits allowed outside it are
+   the seams your section names, each one small and named in your pull request. A router has one writer in
+   this batch, `INV-00`: a screen that needs one more field asks for it under "Requests to other packages".
+   Something missing from the shared components is built inside your boundary and listed under "Promote to
+   shared". Never push to a branch that is not yours.
+4. **Check the open pull requests** that touch your boundary before you start and before you finish
+   (`OPEN-PRS.md` is the state of 28.11.2026). Where one overlaps, say so in your pull request and keep your
+   change easy to rebase.
+5. **Verify like a user.** Run the local demo stack and look at your screen as each role that can reach it
+   (owner, manager, bookkeeper; and confirm that the receiver and the chef are kept out), at 1440 px and at
+   390 px, and at 1280 and 1024 where `SPEC.md` gives a rule for them, in Hebrew and in one more language.
+   Compare with the reference side by side.
+   - `bash docs/ux/wave2/lab.sh INV-0N` (from the repository root; its head lists the flags, and it takes any
+     id of letters, digits and hyphens) reseeds the demo restaurant "כפר הזיתים" at the demo day 25.10.2026
+     with every feature on and serves a production build. It is local only. The demo accounts are `owner@`,
+     `manager@`, `bookkeeper@`, `chef@` and `receiver@kfar-hazeitim.test`.
+   - **A number of days needs both clocks pinned.** The seed dates everything from the day of the run, so "10
+     ימים" exists only at the demo day with the server's clock and the browser's clock pinned too. Every
+     function that words a wait takes "now" as an argument and has a unit test.
+   - No real reading service, e-mail, WhatsApp or storage provider, no production database, no secret.
+6. **Keep the gates green** (`AGENTS.md`, "Test / CI facts"; the workflow `.github/workflows/ci.yml` is the
+   truth: it blocks on the test job, the worker tests, the web lint, build and type check, the worker image
+   and the dependency audit; the e2e job reports and does not block).
+   - Server: `pnpm --filter @restomatch/db migrate`, then `pnpm turbo run test --concurrency=1`. A new tRPC
+     procedure needs its line in a coverage fragment and its attack test in the same commit.
+   - Web: `pnpm --filter @restomatch/web lint`, `typecheck`, `test`, `guards` and `build`. The copy guard and
+     the he/en parity test run in the web unit suite; meet them, never loosen them.
+   - e2e: one spec per package, `apps/web/e2e/INV-0N.spec.ts`, with its own axe run (no serious or critical
+     finding). In a spec that is not yours, change only the assertions that read your screen, and name each in
+     the pull request with why it keeps its meaning. Shared helpers, seeds, configs, `a11y.spec.ts` and
+     `smoke.spec.ts` are read-only.
+   - The gates on a pull request: `test-sentinel` always; `tenant-security-warden` on `INV-00`, `INV-05` and
+     `INV-06`; `money-format-marshal` wherever ₪ is rendered; `rtl-design-steward` for the look; `icp-keeper`
+     for scope.
+   - If a gate fails after your pull request is open you get at most two fix attempts; on the third failure
+     stop and write what failed. A red run that matches a known flaky gate is re-run, not "fixed".
+7. **Open one draft pull request and stop.** Title `ux(INV-NN): …`. Commits prefixed `ux(INV-NN):`,
+   `test(INV-NN):`, `fix(INV-NN):`, `docs(INV-NN):`. When the pull request is stacked, its first line states
+   the merge order. Body sections: What · Why · Write boundary (the boundary, then every seam, one file and
+   one reason each) · Evidence (before and after screenshots at both widths, per role, from a production build
+   at the demo day; files under `apps/web/e2e/__screenshots__/INV-0N/`) · Tests (gate, result and the commit
+   it ran on) · Owner decisions touched · Requests to other packages · Promote to shared · Not done. The body
+   says in words: "no file of the immutability list changed". Then a short report to the owner in plain,
+   gender-neutral Hebrew: what was built, the link, what is still open, what needs his decision.
+
+### Upstream and bases
+
+The clean finish is not on `main` yet: DS3-00 (tokens, pull request 346) ← DS3-01 (shared components, 345) ←
+DS3-04 (the approvals desk, 347, finished at `be22850e`). A screen package needs it, so it is stacked.
+
+| Package | What | Wave | Merges in first | Pull request base | Branch |
+| --- | --- | --- | --- | --- | --- |
+| `INV-00` | The server reads, and the words every screen shares | 1 | nothing | `main` | `claude/inv-00-server-reads` |
+| `INV-01` | The invoice screen (reads only) | 1 | `claude/ds3-01-components`, `claude/inv-00-server-reads` | `claude/ds3-01-components` | `claude/inv-01-invoice-screen` |
+| `INV-02` | The invoices list | 2 | the same two | `claude/ds3-01-components` | `claude/inv-02-invoices-list` |
+| `INV-03` | The pay run | 2 | the same two | `claude/ds3-01-components` | `claude/inv-03-pay-run` |
+| `INV-04` | Approvals by role, and the decision a second screen can mount | 2 | `claude/ds3-04-approvals-desk`, `claude/inv-00-server-reads` | `claude/ds3-04-approvals-desk` | `claude/inv-04-approvals-by-role` |
+| `INV-05` | Deciding from the invoice screen | 3 | `claude/inv-04-approvals-by-role`, `claude/inv-01-invoice-screen` | `claude/inv-04-approvals-by-role` | `claude/inv-05-decide-on-invoice` |
+| `INV-06` | Optional, not opened unless the owner asks: a PDF in the same viewer | 3 | `claude/inv-01-invoice-screen` | `claude/inv-01-invoice-screen` | `claude/inv-06-pdf-viewer` |
+
+- Every session starts from current `main` with its own branch, then `git fetch origin <branch>` and merges
+  its upstream branches itself. The pull request's base is the upstream branch it merged in (a stacked pull
+  request, as the DS3 batch did). No `INV` session pushes to a DS3 branch.
+- `INV-00` pushes its contract first (the types and shapes of the new reads, and the empty message sub-files),
+  so that the screens compile against its branch within hours. Merge it again before you finish and look at
+  your screen with the real values.
+- `INV-05` opens when slice 1 of `INV-04` is pushed and `INV-01`'s branch has the gap card and
+  `gap-actions.tsx`.
+- The order in which a person merges: 346, 345, `INV-00` (at any time; it depends on nothing in DS3), then
+  `INV-01`, `INV-02` and `INV-03` in any order, then 347, `INV-04`, `INV-05`.
+- What breaks if a screen package starts without the clean finish: it does not compile once it imports the
+  DS3 components or the preferences store, and where it compiles it draws the old finish, so its screenshots
+  and its copy, density and accessibility measurements would have to be redone.
+
+### Where this folder lives until it is merged
+
+Branch `claude/admiring-faraday-3oxulo` (a docs-only draft pull request). From a checkout of `main`:
+
+```bash
+git fetch origin claude/admiring-faraday-3oxulo
+```
+
+```bash
+git worktree add ../inv-handoff origin/claude/admiring-faraday-3oxulo
+```
+
+Then read `../inv-handoff/docs/ux/inv/` (and `../inv-handoff/docs/ux/ds3/` for the look). Do not copy the
+folder into your own branch. The branch moves when the handoff is corrected; to refresh:
+
+```bash
+git -C ../inv-handoff fetch origin claude/admiring-faraday-3oxulo && git -C ../inv-handoff checkout --detach origin/claude/admiring-faraday-3oxulo
+```
+
+`CHANGES.md` in this folder lists every correction made after the sessions started, newest first.
+
+### Using the reference and its checks
+
+Open `../inv-handoff/docs/ux/inv/reference/reference.html` in a browser. The page's anchors are `#register`,
+`#invoice`, `#approvals` and `#payrun`; the switch "להציג כמו" above each mock-up changes all four together.
+On the invoice screen set the switch "המסמך" to "בלי סימון" or "בלי קובץ": "עם סימון" is step two and is not
+built. The mock-ups show the demo day, 25.10.2026.
+
+```bash
+cd ../inv-handoff/docs/ux/inv/reference/checks && node check.cjs 1440
+```
+
+That drives the four mock-ups end to end in a headless browser and reports what passed. `check.cjs`,
+`verify10.cjs` and `verify11.cjs` also take `390`; `reference/checks/README.md` lists what each script checks
+and its result on Version 6. The scripts need Playwright with a Chromium it can launch, and write their working
+copies to an `out` folder beside them, which the repository ignores. They test the **mock-ups**, not the
+product: read them for the behaviour that is expected, and remember that a passing check does not override
+`KNOWN-ISSUES.md`. The reference loads its typefaces from Google Fonts; without network access it falls back to
+a system font and widths shift a little.
+
+To check that the partition still holds on your checkout:
+
+```bash
+node ../inv-handoff/docs/ux/inv/check-partition.cjs "$PWD"
+```
