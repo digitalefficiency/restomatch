@@ -136,8 +136,10 @@ export function TrackerClient({
   const inView = (c: Claim) => {
     const s = statusOf(c);
     if (view === 'closed') return CLOSED.includes(s);
-    if (view === 'send') return s === 'claimed';
-    return !CLOSED.includes(s) && s !== 'claimed';
+    // A claim the invoice cap left at ₪0 has nothing to send (R5-4): it is listed under tracking,
+    // never under "to send" — the same predicate as the page's tab counts.
+    if (view === 'send') return s === 'claimed' && !isCappedAway(c);
+    return !CLOSED.includes(s) && (s !== 'claimed' || isCappedAway(c));
   };
   const shown = claims.filter(inView);
 
@@ -256,7 +258,8 @@ export function TrackerClient({
       else next.add(id);
       return next;
     });
-  const selectedIds = [...selected].filter((id) => byId.has(id) && !isPending(id));
+  // A capped-away claim is never batch-moved (e.g. to letter_sent with no letter carrying it).
+  const selectedIds = [...selected].filter((id) => byId.has(id) && !isPending(id) && !isCappedAway(byId.get(id)!));
   // The server's next[] per claim (no client mirror of the transition table).
   const selectedMoves = batchMoves(selectedIds.map((id) => byId.get(id)!.next)) as Move[];
 
@@ -470,8 +473,8 @@ export function TrackerClient({
                         <input
                           type="checkbox"
                           className="mt-1 h-4 w-4 accent-primary"
-                          checked={selected.has(c.id) && !isPending(c.id)}
-                          disabled={isPending(c.id)}
+                          checked={selected.has(c.id) && !isPending(c.id) && !isCappedAway(c)}
+                          disabled={isPending(c.id) || isCappedAway(c)}
                           onChange={() => toggle(c.id)}
                           aria-label={t('batch.select', { invoice: c.invoiceNumber ?? '—', item: itemOf(c) })}
                         />
@@ -531,8 +534,8 @@ export function TrackerClient({
                               <input
                                 type="checkbox"
                                 className="h-5 w-5 accent-primary"
-                                checked={selected.has(c.id) && !isPending(c.id)}
-                                disabled={isPending(c.id)}
+                                checked={selected.has(c.id) && !isPending(c.id) && !isCappedAway(c)}
+                                disabled={isPending(c.id) || isCappedAway(c)}
                                 onChange={() => toggle(c.id)}
                                 aria-label={t('batch.select', { invoice: c.invoiceNumber ?? '—', item: itemOf(c) })}
                               />

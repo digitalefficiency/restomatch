@@ -17,6 +17,7 @@ import { __resetAskBurst } from '../ask/budget';
 import { OVERDUE_BOUNDARY_NOW } from '../lib/claims';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
+import { coverClaim } from './au03-helpers';
 
 /**
  * AU-06 golden set: Hebrew owner questions answered OFFLINE (no key, fixed
@@ -59,9 +60,12 @@ beforeAll(async () => {
     });
     await db
       .update(invoices)
-      // totalInclVat = excl + VAT, so the invoice covers its claim (the tracker reads the claim's capped share).
+      // totalInclVat = excl + VAT (₪14,160): it covers A's ₪120 claim (the tracker reads a claim's capped share).
       .set({ invoiceDate: new Date('2026-10-20T08:00:00Z'), totalExclVat: '12000.00', vatAmount: '2160.00', totalInclVat: '14160.00', allocationNumber: null, status: 'matched' })
       .where(eq(invoices.id, t.invoiceId));
+    // B's ₪90,000 claim needs a covering invoice too, or the cross-tenant '90000' sentinel below
+    // would pass for the wrong reason (the cap, not tenant isolation).
+    if (t === B) await coverClaim(db, t.invoiceId, agorot);
   }
 });
 beforeEach(() => {

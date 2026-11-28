@@ -344,6 +344,12 @@ export const approvalsRouter = router({
         ...(r.poId ? r : { ...r, qtyOrdered: null, orderedUnit: null, poRef: null, poDate: null }),
         claimable: claimable(r),
         claimAgorot: claimable(r) ? Math.round((claims.amounts.get(r.id)?.amount ?? 0) * 100) : 0,
+        /**
+         * The row already holds a live claim (reopened): no ₪ to decide, but it keeps its type's
+         * real verbs (a duplicate stays "don't pay this copy") — never mapped onto "mark as reviewed",
+         * which would waive it (a rejected duplicate leaves the hold and the leak). Round 7, item 4.
+         */
+        claimed: claims.claimed.has(r.id),
         canAct: canActOn(ctx.session.role, r.requiredRole),
         /** Who decides it: its routed role, or 'unrouted' (owner / manager). */
         waitingOn: (r.requiredRole ?? 'unrouted') as AwaitingRouting,

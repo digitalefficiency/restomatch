@@ -80,7 +80,8 @@ export default async function RecoveryPage({
   const tabCount = {
     // An open claim the invoice cap left at ₪0 has nothing to send (R5-4).
     send: claims.filter((c) => c.status === 'claimed' && !isCappedAway(c)).length,
-    track: claims.filter((c) => !['claimed', 'recovered', 'written_off'].includes(c.status)).length,
+    // The same predicates as the tracker's lists (tracker-client inView): a capped-away claim is tracked.
+    track: claims.filter((c) => !['recovered', 'written_off'].includes(c.status) && (c.status !== 'claimed' || isCappedAway(c))).length,
   };
   // No tab asked: "מעקב" — unless nothing is out with suppliers yet and requests wait to be sent,
   // then "לשליחה" (never land the owner on an empty list while there is something to do).

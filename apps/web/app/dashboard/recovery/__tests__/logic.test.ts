@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CLAIM_ANSWER_DAYS, isAwaitingChase, OVERDUE_BOUNDARY_CASES, OVERDUE_BOUNDARY_NOW } from '@restomatch/api';
+import { CAPPED_AWAY_CASES, CLAIM_ANSWER_DAYS, isAwaitingChase, isCappedAwayApi, OVERDUE_BOUNDARY_CASES, OVERDUE_BOUNDARY_NOW } from '@restomatch/api';
 import {
   ANSWER_DAYS,
   CONFIRMED_MOVES,
@@ -9,6 +9,7 @@ import {
   countdownOf,
   followUps,
   isAwaitingChaseWeb,
+  isCappedAway,
   funnelOf,
   hamiltonShekels,
   menuMoves,
@@ -185,6 +186,11 @@ describe('closing confirms name the right ₪', () => {
     expect(confirmAgorot(claims, 'recovered')).toBe(18132);
     expect(confirmAgorot(claims, 'written_off')).toBe(1000);
   });
+
+  it('G-14 Q3 round 7: a write-off of a claim with nothing back names the stored ₪ the desk will book (even when capped away to ₪0 owed)', () => {
+    expect(confirmAgorot([{ creditedAgorot: 0, outstandingAgorot: 0, amountAgorot: 800 }], 'written_off')).toBe(800);
+    expect(confirmAgorot([{ creditedAgorot: 200, outstandingAgorot: 0, amountAgorot: 800 }], 'written_off')).toBe(0);
+  });
 });
 
 describe('phone cards grouped by supplier', () => {
@@ -284,5 +290,12 @@ describe('AU-03 · isAwaitingChaseWeb ≡ @restomatch/api isAwaitingChase (one p
     for (const k of OVERDUE_BOUNDARY_CASES) {
       expect(isAwaitingChaseWeb({ status: 'letter_sent', outstandingAgorot: 1, letterSentAt: k.letterSentAt, claimedAt: k.letterSentAt }, OVERDUE_BOUNDARY_NOW), k.why).toBe(k.overdue);
     }
+  });
+});
+
+describe('isCappedAway — the web and api twins agree (G-14 Q3 round 7)', () => {
+  it.each(CAPPED_AWAY_CASES)('$why → $cappedAway', ({ claim, cappedAway }) => {
+    expect(isCappedAway(claim)).toBe(cappedAway);
+    expect(isCappedAwayApi(claim)).toBe(cappedAway);
   });
 });

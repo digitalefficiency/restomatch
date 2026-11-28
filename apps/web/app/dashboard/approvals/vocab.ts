@@ -134,10 +134,12 @@ export type DecisionAction =
  *  • DUPLICATE_INVOICE: "אל תשלם את העותק" / "שלם · זו לא כפולה";
  *  • everything else: "בקשת זיכוי · ₪X" / "שלמו כפי שחויב".
  */
-export function decisionActions(type: string, claimable = true): DecisionAction[] {
+export function decisionActions(type: string, claimable = true, claimed = false): DecisionAction[] {
   if (type === 'UNORDERED_ARRIVAL') return [{ kind: 'link', label: 'decision.link' }];
   // No ₪ to claim (info severity, ₪0, PRICE_LOWER — packages/api isClaimableRow): a check, never "בקשת זיכוי · ₪X".
-  if (type === 'PRICE_LOWER' || type === 'MISSING_ON_INVOICE' || !claimable) {
+  // A row that already holds a live claim (`claimed`, reopened) is not "no ₪": it keeps its type's
+  // real verbs at ₪0 below — "mark as reviewed" would waive it (G-14 Q3 round 7, item 4).
+  if (type === 'PRICE_LOWER' || type === 'MISSING_ON_INVOICE' || (!claimable && !claimed)) {
     return [{ kind: 'review', procedure: 'reject', label: 'decision.reviewed', done: 'decision.reviewedDone' }];
   }
   if (type === 'DUPLICATE_INVOICE') {
@@ -148,7 +150,7 @@ export function decisionActions(type: string, claimable = true): DecisionAction[
     ];
   }
   return [
-    { kind: 'approve', procedure: 'approve', label: 'decision.approve', done: 'decision.approved', withAmount: true },
+    { kind: 'approve', procedure: 'approve', label: 'decision.approve', done: 'decision.approved', withAmount: !claimed },
     { kind: 'reject', procedure: 'reject', label: 'decision.reject', done: 'decision.rejected' },
   ];
 }

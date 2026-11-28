@@ -12,6 +12,7 @@ import {
 } from '@restomatch/db';
 import { TOLERATED_SQL } from '@restomatch/charts';
 import { claimBasis } from './owed';
+import { isCappedAway } from './cappedAway';
 import { assertSupplierOwned } from '../tenant';
 import { appError } from '../errors';
 import { HELD_FOR_RECEIPTS_KEY } from '@restomatch/charts';
@@ -460,8 +461,9 @@ export interface RecoveryClaimRow {
   creditedAgorot: number;
   outstandingAgorot: number;
   /**
-   * What the claim stands for on the one basis (G-14 Q3 R5-3): its capped share of the invoice from
-   * the leak ledger's allocator (≤ amountAgorot), or the stored amount for a claim outside the ledger.
+   * What the claim stands for on the one basis (G-14 Q3 R5-3): max(its capped share of the invoice
+   * from the leak ledger's allocator, what was already credited) — credit received is never capped
+   * away — or the stored amount for a claim outside the ledger.
    * The desk's "claimed", write-offs and recovery rate read it, so its funnel adds up with outstanding.
    * Optional for hand-built rows (absent = amountAgorot); listClaims always sets it.
    */
@@ -650,14 +652,7 @@ const ALL_STATUSES: RecoveryStatus[] = [
   'written_off',
 ];
 
-/**
- * G-14 Q3 R5-4 · an open claim the invoice cap leaves at ₪0 (capped share below the stored amount,
- * nothing owed): not counted as "to send" (byStatus.claimed), never auto-written off. Twin of
- * apps/web recovery/logic isCappedAway.
- */
-export function isCappedAway(c: Pick<RecoveryClaimRow, 'status' | 'outstandingAgorot' | 'amountAgorot' | 'cappedAgorot'>): boolean {
-  return (OPEN_STATUSES as readonly string[]).includes(c.status) && c.outstandingAgorot <= 0 && (c.cappedAgorot ?? c.amountAgorot) < c.amountAgorot;
-}
+export { isCappedAway, CAPPED_AWAY_CASES } from './cappedAway';
 
 /** Totals, ageing and per-supplier recovery rate — all integer agorot, summed from listClaims. */
 export function summarize(claims: ReadonlyArray<RecoveryClaimRow>): RecoverySummary {

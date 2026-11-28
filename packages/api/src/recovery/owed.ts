@@ -25,7 +25,8 @@ export async function owedAgorot(db: Database, restaurantId: string, rows: reado
 
 /**
  * Both figures of each claim on the one basis (R5-3): `cappedAgorot` = what the claim stands for —
- * its capped share of the invoice (a live claim), else its stored amount — and `owedAgorot` = what
+ * its capped share of the invoice, or what was already credited if that is more (a live claim),
+ * else its stored amount — and `owedAgorot` = what
  * is still owed on it (capped share less credited; see owedAgorot). `amount_agorot` is read when
  * present (the stored claim), else outstanding + credited.
  */
@@ -39,7 +40,11 @@ export async function claimBasis(
   return rows.map((r) => {
     const led = allocation.get(String(r.discrepancy_id));
     const credited = Number(r.credited_agorot ?? 0);
-    if (led?.liveClaim) return { cappedAgorot: led.cappedAgorot, owedAgorot: Math.max(0, led.cappedAgorot - credited) };
+    // Credit already received can never be capped away (round 7, item 2): the claim stands for at
+    // least what came back, so claimed = outstanding + credited + written off on every claim.
+    if (led?.liveClaim) {
+      return { cappedAgorot: Math.max(led.cappedAgorot, credited), owedAgorot: Math.max(0, led.cappedAgorot - credited) };
+    }
     const stored = r.amount_agorot != null ? Number(r.amount_agorot) : Number(r.outstanding ?? 0) + credited;
     return { cappedAgorot: stored, owedAgorot: Number(r.outstanding ?? 0) };
   });
