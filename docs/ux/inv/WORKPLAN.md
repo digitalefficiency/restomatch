@@ -988,16 +988,23 @@ The viewer's evidence comes from one of the three, and the pull request says whi
     retired word and becomes "חשבונית מרכזת", both languages (`KNOWN-ISSUES.md`, the invoice screen).
 13. The spec, the changed tests of `W2-02`, axe on the page and on the dialog, the evidence.
 
-**Defaults until the owner says otherwise** (`SPEC.md` §8). One card per gap when an invoice has several. The
+**Defaults until the owner says otherwise** (`SPEC.md` §8). One card per gap when an invoice has several;
+the phone's dock, the foot of the whole-screen dialog, the pinned bar and the line "חפשו במסמך" speak for one
+gap at a time, the screen's current gap (point 11). The
 screen is one column when the window is narrower than 1024 px, the window's width and not the content's (point
 20). The payment block is shown where the pay run is switched off too; it states the invoice's own state.
-(That the pay run is off for the pilot restaurant is the owner's statement on the proposal page; no file in
-the repository holds the pilot's flags.) The desk tints one cell and writes "3 ק״ג פחות", and this screen
+(That the pay run is off for the pilot restaurant is the owner's statement on the proposal page. The admin
+panel's pilot preset, `apps/web/app/admin/restaurants/[id]/FeaturesPanel.tsx:25-37`, lists ten keys and
+`payRun` is not one of them; what is stored for the pilot restaurant is in the production database, which no
+session reads.) The desk tints one cell and writes "3 ק״ג פחות", and this screen
 draws the pair and writes "חויבו 3 ק״ג יותר": each screen keeps its drawing.
 
 **Acceptance.** As owner, manager and bookkeeper on the demo restaurant, at 1440, 1280 and 1024 px and at
 390 px, in Hebrew and one more language.
-1. Two panes in a frame as tall as the window, the document 58 % by default. The divider drags, moves with
+1. Two panes in a frame as tall as the window, the document 58 % by default, or its widest stop where the
+   448 px floor is reached first: with the side menu open that is so at 1280 (about 51 %) and at 1024 (34 %),
+   and 58 % is reached at 1440 (`SPEC.md` §4.1). A spec asserts the floor and the stop it gives, never
+   `aria-valuenow` 58 at 1280. The divider drags, moves with
    the arrows, goes to its ends with Home and End, resets with Enter and with a double press, never lets the
    data pane go under 448 px, reports `aria-valuenow`, and keeps the same place of the document in the middle.
    Under a 1024 px window the screen is one column; at 1024 and at 1280, with the side menu open, it is two
@@ -1006,7 +1013,8 @@ draws the pair and writes "חויבו 3 ק״ג יותר": each screen keeps its 
 2. The viewer, for a JPEG, a PNG and a WebP: fit to width, 50 to 400 %, quarter turns that re-fit, a mouse
    drag, two-finger and Ctrl + wheel sizing, the keys `+ - 0 R` with the focus anywhere in the viewer and in
    the whole-screen dialog, "פתחו את המקור" present, the kind of file in the toolbar. A PDF is in the
-   sandboxed frame inside the new pane, with its page count when the scan row has one.
+   sandboxed frame inside the new pane, and the toolbar says "PDF" (no page count reaches this page today:
+   slice 4).
 3. No PDF library: `apps/web/package.json` and `pnpm-lock.yaml` are unchanged, and no request for one is made
    on an invoice with an image or with a PDF.
 4. The whole screen is a dialog: opened from the toolbar and from the phone window, closed by Escape and by
@@ -1020,7 +1028,10 @@ draws the pair and writes "חויבו 3 ק״ג יותר": each screen keeps its 
    invoices.
 7. The payment block says "בהשהיה" or "ניתן לשלם", the due date, before VAT, VAT, including VAT, and the
    check sentence with no percentage; SH-24121 (no VAT) never shows "18%". "ההחלטה על הפער תשחרר את החשבונית
-   לתשלום." appears only when `invoices.detail.payment` says the gap is the only reason.
+   לתשלום." appears only when `invoices.detail.payment` says the gap is the only reason. The allocation fact
+   is said once: by the mounted field where it is mounted, by the block's own line elsewhere (slice 9). The
+   block, with the held-reasons note, the VAT note and the field's wrapper, is also drawn on an invoice that
+   opens in the reading correction and on one with no lines.
 8. The lines: grouped heads with the order's reference and the two dates; the gap lines alone by default and
    "כל N השורות"; every line by default and dense rows for the bookkeeper at a desk; "לבדיקה" still on a
    low-confidence line; "לא נספר" still on an uncounted line.
@@ -1044,13 +1055,18 @@ draws the pair and writes "חויבו 3 ק״ג יותר": each screen keeps its 
     manager's gap and the bookkeeper on a duplicate see "להחלטה" with both address parameters (S8); the
     manager on the owner's gap and the bookkeeper on any other gap see the sentence with the role's word.
     **No decision control exists on this screen in this package.** `gap-actions.tsx` has the five props of
-    S7, is mounted for every gap in its four places (a decided gap included), and the screen has the empty
-    place above the dock and the `holdStep` hold: a unit test mounts the component with each prop and proves
-    that `[` and `]` do nothing while the hold is on.
+    S7 and its test ids. It is mounted in `card` for every gap of the screen, a decided one included; in
+    `dock`, `dialog` and `bar` for the current gap (`SPEC.md` §8, point 11); and in `message` in its three
+    places. A unit test mounts the component in each slot and proves each member of `screen`: that `[`, `]`
+    and the previous and next buttons do nothing while `holdStep` is on, that `hideDock` removes the dock
+    and its caption and puts them back, that two `refresh()` calls in a row end on the second answer, that
+    `toTop` puts the focus on the element it is given, and that `say` reaches the one announcer.
 15. Tests added. Unit: the divider's clamp and keys; the viewer's zoom steps, fit and turn geometry; picking
     the gap lines; the ₪0 twin; days left by the Israeli day; the "חפשו במסמך" sentence with and without a
     SKU; the role matrix. e2e `INV-01.spec.ts`: the items above on a stored image and a stored PDF, axe with
-    no serious or critical finding on the page and on the dialog, ₪ left of the digits, reduced motion.
+    no serious or critical finding on the page and on the dialog, ₪ left of the digits, reduced motion. The
+    tests that expect the button to the desk, no decision control, and the copy numbers stand in
+    `INV-01.spec.ts` itself, each in a test of its own: `INV-05` has a seam on exactly those (S6).
     Existing specs that land on the page stay green and are not yours to change: `pilot-unread-invoices`,
     `invoice-manual-lines`, `pilot/pilot-journey` (`:504-528`), `consolidated`, `W1-03`, `W1-04`, `W1-06`,
     `W2-08`, `smoke`, and `AU-08-cockpit`. What they read on this
@@ -1059,7 +1075,9 @@ draws the pair and writes "חויבו 3 ק״ג יותר": each screen keeps its 
     is in the spec and its numbers are in the pull request.
 16. The owner's rules of `README.md`, and above all: no ₪ in red; every ₪ through the shared money component
     with its VAT basis beside it or in the column head; one filled button in the viewport; Hebrew and English
-    in parity; the copy guard met with no new allow-list line.
+    in parity; the copy guard met with no new allow-list line. One exception is not yours to remove: the
+    allocation field's own save button is filled (`allocation-field.tsx:137`), so while its editor is open
+    the viewport may hold two filled buttons; name it in the pull request.
 
 **Open pull requests to watch.** 190 (`page.tsx` +18, `messages/invoices` +6: a block just before `needsLines`
 and one word in the frozen group `state`, `apps/web/lib/supabase/server.ts`; it makes an invoice's file a PDF
