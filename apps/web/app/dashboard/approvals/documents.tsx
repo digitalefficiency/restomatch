@@ -29,7 +29,7 @@ const HIT_TINT = {
   info: 'bg-surface-sunken shadow-[inset_0_0_0_1px_rgb(var(--c-neutral-border-subtle))]',
 } as const;
 const CELL = 'px-1.5 py-1';
-const NUM_CELL = 'num px-1.5 py-1 text-right';
+const NUM_CELL = 'num whitespace-nowrap px-1.5 py-1 text-right';
 
 type Slot = { kind: 'line'; line: PaperLine } | { kind: 'skeleton'; key: string };
 
@@ -120,9 +120,10 @@ function PaperCard({ g, doc }: { g: QueueItem; doc: Exclude<GapDocument, { statu
           <caption className="sr-only">{t('desk.sr.paperCaption')}</caption>
           <colgroup>
             <col />
-            <col className="w-11" />
-            <col className="w-12" />
+            {/* Wide enough for "10.5 ק״ג", "₪149.00" and "₪12,490.00" at caption size: figures never run together. */}
             <col className="w-14" />
+            <col className="w-16" />
+            <col className="w-20" />
           </colgroup>
           <thead>
             <tr>

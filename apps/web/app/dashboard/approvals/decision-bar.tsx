@@ -48,10 +48,13 @@ export interface DecisionBarProps {
 type Variant = 'claim' | 'duplicate' | 'review' | 'link' | 'conflict' | 'blocked';
 
 /** Two literal class maps (§4.0): the desk switches at xl; the landing ('single') is the narrow view, unprefixed. */
+// Below 1024 px the bar is FIXED above the bottom nav (the field-mode pattern of the receiver's ActionBar): sticky
+// cannot lift it above its own section's top, so with a tall page head it hung below the screen, the pay-as-billed
+// button under the nav. EvidencePanel reserves its published height (--rm-actionbar-h). From 1024 px it stays sticky.
 const BAR: Record<DeskMode, string> = {
-  desk: 'flex flex-wrap items-center gap-2.5 border-t border-line-rule bg-surface xl:min-h-[4.5rem] xl:px-7 xl:py-3.5 xl:group-data-[density=compact]/desk:min-h-[3.75rem] xl:group-data-[density=compact]/desk:px-6 xl:group-data-[density=compact]/desk:py-2.5 max-xl:sticky max-xl:bottom-[calc(var(--rm-bottomnav-h,0px)+var(--consent-h,0px))] max-xl:z-action-bar max-xl:-mx-4 sm:max-xl:-mx-6 lg:max-xl:-mx-8 max-xl:mt-4 max-xl:gap-2 max-xl:px-3.5 max-xl:pb-3.5 max-xl:pt-3 max-xl:[&_[data-kbd]]:hidden',
+  desk: 'flex flex-wrap items-center gap-2.5 border-t border-line-rule bg-surface xl:min-h-[4.5rem] xl:px-7 xl:py-3.5 xl:group-data-[density=compact]/desk:min-h-[3.75rem] xl:group-data-[density=compact]/desk:px-6 xl:group-data-[density=compact]/desk:py-2.5 max-xl:sticky max-lg:fixed max-lg:inset-x-0 max-xl:bottom-[calc(var(--rm-bottomnav-h,0px)+var(--consent-h,0px))] max-xl:z-action-bar max-xl:-mx-4 sm:max-xl:-mx-6 lg:max-xl:-mx-8 max-lg:mx-0 max-xl:mt-4 max-xl:gap-2 max-xl:px-3.5 max-xl:pb-3.5 max-xl:pt-3 max-xl:[&_[data-kbd]]:hidden',
   single:
-    'sticky bottom-[calc(var(--rm-bottomnav-h,0px)+var(--consent-h,0px))] z-action-bar -mx-4 mt-4 flex flex-wrap items-center gap-2 border-t border-line-rule bg-surface px-3.5 pb-3.5 pt-3 sm:-mx-6 lg:-mx-8 [&_[data-kbd]]:hidden',
+    'sticky max-lg:fixed max-lg:inset-x-0 bottom-[calc(var(--rm-bottomnav-h,0px)+var(--consent-h,0px))] z-action-bar -mx-4 max-lg:mx-0 mt-4 flex flex-wrap items-center gap-2 border-t border-line-rule bg-surface px-3.5 pb-3.5 pt-3 sm:-mx-6 lg:-mx-8 [&_[data-kbd]]:hidden',
 };
 const PAIR: Record<DeskMode, string> = {
   desk: 'flex flex-wrap gap-2.5 max-xl:w-full max-xl:flex-col max-xl:gap-2',

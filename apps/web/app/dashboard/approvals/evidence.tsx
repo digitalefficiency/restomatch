@@ -170,6 +170,8 @@ export function EvidencePanel({
         <DeskEmpty summary={c.summary} filtered={filtered} filteredNote={filteredNote} mode={mode} />
       )}
       <DecisionBar c={c} mode={mode} singleKeys={singleKeys} wide={wide} viewerRole={viewerRole} blocked={blocked} />
+      {/* Below 1024 px the bar is fixed: keep its height free so the last line is never under it. */}
+      <div aria-hidden="true" className="h-[var(--rm-actionbar-h,0px)] lg:hidden" />
     </section>
   );
 }

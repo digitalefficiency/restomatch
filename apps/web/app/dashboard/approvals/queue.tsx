@@ -199,7 +199,8 @@ export function QueueColumn({
           onExpire={(info) => c.expireUndo(info)}
         />
       ) : null}
-      {desk ? (
+      {/* Nothing to decide and nothing to undo: no keys to teach (the calm empty state stays calm). */}
+      {desk && (c.live.length > 0 || c.undo != null) ? (
         <KeysLegend singleKeys={singleKeys} asking={c.asking != null} onOpenHelp={() => c.setKeysOpen(true)} />
       ) : null}
     </section>
