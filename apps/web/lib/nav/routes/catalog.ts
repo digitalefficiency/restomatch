@@ -8,7 +8,8 @@ export const routes: RouteDef[] = [
     rank: 40,
     roles: ['owner', 'manager'],
     nav: 'item',
-    badge: null,
+    // W3-10: "N לקישור · ₪X עוד לא נבדקו" (nav.badges.link), always neutral.
+    badge: 'link',
     aliases: ['קטלוג', 'מוצרים', 'catalog', 'products'],
   },
   { key: 'catalogImport', path: '/dashboard/catalog/import', group: 'procure', parent: 'catalog', nav: 'linked', badge: null },
