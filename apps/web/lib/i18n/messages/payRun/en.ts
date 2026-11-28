@@ -141,6 +141,7 @@ export const en = {
     undone: 'Marking undone',
     openLeak: 'This invoice has gaps · decide before marking it paid',
     conflict: 'The invoice changed since it loaded · refresh',
+    ownerOnly: 'Invoice {invoice}: only the owner can approve it for payment',
     notYet: 'Mark as paid opens after the system update',
     methods: { bank_transfer: 'Bank transfer', check: 'Cheque', cash: 'Cash', card: 'Credit card', offset: 'Offset against a credit', other: 'Other' },
   },

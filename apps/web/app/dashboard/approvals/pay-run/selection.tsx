@@ -17,6 +17,7 @@ import { downloadCsv, type CsvColumn, type CsvRow } from '@/lib/components/views
 import { useLocale, useT } from '@/lib/i18n/client';
 import { payRun as payRunNs } from '@/lib/i18n/messages/payRun';
 import { formatIls } from '@/lib/money';
+import { localizeServerError } from '@/lib/serverErrors';
 import { trpc } from '@/lib/trpc/client';
 import type { PayRunPaymentMethod } from '@restomatch/api';
 
@@ -97,8 +98,14 @@ export function PayRunSelection({
   const markPaid = trpc.payRun.markPaid.useMutation();
   const unmarkPaid = trpc.payRun.unmarkPaid.useMutation();
 
-  const errText = (e: { data?: { code?: string } | null; message?: string }) =>
-    e.data?.code === 'PRECONDITION_FAILED'
+  const errText = (e: { data?: { code?: string; appCode?: string } | null; message?: string }) =>
+    e.data?.code === 'FORBIDDEN'
+      ? // G-15b owner rule: name the invoice when it is the only one selected (no ₪ — the
+        // refusal carries the code only); otherwise the localized server message.
+        e.data?.appCode === 'payment.ownerApprovalRequired' && chosen.length === 1
+        ? t('batch.ownerOnly', { invoice: chosen[0]!.invoiceNumber ?? '—' })
+        : localizeServerError(e, locale)
+      : e.data?.code === 'PRECONDITION_FAILED'
       ? t('batch.openLeak')
       : e.data?.code === 'CONFLICT'
         ? t('batch.conflict')
