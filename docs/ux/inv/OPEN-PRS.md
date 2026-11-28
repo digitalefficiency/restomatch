@@ -302,6 +302,8 @@ On a seam file:
 - `apps/web/e2e/W2-02.spec.ts`, `apps/web/e2e/ia/screens.ts`: #241, #252, #362 (listed as added).
 - `apps/web/app/dashboard/invoices/[invoiceId]/gap-actions.tsx`: new, created by `INV-01` with the interface
   of `WORKPLAN.md`, S7; in no pull request.
+- `apps/web/e2e/INV-01.spec.ts`: new, created by `INV-01`; in no pull request. Your seam there is
+  `WORKPLAN.md`, S6.
 
 No file in common, and it changes what you build:
 - **#190**: the server refuses every decision except a pass-on while a page question is open. Show the

@@ -8,9 +8,10 @@ server field. **Where this file and the reference disagree, this file wins. Wher
 screen as you map it, and add what you find to your pull request.
 
 File and line citations are from `main@de5cfcf7` (`main` on 28.11.2026); "DS3-04:" means the finished desk
-branch at `a6be4080`. Three things were run to write this folder: the partition check, the gates of the merged
-bases and a trial of the empty message groups ("Not determined", at the end). Behaviour is read from the
-code.
+branch at `a6be4080`. What was run to write this folder: the partition check, the gates of the merged bases,
+a trial of the desk's merge with `main`, a trial of the empty message groups, the product's copy guard on
+the one sentence two screens share, and the suites with and without the lab's environment ("Not determined",
+at the end; `WORKPLAN.md`, S10; `README.md`, step 6). Behaviour is read from the code.
 
 ## `main` moved after the proposal was drawn
 
@@ -24,13 +25,22 @@ request 341), "לא נספר" on a line whose receipt was closed without a count
 The approvals desk was rebuilt by DS3-04 on its own branch and is not on `main`. Start from current `main`,
 map your screen first, and build the difference only.
 
+**`STATE.md` on `main` is behind the code in two places, and the code wins.** It says the approvals engine
+has 7 rules, and that a duplicate is routed "to the bookkeeper who cannot act" (`STATE.md:134-135`). The
+engine has eight rule ids and a fallback (`packages/api/src/approvals/engine.ts:152-217`, `:254`), and the
+bookkeeper decides a gap routed to the bookkeeper (`packages/api/src/routers/approvals.ts:59-60`, `:386`,
+`:1246-1262`; `packages/api/src/lib/roles.ts:44`). This folder follows the code. `STATE.md` is not yours to
+edit.
+
 ## Every mock-up: demo shortcuts
 
 1. **One gap per invoice, of two kinds.** The demo has four invoices, each with one gap: a bill for more than
    was received, or a price above the expected one. A real invoice can carry several gaps, gaps at two roles
    at once, gaps that sit on no line (a total that does not match its lines, a duplicate, an item missing on
    the invoice) and rows to review with no ₪. Everything "per invoice" in the mock-ups (its place, its role,
-   its one line, its one card) needs the rule in `SPEC.md` §8, points 1, 2, 3 and 11.
+   its one line, its one card) needs the rule in `SPEC.md` §8, points 1, 2, 3 and 11. Point 11 also says
+   which gap the places that exist once per screen speak for (the line "חפשו במסמך", the phone's dock, the
+   foot of the whole-screen dialog, the pinned bar): the screen's current gap.
 2. **One store behind four mock-ups.** A decision in one mock-up repaints the other three at once, and the
    role switch "להציג כמו" changes who is looking. The product has neither: each screen reads the server, and
    a refresh after an undo must never join a request that is still in flight (the lesson of pull request 360).
@@ -73,7 +83,9 @@ map your screen first, and build the difference only.
 13. **`[` and `]` always act in the mock-up**, and act whenever the pointer is over the frame. In the product
     they follow the single-key switch and the focus, as today's handler does for typing.
 14. **The message with "ביטול" is placed by script** over the part of the mock-up that is on screen, because a
-    mock-up is taller than a window. That is a property of the page. The product uses the desk's own message.
+    mock-up is taller than a window. That is a property of the page. The product uses the desk's own message,
+    which is a component its view places. On the invoice screen `INV-01` keeps the places for it (the slot
+    `message` of `gap-actions.tsx`: `WORKPLAN.md`, S7), and `INV-05` draws it there.
 15. **English.** The mock-ups are Hebrew only. Every new string needs its English twin in the same commit.
 
 ## The invoices list (`INV-02`)
@@ -130,7 +142,10 @@ map your screen first, and build the difference only.
   reading stored and can be absent.
 - **A PDF is drawn like an image** in the mock-up, with "PDF · עמוד 1 מתוך 1". In the product a PDF stays in
   the browser's sandboxed frame (`apps/web/lib/components/invoice/InvoiceScanViewer.tsx:88`), which has its
-  own tools and may not draw on a phone. `INV-01` adds no dependency.
+  own tools and may not draw on a phone. `INV-01` adds no dependency. And no page count reaches the invoice
+  page today: `resolveScan` returns `pageCount: null` for an invoice id
+  (`apps/web/lib/supabase/server.ts:132`, `:106`, `:153`), so the toolbar says "PDF" (`WORKPLAN.md`,
+  `INV-01`, slice 4).
 - **The PDF library's licence is not verified.** The page text says "pdf.js של Mozilla, רישיון Apache 2.0". No
   PDF-drawing library is in the repository, nobody read the licence of an exact version, and the product's
   security policy has no allowance for a worker or for WebAssembly
@@ -168,7 +183,12 @@ map your screen first, and build the difference only.
   (not required, the number itself, missing), and a check that can fail or not exist yet
   (`messages/invoices/he.ts:212`). Only "not required" has words in the reference: the other forms use the
   product's own words and are named in the pull request. The sentence "ההחלטה על הפער תשחרר את החשבונית
-  לתשלום." is true only when the gap is the only thing holding the invoice.
+  לתשלום." is true only when the gap is the only thing holding the invoice. Where the allocation field is
+  mounted it already says the number, its state and the deadline, so there the field is the allocation line
+  and the block prints its own only for "not required" (`SPEC.md` §4.6); on such an invoice the field's chip
+  still reads "חסר", because the field's state is about the stored number alone (missing, valid or
+  malformed) and not about whether one is required (`packages/api/src/routers/vat.ts:101`). The file is not
+  `INV-01`'s: name it in the pull request.
 - **"חשבונית 1 מתוך 4 שנמצא בהן פער"** fits the mock-up, which walks the four invoices with a gap. The product
   walks the place the person came from; the words after the count must be true for that place, or be left
   out.
@@ -183,7 +203,8 @@ map your screen first, and build the difference only.
   none and never edits the file.
 - **Two things were left as they are in the reference, on purpose.** For about 60 px of scrolling the pinned
   amount lies over the card's buttons. And the whole-screen document covers the message with "ביטול" when it
-  is opened inside its ten seconds: in the product the message must stay reachable for its whole window.
+  is opened inside its ten seconds: in the product the message must stay reachable for its whole window, so
+  the dialog has a place for it above its foot (`WORKPLAN.md`, S7, the slot `message`).
 - **The order's date differs between two screens today.** The invoice screen reads the expected delivery date
   (`packages/api/src/routers/invoices.ts:312`), the desk the date the order was sent
   (`packages/api/src/routers/approvals.ts:298`). The new group head uses the sent date on both.
@@ -195,12 +216,23 @@ map your screen first, and build the difference only.
 - **The mock-up is a drawing of the desk, not the desk.** It has no bulk selection, no "approve the whole
   invoice", no filters, saved views or CSV, no branch strip, no key help, and none of the bar's other forms
   (a duplicate, "סמנו כנבדק", "שייך להזמנה"). All of them exist on DS3-04 and stay. Build on DS3-04's files;
-  `docs/ux/ds3/SPEC.md` §10.2 stays binding for the desk's look.
+  `docs/ux/ds3/SPEC.md` §10.2 stays binding for the desk's look. One label changes its form: "שייך להזמנה"
+  is a singular imperative on a button (`main`: `messages/approvals/he.ts:114`; DS3-04: `:300`), which
+  `README.md` forbids, so `INV-04` rewords it to "שייכו להזמנה", key unchanged, with the test line that pins
+  it (`approvals/__tests__/vocab.test.ts:158`).
 - **Title and row meta.** The mock-up's title is "אישורים" and a row shows the days it waits; the product's
   title is "תור אישורים" (`messages/approvals/he.ts:8`) and DS3-04's row shows the due date (DS3-04:
   `queue.tsx:405-417`). `SPEC.md` §8, point 13.
-- **The undo's word.** "ביטול" in the mock-up, "בטלו" in the product (`messages/approvals/he.ts:182`).
-  `SPEC.md` §8, point 12.
+- **The undo's word.** "ביטול" in the mock-up, "בטלו" in the product (`main`:
+  `messages/approvals/he.ts:182`; DS3-04: `:368`). `SPEC.md` §8, point 12.
+- **The message's words.** The desk's own message is "{verb} · {amount} {basis}", and its line after an undo
+  is "ההחלטה בוטלה · הפער חזר לתור" (DS3-04: `messages/approvals/he.ts:284`, `:370`;
+  `approvals/desk-text.ts:123`). The mock-up's are "{result}, {supplier}" and "ההחלטה בוטלה." The desk's
+  stay, on both screens. Two cases do not fit and are `INV-04`'s: "הפער חזר לתור" is wrong on the invoice
+  screen, which has no queue, so the exported decision gives a host without a queue the line without it
+  (`WORKPLAN.md`, S9); and with the ending "החלטתם במקום הנהלת החשבונות" the desk's form passes the eight
+  words a message may hold, so `INV-04` names that one under "Owner decisions touched" and does not shorten
+  an approved phrase by itself.
 - **A row paid as billed drops the role.** Under "הוחלט היום" the mock-up writes "נוסף לבקשת הזיכוי · בעלים"
   and only "הפער: שולם כפי שחויב". The page text promises the result and the role for both: show the role on
   both.
@@ -231,13 +263,16 @@ map your screen first, and build the difference only.
 - **Not answered by the mock-up:** whether the other roles' rows and the decided rows show while a filter or
   `?invoice=` is set, and whether the CSV holds them; what the single-invoice landing
   (`/dashboard/approvals/[invoiceId]`) says to a role with nothing to decide there while gaps are open for
-  others; more than 100 open gaps (the queue reads pages of 100). Decide each as the desk decides the same
-  case and name it in the pull request.
+  others; more than 50 open gaps (the desk reads pages of 50, DS3-04: `desk-state.ts:38`, `page.tsx:68`;
+  the server allows up to 100 a call, `packages/api/src/routers/approvals.ts:227`). Decide each as the desk
+  decides the same case and name it in the pull request.
 
 ## The pay run (`INV-03`)
 
-- **The pay run is off for the pilot restaurant.** That is the owner's statement on the proposal page; no
-  file in the repository holds the pilot's flags, and `PILOT_FEATURE_KEYS` in
+- **The pay run is off for the pilot restaurant.** That is the owner's statement on the proposal page. The
+  admin panel's pilot preset (`apps/web/app/admin/restaurants/[id]/FeaturesPanel.tsx:25-37`) lists ten keys
+  and `payRun` is not one of them, which agrees with it; what is stored for the pilot restaurant is in the
+  production database, which no session reads. `PILOT_FEATURE_KEYS` in
   `packages/db/scripts/pilot-setup.ts:61-95` is only the list of keys that exist (`payRun` is in it, as every
   key is). The mock-up shows the demo, with a notice that is the mock-up's own. The product's disabled state
   stays as it is.
@@ -246,8 +281,18 @@ map your screen first, and build the difference only.
   billed twice, a decision, a missing allocation number), and one invoice can carry several. One group per
   invoice needs an order of precedence (the server's own order), the second reason as words in the row, and a
   place for the five reasons the mock-up does not draw (`SPEC.md` §8, point 10).
+- **A duplicate has two homes, by whether it is decided.** The server gives a live duplicate the reason
+  `duplicate` first, an undecided one included, and never a `decision` reason beside it
+  (`routers/payRun.ts:192`, `:453`, `:461`). Grouped by first reason alone, an undecided duplicate would sit
+  in the last group, the bookkeeper's decision group could never exist, and the list would show the same
+  invoice under "אצל הנהלת החשבונות". So a `duplicate` reason splits by `invoices.holding`: a decision group
+  while a gap of the invoice still waits, the last group once the copy is held (`SPEC.md` §6.3).
 - **"השיוך לתעודות המשלוח עוד לא פעיל."** is true for a consolidated invoice only. The same hold covers an
-  ordinary invoice with no order link, whose words are the list's "מחכה לשיוך להזמנה".
+  ordinary invoice with no order link, whose words are the list's "מחכה לשיוך להזמנה". Both lines are
+  `INV-00`'s keys: the list prints the same sentence, it is six words, and the product's copy guard fails
+  the same text of six words or more in two keys (`apps/web/lib/copy/guard.ts:28`, `:60-66`). Written once
+  in `messages/invoices/list.ts` and once in `messages/payRun`, each pull request is green alone and the
+  second to land turns `main` red.
 - **"חסר מספר הקצאה" is one hand-placed invoice** (MF-24950, a September invoice outside the mock-up's
   store), and its note sums the VAT of that one. For several invoices, and for a number already asked for,
   the sentence is not written.
@@ -294,14 +339,16 @@ map your screen first, and build the difference only.
 
 ## Not determined
 
-- Whether `main` merged with the desk's branch passes the lint, the build and the suites. What was run, on
-  28.11.2026 (`WORKPLAN.md`, S10): `main@de5cfcf7` merged with the components branch (`daec849e`) passed the
+- Whether `main` merged with the desk's branch passes the build, the full server suites and the e2e specs.
+  What was run, on 28.11.2026 (`WORKPLAN.md`, S10): `main@de5cfcf7` merged with the components branch (`daec849e`) passed the
   install, the database migrate, the RLS provisioning and check, the type checks, the web lint, the test
   suites except the worker's, and the web build, each with exit code 0; the worker's tests, the e2e specs, the
-  worker image and the dependency audit were not run on it. `main@9dd26ef9` merged with the desk's branch at
-  `be22850e`, with DS3-04's `approvals/list.tsx` kept, type-checks (all 17 packages, and `tsc --noEmit` of
-  `apps/web`); nothing else was run on that tree, and `INV-04` runs the desk's suites on its own merge
-  first.
+  worker image and the dependency audit were not run on it. `main@de5cfcf7` merged with the desk's branch at
+  `a6be4080` and resolved as `WORKPLAN.md`, S10, says: the type check of the 17 packages and of `apps/web`,
+  the web lint and `guards` exit 0; the web unit suite passes (226 files, 2,562 tests), the desk's own unit
+  tests among them (14 files, 317 tests); `approvals-router`, `approvals-queue-fields` and `approvals-scope`
+  pass (64 tests). The full server suites, the web build and the e2e specs were not run on that tree, and
+  `INV-04` runs the desk's suites on its own merge first.
 - The licence of any PDF library, and whether the real storage lets a script read a file.
 - Settled: empty message groups composed as `WORKPLAN.md`, S3, says pass the type check, the parity test, the
   copy budget and the copy gate (tried on `main@9dd26ef9` merged with the components branch;

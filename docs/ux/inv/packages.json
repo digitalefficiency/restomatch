@@ -41,7 +41,8 @@
         "packages/api/src/__tests__/coverage/IA-04.ts",
         "apps/web/lib/invoices/**",
         "apps/web/lib/i18n/messages/invoices/index.ts",
-        "apps/web/lib/i18n/messages/invoices/gap.ts"
+        "apps/web/lib/i18n/messages/invoices/gap.ts",
+        "apps/web/e2e/__screenshots__/INV-00/**"
       ],
       "newFiles": [
         "packages/api/src/invoices/holding.ts",
@@ -56,7 +57,8 @@
         "packages/api/src/__tests__/invoice-area.fixtures.ts",
         "packages/api/src/__tests__/coverage/IA-04.ts",
         "apps/web/lib/invoices/**",
-        "apps/web/lib/i18n/messages/invoices/gap.ts"
+        "apps/web/lib/i18n/messages/invoices/gap.ts",
+        "apps/web/e2e/__screenshots__/INV-00/**"
       ],
       "reserved": [
         "packages/api/src/routers/payRun.ts",
@@ -202,13 +204,13 @@
           "file": "apps/web/lib/copy/screens.ts",
           "owner": "shared",
           "who": "INV-02",
-          "what": "One new row for the list (owner, 1440), measured, placed directly after the suppliers row (line 66 on main@de5cfcf7)."
+          "what": "One new row for the list (owner, 1440), measured, placed directly after the suppliers row (line 66 on main@de5cfcf7). The spec that reads it opens the current month (W2-16.spec.ts:105) and fails a screen that grew, so mark each place card as a record (data-record): the row's number must not depend on which places hold an invoice on the day of the run."
         },
         {
           "file": "apps/web/e2e/ia/screens.ts",
           "owner": "shared",
           "who": "INV-02",
-          "what": "One new row for the list, which is two entries: a row in BASE directly after the inbox-bookkeeper-desk row (line 41 on main@de5cfcf7) and its entry in BASELINE_0711 directly after 'team-owner-desk' (line 77). apps/web/test/ia-density.test.ts:154 needs both. The adopter must match the pattern at ia-density.test.ts:147: write adopter 'W2-02', never 'INV-02'."
+          "what": "One new row for the list, which is two entries: a row in BASE directly after the inbox-bookkeeper-desk row (line 41 on main@de5cfcf7) and its entry in BASELINE_0711 directly after 'team-owner-desk' (line 77). The row: { id: 'invoices-owner-desk', route: '/dashboard/invoices', role: 'owner', vp: 'desk', type: 'queue', adopter: 'W2-02' }. apps/web/test/ia-density.test.ts:154 needs both entries. The adopter must match the pattern at ia-density.test.ts:147: 'W2-02', never 'INV-02'."
         },
         {
           "file": "apps/web/lib/copy/budget.allow.ts",
@@ -388,19 +390,25 @@
           "file": "apps/web/app/dashboard/invoices/[invoiceId]/gap-actions.tsx",
           "owner": "INV-01",
           "who": "INV-05",
-          "what": "One import and one branch, and no other file of the screen: for a gap the viewer may decide, mount the decision from [invoiceId]/decide/ in place of the button to the desk; on a decided gap the button to the next gap; the undo message; in the pinned bar the button to the decision. Everything arrives as the props INV-01 builds in wave 1 (gap, decided, slot, features, screen). The branch reads the switch-off key decideOnInvoice from the features prop: with the key absent, the button to the desk stays."
+          "what": "One import and one branch, and no other file of the screen. The branch hands a mount to [invoiceId]/decide/ when the key is on and the slot and the gap are ones INV-05 draws: in the slots card, dock and dialog the decision in place of the button to the desk, for a gap the viewer may decide; in card the button to the next gap on a decided gap; in bar the button to the decision; in message the undo message and the pass-on sheet. What it needs from the screen arrives as the props INV-01 builds in wave 1 (gap, decided, slot with its five values card, dock, dialog, bar and message, features, screen); the viewer's role comes from useNavViewer(), read and never edited. The branch reads the switch-off key decideOnInvoice from the features prop: with the key absent, the button to the desk stays."
         },
         {
           "file": "apps/web/e2e/W2-02.spec.ts",
           "owner": "INV-01",
           "who": "INV-05",
-          "what": "Only the cockpit-decide assertions inside the test that starts at line 150 on main@de5cfcf7."
+          "what": "Only the assertions on cockpit-decide in the invoice-screen test INV-01 leaves. It starts at line 150 on main@de5cfcf7, and INV-01 rewrites it first."
+        },
+        {
+          "file": "apps/web/e2e/INV-01.spec.ts",
+          "owner": "INV-01",
+          "who": "INV-05",
+          "what": "Only the tests that expect the button to the desk, no decision control, or the copy numbers of the screen without the decision. Each runs with the restaurant's features.decideOnInvoice stored false (set with e2eSql() before it and put back after it, in this file), or is updated to the decision; each is named in the pull request. Nothing else in the file."
         },
         {
           "file": "apps/web/e2e/ia/screens.ts",
           "owner": "shared",
           "who": "INV-05",
-          "what": "The row invoice-owner-desk: measured again once with the decision mounted; the pull request states the numbers before and after."
+          "what": "The row invoice-owner-desk: measured again once with the decision mounted; the pull request states the numbers before and after. IA-01 measures the newest invoice of the demo restaurant (e2e/IA-01.spec.ts:52): say in the pull request whether it carried an open gap the owner may decide; if not, leave the row as INV-01 set it and state the density with the decision from INV-05.spec.ts's own invoice."
         },
         {
           "file": "packages/api/src/lib/features.ts",

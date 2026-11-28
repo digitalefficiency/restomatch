@@ -17,7 +17,8 @@ component.
   "DS3-04:", which means the finished desk branch `claude/ds3-04-approvals-desk` at `a6be4080`. `main` moves:
   confirm a line before you rely on it.
 - **Server fields** are named as `WORKPLAN.md` (`INV-00`, "The contract") names them. `INV-00` pushes the exact
-  types first; where its pushed contract and this file differ in a name, the contract wins.
+  names and types first (its slice 0, which registers the new reads with empty answers); where its pushed
+  contract and this file differ in a name, the contract wins.
 
 Mock-ups and their sources:
 
@@ -120,6 +121,12 @@ summary and at the foot of the whole-screen document the short form "ההחלט�
 **The owner on another role's gap:** the note "גם אתם רשאים להחליט", and after the decision "…, החלטתם במקום
 הניהול".
 
+**Waiting to be linked:** "מחכה לשיוך להזמנה", and for a consolidated invoice "השיוך לתעודות המשלוח עוד לא
+פעיל". The list's cell (section 3.6) and the pay run's note (section 6.3) print these two keys; a screen adds
+the full stop where it prints a sentence. The second is six words, and the product's copy guard fails the
+same text of six words or more in two keys (`apps/web/lib/copy/guard.ts:28`, `:60-66`), so it cannot be
+written once per screen.
+
 ### 2.3 Status language and colour
 
 A status is a dot or an icon and a word, never colour alone. Values are DS3's roles
@@ -213,8 +220,8 @@ none of it. The rows that can be decided, their status and their claimable ₪ c
 | In the message | "ביטול" | Takes the decision back. | `approvals.reopen { discrepancyId }` |
 
 Wherever this file writes "ביטול" for the undo control it quotes the mock-up. The product's word today is
-"בטלו" (`messages/approvals/he.ts:182`), and it stays on both screens until the owner picks one (section 8,
-point 12).
+"בטלו" (`main`: `messages/approvals/he.ts:182`; DS3-04: `:368`), and it stays on both screens until the
+owner picks one (section 8, point 12).
 
 - **The reasons question:** "למה לשלם כפי שחויב?" with the product's own reasons for the gap's kind
   (`messages/approvals/he.ts:130-141`) and "חזרה". "אחר" opens a required field "הסיבה" (hint for a screen
@@ -224,7 +231,10 @@ point 12).
 - **The message** (at most 8 words, one at a time): "{result}, {supplier}" with "ביטול" and the line that
   shortens over ten seconds; it pauses under the pointer or the focus. When the owner decided another role's
   gap: "{result}, החלטתם במקום הניהול". After a pass-on: "הועבר לבעלים, {supplier}". After an undo the
-  announcer says "ההחלטה בוטלה." or "ההעברה בוטלה."
+  announcer says "ההחלטה בוטלה." or "ההעברה בוטלה." These words are the mock-up's. The finished desk has its
+  own, "{verb} · {amount} {basis}" and after an undo "ההחלטה בוטלה · הפער חזר לתור" (DS3-04:
+  `messages/approvals/he.ts:284`, `:370`), and the desk's stay on both screens: `KNOWN-ISSUES.md`,
+  "Approvals by role", says what `INV-04` does about the two cases where they do not fit.
 - **Undo:** only the person who decided; offered for 10 s; never asked of the server after 12 s; the server
   allows 15 s (`routers/approvals.ts:84`; DS3-04: `undo-window.ts:12-18`). No number changes. Z takes back the
   last decision only.
@@ -289,15 +299,18 @@ to the agora. The place of an invoice and the sums of the cards come from the se
 `places[]` on the response); the screen never computes them.
 
 Order: "אצלכם"; then the other roles that hold an open gap ("אצל הבעלים", "אצל הניהול", "אצל הנהלת
-החשבונות"); "ממתינות לשיוך"; "חסר מספר הקצאה"; "בלי פער פתוח"; "שולמו"; and last "כל החודש". The group is named
-for a screen reader "איפה הכסף של החודש, הסכומים כוללים מע״מ".
+החשבונות"); "ממתינות לשיוך"; "כפולה אפשרית" (a copy held as a duplicate, only when it holds an invoice:
+section 8, point 2); "חסר מספר הקצאה"; "בלי פער פתוח"; "שולמו"; and last "כל החודש". The order is
+`apps/web/lib/invoices/places.ts`'s. The group is named for a screen reader "איפה הכסף של החודש, הסכומים
+כוללים מע״מ".
 
 Each card: its name with a dot when it waits for a person, the count, the sum with "כולל מע״מ", and a third
 line:
 
 | Card | Third line |
 | --- | --- |
-| A role's card | "פער של ₪38.70 לפני מע״מ" / "פערים של ₪143.50 לפני מע״מ" |
+| A role's card | "פער של ₪38.70 לפני מע״מ" / "פערים של ₪143.50 לפני מע״מ". The sum is `places[]`'s, by VAT basis: a part on another basis (a duplicate's amount includes VAT, a VAT mismatch is the VAT itself) is printed with its own basis, never under "לפני מע״מ" (section 2.4) |
+| "כפולה אפשרית" | none in the reference; no third line until the owner gives one |
 | "ממתינות לשיוך" | "חשבוניות מרכזות" only when every invoice in it is consolidated (true for the demo); otherwise no third line (section 8, point 17) |
 | "חסר מספר הקצאה" | "צריך לבקש מהספק" |
 | "בלי פער פתוח" | "כולן תקינות" / "אחת מהן בבקשת זיכוי" / "N מהן בבקשת זיכוי" |
@@ -310,8 +323,10 @@ line:
 - **"שולמו" appears only when the month has a paid invoice** (decision 5: `counts.paid` above zero, a field
   that exists). In a real restaurant that is never, until a payment record exists.
 - **"חסר מספר הקצאה" holds only invoices that must carry a number** and have none (decision 5), by the pay
-  run's own rule, from the new field `allocationMissing`. It is absent when empty. It holds only invoices with
-  no open gap; an invoice with an open gap stays with whoever holds the gap.
+  run's own rule. The card is the server's place (`alloc` in the reference) of `places[]`, and is absent
+  when empty. It holds only invoices with no open gap that wait for nothing else; an invoice with an open
+  gap stays with whoever holds the gap. The row flag `allocationMissing` and its count are wider than the
+  place (a held or waiting invoice can lack a number too) and are not the card.
 - Every old address keeps working: `?view=` takes a place id or one of today's tab ids (`review`, `lines`,
   `awaiting`, `matched`, `held`, `paid`, `noAllocation`, `intake`), resolved by `apps/web/lib/invoices/places.ts`.
 
@@ -333,13 +348,14 @@ Columns, in this order: ספק · מספר · תאריך · "סכום כולל �
 - **"אצל מי ולמה".** An open gap: with whom (bold for the viewer) and " · 10 ימים" (or " · מהיום"), and under
   it the rule's phrase with a full stop. A decided gap: "הפער: נוסף לבקשת הזיכוי" or "הפער: שולם כפי שחויב",
   and under it "הוחלט היום · בעלים". Waiting to be linked: "מחכה לשיוך להזמנה", or for a consolidated invoice
-  "השיוך לתעודות המשלוח עוד לא פעיל". Every other row: empty.
+  "השיוך לתעודות המשלוח עוד לא פעיל", both from the shared words (section 2.2), never from a key of the
+  list's own. Every other row: empty.
 - **Due date:** the date and a quiet remainder ("נותרו 20 ימים", "היום האחרון"); nothing after it for a paid
   invoice.
 - **Gap:** bold on a row with an open gap, grey on a calm row, empty when there is none (never ₪0.00).
 - **Order** (from `places.ts`, not a sort the person picks): the viewer's gaps, then others' (blocking before
-  warning, the longest wait first); then waiting for a document; then clear; then paid; newest first inside
-  each.
+  warning, the longest wait first); then waiting for a document; then a copy held as a duplicate; then
+  missing an allocation number; then clear; then paid; newest first inside each.
 - **Foot:** "סך הכול, 37 חשבוניות", the sum including VAT, the sum of the gaps, and "פתוח ₪X" when part of
   the gaps is decided.
 - **Keyboard:** one tab stop in the rows; ↑ and ↓ move (and carry an open summary with them); J and K the same
@@ -373,7 +389,7 @@ the date; "סכום, כולל מע״מ"; "לתשלום עד" with " · נותר�
 | "להחלטה" / "למסך האישורים" | none | new | `INV-02` · `decideGapId` and `canAct` in `holding` (never the leading gap's id); the desk's address of section 3.3 |
 | Places | eight tabs (`register-client.tsx:14-15`), filtered again on the client (`:48-52`) | differs | `INV-02` · `place`, `places[]` (`INV-00`) |
 | "שולמו" only with a paid invoice | the tab is always drawn | differs | `INV-02` · `counts.paid` (exists) |
-| "חסר מספר הקצאה" | "ללא מספר הקצאה" counts every invoice with no number (`packages/api/src/routers/invoices.ts:178`). The row already carries `allocationRequired` (the date and the amount only, `routers/invoices.ts:114-118`, `:160`), and the column prints "חסר" only then (`columns.tsx:128-133`) | differs | `INV-00` (`allocationMissing`, the pay run's rule and not `allocationRequired`, and its count, beside the old ones), `INV-02` (the card) |
+| "חסר מספר הקצאה" | "ללא מספר הקצאה" counts every invoice with no number (`packages/api/src/routers/invoices.ts:178`). The row already carries `allocationRequired` (the date and the amount only, `routers/invoices.ts:114-118`, `:160`), and the column prints "חסר" only then (`columns.tsx:128-133`) | differs | `INV-00` (`allocationMissing`, the pay run's rule and not `allocationRequired`, and its count, beside the old ones; and the place), `INV-02` (the card, which is the place of `places[]` and not the flag's count) |
 | Search, supplier filter, count line, empty result | none in the list | new | `INV-02` |
 | Column "אצל מי ולמה" | none | new | `INV-02` · `holding`, `lastDecision` (`INV-00`) |
 | State as a dot and a word | `STATE_TONE` colours by state alone (`columns.tsx:40-50`) | differs | `INV-00` (`lib/invoices/state.ts`), `INV-02` |
@@ -418,8 +434,11 @@ decision buttons, it shows one button "להחלטה" that opens the desk on this
   (`apps/web/app/dashboard/invoices/[invoiceId]/cockpit.tsx:100`), not the content's. At a 1024 px window the
   content box is 712 px with the side menu open (a 248 px menu, `apps/web/app/dashboard/nav.tsx:203`; 32 px
   gutters, `apps/web/app/dashboard/layout.tsx:233`) and 968 px at 1280, so at 1024 the document's pane sits
-  at its 34 % stop and opens at the reading size. The mock-up has no such switch: it scales one 1240 px
-  frame.
+  at its 34 % stop and opens at the reading size. At 1280 the floor wins too: 58 % of 968 px would leave the
+  data 387 px, so the document stops at 500 px (968 − 448 − 20), just under 52 %. With the side menu open,
+  58 % is reached only from a window of about 1430 px, so at 1440 and not at 1280. Wherever the floor is
+  reached first, the default and the reset are the widest stop the floor allows. The mock-up has no such
+  switch: it scales one 1240 px frame.
 - **Under a 1024 px window (tablet and phone).** One column: the top row (the place reads "2 מתוך
   4"), the header, a **window onto the document** (156 px high, the head of the page) with the pill "פתחו את
   המסמך" and a caption, then the data in the same order, then the chain "המסמכים שנבדקו", then what happened.
@@ -433,9 +452,9 @@ decision buttons, it shows one button "להחלטה" that opens the desk on this
 | --- | --- |
 | Loading | The skeleton in the new shape (header, two panes). The existence check stays above it, so an unknown or foreign invoice is a 404 before the skeleton (`[invoiceId]/layout.tsx`). |
 | An image (JPEG, PNG, WebP) | The viewer of section 4.4; the toolbar says "תמונה". |
-| A PDF | In `INV-01`: today's sandboxed frame of the browser inside the new pane (`apps/web/lib/components/invoice/InvoiceScanViewer.tsx:88`), with "PDF · עמוד 1 מתוך N" when the scan row has a page count, and "פתחו את המקור". On a phone, where a frame may not draw a PDF, the window shows one calm line and the same link. Drawing a PDF in the same viewer is `INV-06`, optional. |
+| A PDF | In `INV-01`: today's sandboxed frame of the browser inside the new pane (`apps/web/lib/components/invoice/InvoiceScanViewer.tsx:88`), with "PDF" in the toolbar and "פתחו את המקור". The viewer prints "PDF · עמוד 1 מתוך N" when it is given a page count, and none reaches this page today (`WORKPLAN.md`, `INV-01`, slice 4). On a phone, where a frame may not draw a PDF, the window shows one calm line and the same link. Drawing a PDF in the same viewer is `INV-06`, optional. |
 | No file | The line above; no viewer, no window, no divider. |
-| Being read, or no lines | As today: the screen opens in the reading correction (`[invoiceId]/page.tsx:206-208`); who may correct is unchanged (`:87-88`). |
+| Being read, or no lines | As today: the screen opens in the reading correction (`[invoiceId]/page.tsx:206-208`); who may correct is unchanged (`:87-88`). The payment block is drawn here too, with the held-reasons note, the VAT note and the allocation field (section 4.6): today's notes are drawn outside the edit switch, and two specs read them on such an invoice. |
 | An open gap the viewer may decide | The card with the 2 px outline when it is the viewer's own; `INV-01`: "להחלטה"; `INV-05`: the two buttons. The payment block says "בהשהיה". |
 | An open gap the viewer may not decide | The same card and evidence; "ההחלטה אצל הבעלים, ואין צורך בפעולה מצדכם." in place of the action. |
 | The owner on another role's gap | The note "גם אתם רשאים להחליט" beside the action. |
@@ -476,7 +495,8 @@ named "המסמך מהספק"; the document is one named picture, "המסמך כ
 
 **The divider.** `role="separator"`, vertical, named "רוחב המסמך", tooltip "גררו לשינוי רוחב המסמך", a 32 px
 grip at rest, a 44 px target under a finger. Dragged; ← and → move it 2 %; Home and End go to its stops; Enter
-or a double press puts it back to 58 %. It runs from 34 % to 62 % and stops earlier where the data pane would
+or a double press puts it back to 58 %, or to its widest stop where the floor is reached first (section
+4.1). It runs from 34 % to 62 % and stops earlier where the data pane would
 go under 448 px; `aria-valuenow`, `aria-valuemax` and `aria-valuetext` ("58%") stay true. While it moves, the
 part of the document the person was looking at stays in the middle. Its place is kept while the browser tab is
 open, also across `[` and `]`, and is forgotten on a reload: there is no stored key.
@@ -487,15 +507,19 @@ caption of the phone's window, and at the foot of the whole-screen document:
 > "חפשו במסמך: עגבניות שרי, מק״ט 10129."
 
 The item's name is bold and the SKU is LTR-isolated. In the phone's caption it follows the kind of file:
-"תמונה · חפשו במסמך: עגבניות שרי, מק״ט 10129". A line with no SKU names the item alone. Nothing on the screen
-speaks of a mark.
+"תמונה · חפשו במסמך: עגבניות שרי, מק״ט 10129". A line with no SKU names the item alone. On an invoice with
+several gaps the line speaks for the screen's current gap (section 8, point 11); a gap that sits on no line
+of the invoice has no such line. Nothing on the screen speaks of a mark.
 
 **The whole screen.** A real dialog (the native `<dialog>`, as
 `apps/web/lib/components/overlay/Sheet.tsx` does), named "המסמך מהספק במסך מלא": the page behind is inert,
 Escape and its button "סגרו את המסמך" close it, Tab stays inside, the focus returns to the control that opened
-it. A header with "<number> · <supplier>"; the viewer; a foot with the line "חפשו במסמך", the gap in one line
+it. A header with "<number> · <supplier>"; the viewer; a foot, for the screen's current gap (section 8, point
+11), with the line "חפשו במסמך", the gap in one line
 ("חויבו 9.5 ק״ג, התקבלו 6.5 ק״ג") and "הפער ₪38.70 לפני מע״מ", then the action: `INV-01` "להחלטה"; `INV-05` the
-two buttons; a decided gap "{result} · {role}"; a role that may not decide "ההחלטה אצל הבעלים." At a desk
+two buttons; a decided gap "{result} · {role}"; a role that may not decide "ההחלטה אצל הבעלים." Above the
+foot is a place for the message with "ביטול" (`WORKPLAN.md`, S7, the slot `message`), so that the message
+stays reachable while the dialog is open. At a desk
 "fit" stops at a reading width (920 px in the mock-up). On a phone it opens at the size the print can be read
 at (150 % at 390 px, 175 % at 360 px), at the head of the page with the start edge in sight. A decision taken
 inside it closes it, returns the data pane to its top and puts the focus on a control in sight; "שלמו כפי
@@ -504,7 +528,8 @@ inside it closes it, returns the data pane to its top and puts the focus on a co
 ### 4.5 The gap card
 
 Named "הפער וההחלטה". One card per undecided gap of the queue's own row set (so the ₪0 twin is never a card and
-the count equals the desk's), and a decided gap stays as a calm card.
+the count equals the desk's), and a decided gap stays as a calm card. With several gaps the cards stand in
+the shared order and the single places of the screen speak for one gap at a time (section 8, point 11).
 
 - **Head:** the gap's kind ("חיוב על יותר ממה שהתקבל", "מחיר גבוה מהמצופה"), the pill "חוסם תשלום" or "אזהרה",
   and the item on its own line under them.
@@ -514,17 +539,21 @@ the count equals the desk's), and a decided gap stays as a calm card.
 - **The amount, a row of its own:** "הפער", the amount, "לפני מע״מ", and its arithmetic ("3 ק״ג × ₪12.90").
 - **The line** of section 2.2.
 - **The action** (`gap-actions.tsx`, the one component behind the card's action, the phone's dock, the foot
-  of the whole-screen dialog and the pinned bar's button; `WORKPLAN.md`, S7): section 4.2. With the two
-  buttons (`INV-05`), two lines under them say
+  of the whole-screen dialog, the pinned bar's button and the place of the message; `WORKPLAN.md`, S7):
+  section 4.2. With the two buttons (`INV-05`), two lines under them say
   what each does: '"בקשת זיכוי" מוסיפה ₪38.70 לפני מע״מ לבקשה שנשלחת לספק.' and "תשלום כפי שחויב סוגר את הפער
   בלי בקשת זיכוי."
-- **After a decision** (`INV-05`): a tick and the result; "25.10.2026 · 14:32 · בעלים · {reason}"; the effect
-  ("₪38.70 לפני מע״מ נוספו לבקשת הזיכוי לספק." or "הפער נסגר בלי בקשת זיכוי."); and one secondary button to
-  the next gap the viewer may decide, "לפער הבא שמחכה לכם" or "לפער הבא, אצל הניהול" (their own first, blocking
-  first, the oldest first; it may be on another invoice). The focus goes to that button, and by keyboard the
+- **A decided gap** (`INV-01`, from `invoices.detail`, so it is the same after a reload): a tick and the
+  result; "25.10.2026 · 14:32 · בעלים · {reason}"; and the effect line, "₪38.70 לפני מע״מ נוספו לבקשת הזיכוי
+  לספק." or "הפער נסגר בלי בקשת זיכוי." These strings are `INV-01`'s, in `screen.ts`; `INV-05` writes none of
+  them (the first effect line is six words, and the copy guard fails it in two keys).
+- **After a decision** (`INV-05`): one secondary button to the next gap the viewer may decide, "לפער הבא
+  שמחכה לכם" or "לפער הבא, אצל הניהול" (their own first, blocking first, the oldest first; it may be on
+  another invoice). The focus goes to that button, and by keyboard the
   next stop after it is "ביטול". Tab from "ביטול" returns to the screen only when the decision sent the focus
   there. The message with "ביטול" survives a move with `[`, `]` or the "next gap" button.
-- **The pinned amount (a desk).** Once the card's numbers have left the pane, a bar stays at the pane's head:
+- **The pinned amount (a desk).** Once the numbers of the current gap's card have left the pane, a bar stays
+  at the pane's head:
   "הפער · ₪38.70 לפני מע״מ · עגבניות שרי" and a quiet button "להחלטה" (named "להחלטה על הפער") that returns
   the pane to its top; "לפרטי הפער" for a role that may not decide and for a decided gap, whose bar reads
   "{result} · ₪38.70 לפני מע״מ" with no item (the amount is never cut). **In `INV-01` the bar's button reads
@@ -534,7 +563,9 @@ the count equals the desk's), and a decided gap stays as a calm card.
   while it holds the focus.
 - **The phone's dock.** Fixed at the foot, named "ההחלטה על הפער": the caption "הפער ₪38.70 לפני מע״מ · עגבניות
   שרי" (it may take two lines) over the action. It is absent for a decided gap, for a role that may not decide
-  and while the reasons question is open. The message with "ביטול" sits above it.
+  and while the reasons question is open (`INV-05` asks the screen to remove it: `WORKPLAN.md`, S7,
+  `screen.hideDock`). The message with "ביטול" sits above it, above the bottom bar when there is no dock; at
+  a desk it sits at the foot of the data pane.
 
 ### 4.6 The payment block
 
@@ -549,9 +580,22 @@ Heading "התשלום", in the pay run's own words, from `invoices.detail.paymen
 - The check: "השורות מסתכמות בסכום שלפני מע״מ, והמע״מ תואם." with **no percentage** (today's string prints the
   rate, also on an invoice with no VAT: `messages/invoices/he.ts:211`).
 - The allocation line, one of three: "מספר הקצאה לא נדרש בסכום הזה."; the number itself; or that it is missing.
+  **Where the allocation field is mounted** (the feature `vatAtRisk`, a finance role) **the field is the
+  line** for "the number itself" and for "missing": it already prints the number, its state and the deadline
+  (`[invoiceId]/allocation-field.tsx:79-96`, `:167-171`), and a second line from `invoices.detail` would say
+  the fact twice and go stale the moment the field saves. The block then prints its own line only for "מספר
+  הקצאה לא נדרש בסכום הזה." Where the field is not mounted the block prints all three forms.
   The block ends with one named wrapper for the allocation field (`[invoiceId]/allocation-field.tsx`),
   which is mounted on `main` (pull request 341; `[invoiceId]/page.tsx:252-257`). `INV-01` moves that one
-  mount into the wrapper, unchanged, adds none of its own and never edits the file.
+  mount into the wrapper, unchanged, adds none of its own and never edits the file. The field's save button
+  is filled (`allocation-field.tsx:137`) and is not `INV-01`'s to change: while its editor is open the
+  viewport may hold two filled buttons.
+- **The block is drawn wherever today's notes are drawn:** also while the screen is in the reading
+  correction, and for an invoice with no lines or no match. Today the held-reasons note, the VAT note and
+  the field are drawn outside the edit switch (`[invoiceId]/page.tsx:209-269`, `cockpit.tsx:379`), and two
+  specs nobody may edit read them there: `apps/web/e2e/AU-08-cockpit.spec.ts` (an invoice with no lines:
+  `allocation-field`, `invoice-vat-at-risk`) and `apps/web/e2e/pilot-unread-invoices.spec.ts:104-117` (a
+  held reading: `invoice-held-reasons`).
 
 ### 4.7 The lines
 
@@ -728,16 +772,20 @@ focus stays inside and returns to the link. Its numbers come from `settings.effe
 
 Kept although the mock-up does not draw them: the bulk selection and "approve the whole invoice" on rows the
 viewer may decide, the filters, saved views and the CSV, the branch strip, the link to the pay run, and the
-duplicate, "סמנו כנבדק" and "שייך להזמנה" forms of the bar.
+duplicate, "סמנו כנבדק" and "שייך להזמנה" forms of the bar. The last label is a singular imperative on a
+button, which the product's rules forbid: `INV-04` rewords it to "שייכו להזמנה", key unchanged
+(`WORKPLAN.md`, `INV-04`, slice 9).
 
 ## 6. Screen 4 · the pay run (`INV-03`)
 
 **Purpose.** Why each invoice is held, and what can be paid. Held invoices are grouped by who holds them, the
 viewer's own first, each group with its sum, adding up to "בהשהיה". **No control records a payment.** Owner,
 manager and bookkeeper, where the feature `payRun` is on. It is off for the pilot restaurant: that is the
-owner's statement on the proposal page. No file in the repository holds the pilot's flags, and
-`PILOT_FEATURE_KEYS` in `packages/db/scripts/pilot-setup.ts:61-95` is only the list of keys that exist
-(`payRun` is in it, as every key is).
+owner's statement on the proposal page. The admin panel's pilot preset
+(`apps/web/app/admin/restaurants/[id]/FeaturesPanel.tsx:25-37`) lists ten keys and `payRun` is not one of
+them, which agrees with it; what is stored for the pilot restaurant is in the production database, which no
+session reads. `PILOT_FEATURE_KEYS` in `packages/db/scripts/pilot-setup.ts:61-95` is only the list of keys
+that exist (`payRun` is in it, as every key is).
 
 ### 6.1 Layout
 
@@ -767,14 +815,27 @@ viewer's own decisions; then the other roles' (owner, manager, bookkeeper); then
 | --- | --- | --- |
 | "מחכה להחלטה שלכם" / "מחכות להחלטה שלכם" | red when one of its gaps blocks payment, else amber | **"להחלטה"**, filled on the first group the viewer may decide |
 | "מחכות להחלטה של הבעלים" / "… של הניהול" / "… של הנהלת החשבונות" | the same | a secondary "להחלטה" when the viewer may decide (the owner on the manager's group); otherwise **"לקריאה בלבד"** |
-| "ממתינות לשיוך" | grey | the note "השיוך לתעודות המשלוח עוד לא פעיל." (a consolidated invoice only) |
+| "ממתינות לשיוך" | grey | the note "השיוך לתעודות המשלוח עוד לא פעיל." (a consolidated invoice only; the sentence is the shared key of section 2.2, with a full stop) |
 | "חסר מספר הקצאה" | amber | "בקשו את המספר מהספק, כדי לקזז ₪1,123.20 מע״מ." |
 
 A group of one invoice reads "מחכה", of several "מחכות". Each head also carries the count and the sum with
 "כולל מע״מ". "להחלטה" opens the approvals desk on the `decideGapId` of the group's longest-waiting invoice, at
 `/dashboard/approvals?invoice=<invoiceId>&sel=<gapId>`; the desk opens narrowed to that invoice (section
-5.5). The group a row sits in is `holding.role`, with `mine` and `canAct`, from `invoices.holding`, so one
-invoice is under the same role here, on the list and on the invoice screen.
+5.5). For a row in a decision group, the group is `holding.role`, with `mine` and `canAct`, from
+`invoices.holding`, so one invoice is under the same role here, on the list and on the invoice screen.
+
+**Which group.** An invoice sits in the group of its first reason in the server's order
+(`packages/api/src/routers/payRun.ts:451-475`), and a second reason is said as words in its row. **A
+`duplicate` reason splits by `invoices.holding`:** while it returns a `holding` for the invoice (a gap of it
+still waits for a decision; an undecided duplicate is routed to the bookkeeper), the invoice sits in the
+decision group of `holding.role`, with today's duplicate sentence and its amount on the basis the server
+returns (a duplicate's includes VAT), never "פער של … לפני מע״מ". When `holding` is `null` (the copy is held
+and nothing waits), it sits in the last group, with today's sentence. The server never returns a `decision`
+reason beside a `duplicate` one (`routers/payRun.ts:453`, `:461`), and only the duplicate rule routes to the
+bookkeeper (`packages/api/src/approvals/engine.ts:152-156`), so without this split the group "… של הנהלת
+החשבונות" could never exist. An invoice whose first reason is another one (waiting to be linked, waiting
+for the count, an open question, a held reading) stays in that reason's group even with an open gap, and its
+row says with whom the gap is (section 8, point 3).
 
 **A row held for a decision:** supplier · number · "20.11.2026 · נותרו 26 ימים" · "פער של ₪104.80 לפני מע״מ · 4
 ימים" and under it the rule's sentence, word for word the list's and the desk's · the amount. A gap passed on
@@ -800,7 +861,7 @@ has a note.
 | Nothing held for a decision | "אין פער שמחזיק חשבונית." |
 | Owner | The owner's group first with the only filled "להחלטה"; a secondary one on the manager's group. |
 | Manager | The manager's group first; the owner's group "לקריאה בלבד". |
-| Bookkeeper | Every decision group that is not a duplicate "לקריאה בלבד"; no filled button on the screen; dense rows at a desk. |
+| Bookkeeper | The bookkeeper's own group, an undecided duplicate, first, with the filled "להחלטה"; every other decision group "לקריאה בלבד"; no filled button on the screen when no duplicate waits for the bookkeeper; dense rows at a desk. |
 | Decided | The invoice moves to "ניתן לשלם" with its note. |
 
 ### 6.6 Element by element
@@ -810,7 +871,7 @@ has a note.
 | Two tiles | `pay-run/page.tsx:306-322`; the held tile says "… בבירור מול הספק" and no basis (`messages/payRun/he.ts:87`) | differs | `INV-03` · `payRun.list` totals (unchanged) |
 | The sentence | none | new | `INV-03` · summed from the rows held for a decision, each on the basis the server returns |
 | Groups by who holds | one table per due section, payable and held mixed | differs | `INV-03` · that an invoice is held for a decision, and its ₪, come from `payRun.list`; the group's role, the days and `canAct` come from `invoices.holding`. `payRun.list` defines them differently: the role of the oldest open finding (`routers/payRun.ts:273-281`) and days from the gap's creation (`:283-288`, `:733`) |
-| The rule under a row, the dot, `decideGapId` for the jump, a pass-on, the decided note | not returned by `payRun.list` | new | `INV-03` · one call of `invoices.holding({ invoiceIds })` (`INV-00`); words from `lib/invoices/` |
+| The rule under a row, the dot, `decideGapId` for the jump, a pass-on, the decided note | not returned by `payRun.list` | new | `INV-03` · `invoices.holding({ invoiceIds })` (`INV-00`) for every row of `payRun.list`, held and payable, at most 200 ids a call, the held rows first; a row whose call failed shows its `payRun.list` reason and no role; words from `lib/invoices/` |
 | "להחלטה" per group | a secondary "החליטו" per row, to `?invoice=` only (`pay-run/page.tsx:231`) | differs | `INV-03` · the desk's address of section 6.3 |
 | Role words | "מנהל/ת", "בעלים או מנהל/ת" (`messages/payRun/he.ts:125-127`) | differs | `INV-00` (the words), `INV-03` |
 | "פער … לפני מע״מ" | "בבירור מול הספק" (`messages/payRun/he.ts:105`, `:114`) | differs | `INV-03` |
@@ -847,7 +908,9 @@ touched".
 1. **An invoice with open gaps at two roles.** For the viewer it is "אצלכם" when one of its gaps is routed to
    the viewer's role; otherwise it sits with the role of its leading gap (blocking first, then the oldest).
 2. **A possible duplicate.** Undecided, it sits with "אצל הנהלת החשבונות" like any gap; once held as a copy it
-   gets a place of its own, shown only when it holds an invoice, named by the state word "כפולה אפשרית".
+   gets a place of its own, shown only when it holds an invoice, named by the state word "כפולה אפשרית". The
+   place stands after "ממתינות לשיוך" and before "חסר מספר הקצאה", among the cards and among the rows
+   (sections 3.4 and 3.6). On the pay run the same split decides its group (section 6.3).
 3. **An invoice that waits to be linked and also has a routed gap.** Its place follows the state ("ממתינות
    לשיוך") and its row still names who holds the gap.
 4. **The reason for a rule he has not read as a phrase** (a duplicate, a large invoice with no order, an item
@@ -865,9 +928,18 @@ touched".
     sentences in a last group, whose name needs his word.
 11. **The invoice screen:** one card per gap when an invoice has several; the item alone in "חפשו במסמך" for a
     line with no SKU; passing a gap on through the desk's sheet with its note, not in one press as drawn.
-12. **The undo's word:** "ביטול" in the mock-up, "בטלו" in the product today
-    (`messages/approvals/he.ts:182`). One word for both screens; until he picks, the product's word stays and
-    the pull request says so.
+    **With several gaps the single places speak for one gap, the screen's current gap:** the invoice's
+    `holding.decideGapId` when it is not `null` (the first open gap the viewer may decide), else its leading
+    gap, else, when no gap is open, its last decided gap. The line "חפשו במסמך", the phone's dock, the foot of
+    the whole-screen dialog and the pinned bar show that gap, and pass to the next one when it is decided
+    and the screen has read again. The cards stand in the shared order: open ones first (the viewer's own,
+    then blocking before warning, the longest wait first); decided ones after them. A card decided in place does not jump while the person is on the screen; `INV-01` says in
+    its pull request where it stands until the next load. The mock-up has one gap per invoice
+    (`reference/src/inv-core.js`, `x.gap`) and shows none of this.
+12. **The undo's word and the message's words:** "ביטול" and "{result}, {supplier}" in the mock-up; "בטלו"
+    and "{verb} · {amount} {basis}" in the product today (`main`: `messages/approvals/he.ts:182`; DS3-04:
+    `:368`, `:284`). One wording for both screens; until he picks, the product's stays and the pull request
+    says so.
 13. **The desk's title** ("אישורים" in the mock-up, "תור אישורים" today, `messages/approvals/he.ts:8`): the
     product's stays. **Beside a row's amount:** the days it waits. **The bulk selection:** stays, only on rows
     the viewer may decide.
