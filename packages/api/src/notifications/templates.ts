@@ -253,12 +253,36 @@ export function supplierDelayEmail(args: {
   daysLate: number;
   lineCount: number;
   poUrl?: string;
+  /**
+   * AU-04 A6 (manager): pre-addressed wa.me / mailto drafts to the supplier. Each is
+   * `null` when that contact is missing; both null → the "no contact details" hint.
+   * Nothing is ever sent to the supplier by the server.
+   */
+  chase?: { whatsapp: string | null; mailto: string | null };
+  /** AU-04 A6 (receiver, day 1): the "manager is on it" wording, no supplier link. */
+  forReceiver?: boolean;
   locale?: EmailLocale;
 }): RenderedEmail {
   const l = loc(args.locale);
   const c = copyOf(l).supplierDelay;
   const late = args.daysLate >= 1 ? txt(l, c.late, { days: args.daysLate }) : c.notOnTime;
   const vars = { supplier: args.supplierName, late, date: args.expectedAtLabel, lines: args.lineCount };
+  const chase = args.forReceiver ? undefined : args.chase;
+  const chaseLinks: Array<{ label: string; url: string }> = [];
+  if (chase?.whatsapp) chaseLinks.push({ label: c.whatsapp, url: chase.whatsapp });
+  if (chase?.mailto) chaseLinks.push({ label: c.emailLink, url: chase.mailto });
+  const chaseHtml = !chase
+    ? ''
+    : chaseLinks.length > 0
+      ? `<p style="margin:10px 0 0">${htm(l, c.sendToSupplier)} ${chaseLinks
+          .map((k) => `<a href="${escapeHtml(k.url)}" style="color:${COLORS.primary};font-weight:700">[${escapeHtml(k.label)}]</a>`)
+          .join(' ')}</p>`
+      : `<p style="margin:10px 0 0">${htm(l, c.noContact)}</p>`;
+  const chaseText = !chase
+    ? null
+    : chaseLinks.length > 0
+      ? `${c.sendToSupplier}\n${chaseLinks.map((k) => `${k.label}: ${k.url}`).join('\n')}`
+      : c.noContact;
   const html = renderEmail({
     locale: l,
     accent: COLORS.danger,
@@ -271,13 +295,15 @@ export function supplierDelayEmail(args: {
         'danger',
         l,
       )}
-      <p style="margin:10px 0 0">${htm(l, c.body, vars)}</p>`,
+      <p style="margin:10px 0 0">${htm(l, args.forReceiver ? c.receiverBody : c.body, vars)}</p>${chaseHtml}`,
     cta: args.poUrl ? { label: c.cta, url: args.poUrl } : undefined,
   });
   const text = lines(
     txt(l, c.subject, vars),
     '',
     txt(l, c.text, vars),
+    args.forReceiver && txt(l, c.receiverBody),
+    chaseText && `\n${chaseText}`,
     args.poUrl && `\n${c.cta}: ${args.poUrl}`,
   );
   return { subject: txt(l, c.subject, vars), html, text };

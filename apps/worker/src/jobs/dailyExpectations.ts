@@ -1,4 +1,4 @@
-import { briefOptionOn, deliveryState, latestReceiptStatusSql, notify, receiverMorningBrief } from '@restomatch/api';
+import { briefOptionOn, deliveryState, latestReceiptStatusSql, receiverMorningBrief } from '@restomatch/api';
 import {
   and,
   asc,
@@ -16,6 +16,7 @@ import {
 import { makeWorker, type WorkerJob } from '../queue';
 import { jobDb } from '../db';
 import { appBaseUrl, ilDateKey, startOfIlDay } from '../lib/notifyHelpers';
+import { sendBrief } from '../lib/briefSend';
 
 export interface DailyExpectationsJob {
   /** When omitted, computes for ALL restaurants. */
@@ -63,7 +64,8 @@ export async function processDailyExpectations(job: WorkerJob<DailyExpectationsJ
     ? await db.select().from(restaurants).where(eq(restaurants.id, job.data.restaurantId))
     : await db.select().from(restaurants);
 
-  const summary: Array<{ restaurantId: string; count: number; briefed?: number }> = [];
+  const summary: Array<{ restaurantId: string; count: number }> = [];
+  let briefedTotal = 0;
 
   for (const restaurant of restaurantRows) {
     const all = await db
@@ -131,60 +133,40 @@ export async function processDailyExpectations(job: WorkerJob<DailyExpectationsJ
       },
     });
 
-    const briefed = await enqueueReceiverBrief(db, restaurant, forDate, expectations, targetDate);
-    summary.push({ restaurantId: restaurant.id, count: expectations.length, ...(briefed ? { briefed } : {}) });
+    // AU-04 A4 · the 06:00 receiver truck brief (no ₪). Zero deliveries → nothing.
+    if (expectations.length > 0) {
+      if (!briefOptionOn(restaurant.settings, 'receiverBrief')) {
+        console.log(`[daily-expectations] restaurant=${restaurant.id} skipped: option off`);
+      } else {
+        const deliveries = expectations.map((e) => {
+          const at = rows.find((r) => r.poId === e.poId)?.expectedAt ?? null;
+          // A PO day with no time is stored at Israel midnight: show it as "no time".
+          const hasTime = at != null && at.getTime() !== startOfDay.getTime();
+          return { supplierName: e.supplierName, expectedAt: hasTime ? at : null, lineCount: e.lineCount };
+        });
+        const res = await sendBrief(db, {
+          restaurantId: restaurant.id,
+          now: targetDate,
+          event: `au:A4:${forDate}`,
+          audience: { roles: ['receiver'] },
+          entity: { type: 'restaurant', id: restaurant.id },
+          perishable: true,
+          payload: { automationId: 'A4' },
+          build: ({ locale }) =>
+            receiverMorningBrief({ restaurantId: restaurant.id, baseUrl: appBaseUrl(), locale, ilDate: forDate, deliveries }),
+        });
+        briefedTotal += res.enqueued;
+      }
+    }
+
+    summary.push({ restaurantId: restaurant.id, count: expectations.length });
   }
 
   console.log(
     `[daily-expectations] forDate=${forDate} ` +
       `restaurants=${summary.length} ` +
-      `total_pos=${summary.reduce((s, r) => s + r.count, 0)}`,
+      `total_pos=${summary.reduce((s, r) => s + r.count, 0)} receiver_briefs=${briefedTotal}`,
   );
 
   return { date: forDate, summary };
-}
-
-/**
- * W3-03b · the 06:00 receiver brief ("3 משלוחים היום"). Goes through notify()
- * (quiet hours, Shabbat, ≤6/day, dedupe) to the restaurant's receivers only. NO ₪:
- * the brief's input carries no amount at all. Zero deliveries or the owner option
- * `receiverBrief` off → nothing. The IL day is part of the event, so a re-run the
- * same morning dedupes and tomorrow's brief does not. Returns the rows enqueued.
- */
-export async function enqueueReceiverBrief(
-  db: ReturnType<typeof jobDb>,
-  restaurant: { id: string; settings: unknown },
-  forDate: string,
-  expectations: readonly DailyExpectationsEntry[],
-  now: Date,
-): Promise<number> {
-  if (expectations.length === 0 || !briefOptionOn(restaurant.settings, 'receiverBrief')) return 0;
-  const deliveries = expectations.map((e) => ({
-    supplierName: e.supplierName,
-    expectedAt: e.expectedAt ? new Date(e.expectedAt) : null,
-    lineCount: e.lineCount,
-  }));
-  const res = await notify(db, {
-    restaurantId: restaurant.id,
-    event: `receiver.morning_brief:${forDate}`,
-    audience: { roles: ['receiver'] },
-    template: 'receiverMorning',
-    entity: { type: 'restaurant', id: restaurant.id },
-    deepLink: '/dashboard/receiving',
-    now,
-    render: ({ locale, channel }) => {
-      const msg = receiverMorningBrief({
-        restaurantId: restaurant.id,
-        baseUrl: appBaseUrl(),
-        locale,
-        ilDate: forDate,
-        deliveries,
-        // A PO with a day but no time is stored at IL midnight: show no time for it.
-        hasTime: (d) => d.expectedAt != null && ilDateKey(d.expectedAt) === forDate && startOfIlDay(d.expectedAt).getTime() !== d.expectedAt.getTime(),
-      });
-      if (!msg) return null;
-      return channel === 'email' ? { subject: msg.subject, body: msg.text, html: msg.html } : { body: msg.text };
-    },
-  });
-  return res.enqueued;
 }

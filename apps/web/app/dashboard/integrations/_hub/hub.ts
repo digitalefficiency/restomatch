@@ -58,6 +58,8 @@ export interface ProcurementProviderRow {
   connected: boolean;
   mode: 'sample' | 'live' | null;
   lastSyncAt: Date | string | null;
+  /** Server-computed (integrations isSyncStale): live but not synced for 48 h. */
+  syncStale?: boolean;
 }
 
 /** MarketMan / Zester rows → tiles. No adapter → a contact path, never a dead button. */
@@ -69,9 +71,12 @@ export function procurementTiles(rows: readonly ProcurementProviderRow[]): HubTi
       ? ('contact' as const)
       : !r.connected
         ? ('not_connected' as const)
-        : r.mode === 'sample'
-          ? ('sample' as const)
-          : ('connected' as const),
+        : r.syncStale
+          ? ('error' as const)
+          : r.mode === 'sample'
+            ? ('sample' as const)
+            : ('connected' as const),
     lastSyncAt: r.lastSyncAt ? new Date(r.lastSyncAt) : null,
+    ...(r.connected && r.syncStale ? { errorKey: 'hub.errors.syncStale' } : {}),
   }));
 }

@@ -8,17 +8,19 @@ import {
   memberships,
   restaurants,
   sql,
+  subscriptions,
   users,
   type Database,
   type RestaurantSettings,
 } from '@restomatch/db';
 import { resolveTolerances } from '@restomatch/matching';
 import { DEFAULT_REVIEW_THRESHOLD } from '@restomatch/ocr';
-import { resolveApprovalThresholds } from '../approvals/engine';
+import { resolveApprovalThresholds, resolvePayApprovalThresholds } from '../approvals/engine';
 import { recordAudit, type AuditAction } from '../audit';
 import { appError } from '../errors';
 import { vatRateOf } from '../lib/vat';
 import { financeProcedure, managerProcedure, memberProcedure, ownerProcedure, router } from '../trpc';
+import { getEntitlements, getQuota } from '../entitlements';
 import { hasNoControlChars, NO_CONTROL_CHARS_MESSAGE } from '../lib/text';
 
 /**
@@ -65,6 +67,9 @@ const ApprovalThresholdsSchema = z
     cumulativeLargePct: knob(fraction),
     cumulativeMediumAmountMin: knob(boundedNonNeg(100_000_000)),
     cumulativeMediumPctMin: knob(fraction),
+    // G-15b (owner 11.11, Q3): ₪N incl. VAT and above → the owner approves for payment.
+    // Stored in the same jsonb; schema.ts's type for it gains the key in the schema train.
+    payApprovalOverAmount: knob(boundedNonNeg(100_000_000)),
   })
   .strict();
 
@@ -146,9 +151,17 @@ export function effectiveSettings(settings: RestaurantSettings) {
         { value, isDefault: stored?.[k as keyof T] == null } satisfies EffectiveValue,
       ]),
     ) as { [K in keyof T]: EffectiveValue };
+  const storedAppr = (settings.approvalThresholds ?? {}) as Record<string, number | undefined>;
+  const pay = resolvePayApprovalThresholds(storedAppr);
   return {
     tolerances: pick(tol, settings.tolerances),
-    approvalThresholds: pick(appr, settings.approvalThresholds),
+    approvalThresholds: {
+      ...pick(appr, settings.approvalThresholds),
+      payApprovalOverAmount: {
+        value: pay.payApprovalOverAmount,
+        isDefault: storedAppr.payApprovalOverAmount == null,
+      } satisfies EffectiveValue,
+    },
     ocrReviewThreshold: {
       value: settings.ocrReviewThreshold ?? DEFAULT_REVIEW_THRESHOLD,
       isDefault: settings.ocrReviewThreshold == null,
@@ -554,4 +567,37 @@ export const settingsRouter = router({
         .where(eq(users.id, ctx.session.userId));
       return { phone, verified: false };
     }),
+
+  /**
+   * W3-07a · "תוכנית ושימוש": a READ-ONLY view of the active restaurant's plan
+   * and usage, straight from getEntitlements / getQuota (nothing redefined, no ₪).
+   * Seats = memberships of THIS restaurant only.
+   */
+  planUsage: financeProcedure.query(async ({ ctx }) => {
+    const restaurantId = ctx.session.restaurantId;
+    const [ent, scans, seatRows, subRows] = await Promise.all([
+      getEntitlements(ctx.db, restaurantId),
+      getQuota(ctx.db, restaurantId, 'ocr_scans'),
+      ctx.db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(memberships)
+        .where(eq(memberships.restaurantId, restaurantId)),
+      ctx.db
+        .select({ trialEndsAt: subscriptions.trialEndsAt })
+        .from(restaurants)
+        .innerJoin(subscriptions, eq(subscriptions.billingAccountId, restaurants.billingAccountId))
+        .where(eq(restaurants.id, restaurantId))
+        .limit(1),
+    ]);
+    return {
+      planKey: ent.planKey,
+      status: ent.status,
+      trialEndsAt: subRows[0]?.trialEndsAt ?? null,
+      /** No billing account: the implicit trial (unmetered). */
+      implicit: ent.billingAccountId === null,
+      limits: ent.limits,
+      scans: { metered: scans.metered, used: scans.used, limit: scans.limit, withinLimit: scans.withinLimit },
+      seatsUsed: seatRows[0]?.n ?? 0,
+    };
+  }),
 });

@@ -32,6 +32,14 @@ describe('planUsageRows', () => {
   });
 });
 
+describe('planUsageRows without a restaurant count', () => {
+  it('skips the restaurants row instead of guessing', () => {
+    const { restaurantsUsed: _omit, ...rest } = base;
+    void _omit;
+    expect(planUsageRows(rest).map((r) => r.key)).toEqual(['scans', 'seats']);
+  });
+});
+
 describe('trialDaysLeft', () => {
   const now = new Date('2026-10-25T09:40:00Z');
   it('counts whole days up', () => {
