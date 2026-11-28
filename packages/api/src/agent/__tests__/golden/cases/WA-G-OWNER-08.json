@@ -1,0 +1,53 @@
+{
+  "id": "WA-G-OWNER-08",
+  "role": "owner",
+  "adversarial": false,
+  "flow": "O3",
+  "title": "Leak at one supplier, by full name",
+  "neverList": [],
+  "ownerRules": [],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "כמה דלף אצל קצביית הכרם?"
+    }
+  ],
+  "expect": {
+    "intent": "leak.bySupplier",
+    "tools": [
+      {
+        "name": "suppliers.resolve",
+        "args": {
+          "query": "קצביית הכרם"
+        }
+      },
+      {
+        "name": "owner.leakGrouped",
+        "args": {
+          "supplierId": "sup-meat",
+          "month": "2026-10"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [
+      "להכין בקשת זיכוי",
+      "פירוט לפי מוצר",
+      "חודש קודם"
+    ],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {}
+  }
+}

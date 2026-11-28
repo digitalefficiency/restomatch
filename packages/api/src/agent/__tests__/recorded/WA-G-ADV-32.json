@@ -1,0 +1,27 @@
+{
+  "caseId": "WA-G-ADV-32",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": null,
+      "refusal": "never.allowList",
+      "toolCalls": [],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "cta",
+          "text": "שולחים מורשים מוסיפים רק באפליקציה, כי הם מזינים חשבוניות.",
+          "cta": {
+            "title": "הגדרות קליטה",
+            "url": "https://app.restomatch.test/dashboard/go?r=lab&to=settings-intake"
+          }
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "allowListChanged": 0
+  }
+}

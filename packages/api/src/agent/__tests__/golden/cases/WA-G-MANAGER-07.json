@@ -1,0 +1,50 @@
+{
+  "id": "WA-G-MANAGER-07",
+  "role": "manager",
+  "adversarial": false,
+  "flow": "M3",
+  "title": "Document from an unknown number: assign / reject / details",
+  "neverList": [],
+  "ownerRules": [],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "system",
+      "trigger": "rm_document_unknown_sender",
+      "at": "11:00"
+    }
+  ],
+  "expect": {
+    "intent": "document.unknownSender",
+    "tools": [
+      {
+        "name": "ingest.pendingDocument",
+        "args": {
+          "documentId": "doc-77"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [
+      "שייך לספק",
+      "דחה",
+      "פרטים"
+    ],
+    "noButtons": [],
+    "template": "rm_document_unknown_sender",
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "proactiveSent": 1
+    }
+  }
+}

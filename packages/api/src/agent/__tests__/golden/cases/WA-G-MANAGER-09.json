@@ -1,0 +1,49 @@
+{
+  "id": "WA-G-MANAGER-09",
+  "role": "manager",
+  "adversarial": false,
+  "flow": "M3",
+  "title": "Reject the unknown document",
+  "neverList": [],
+  "ownerRules": [],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "tap": {
+        "kind": "template_button",
+        "id": "doc:reject:doc-77",
+        "title": "דחה"
+      }
+    }
+  ],
+  "expect": {
+    "intent": "document.reject",
+    "tools": [
+      {
+        "name": "ingest.rejectDocument",
+        "args": {
+          "documentId": "doc-77"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "documentsRejected": 1,
+      "rowsDeleted": 0
+    }
+  }
+}

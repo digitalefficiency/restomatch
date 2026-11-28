@@ -13,6 +13,7 @@ import { components } from '@/lib/i18n/messages/components';
 import { inventory as inventoryNs } from '@/lib/i18n/messages/inventory';
 import { dayText } from './inventory-ui';
 import { PeriodCard } from './period-card';
+import { ControlRoomCard } from './control-room';
 
 type Outputs = inferRouterOutputs<AppRouter>['inventory'];
 export type InventoryRole = 'owner' | 'manager' | 'chef' | 'bookkeeper';
@@ -99,6 +100,8 @@ export function InventoryHome({
       )}
 
       <PeriodCard percentOnly={!money} canEditSales={closer} />
+      {/* W3-02b: the control room is all ₪ — owner / manager / bookkeeper only (the chef never mounts it). */}
+      {money ? <ControlRoomCard /> : null}
 
       <section aria-labelledby="history-title">
         <h2 id="history-title" className="mb-3 text-sm font-semibold text-muted">

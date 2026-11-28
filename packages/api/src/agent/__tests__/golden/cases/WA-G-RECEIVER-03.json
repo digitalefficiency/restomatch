@@ -1,0 +1,52 @@
+{
+  "id": "WA-G-RECEIVER-03",
+  "role": "receiver",
+  "adversarial": false,
+  "flow": "R1",
+  "title": "Many trucks → full list",
+  "neverList": [],
+  "ownerRules": [
+    "receiver-no-ils"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "tap": {
+        "kind": "template_button",
+        "id": "rcv:list",
+        "title": "רשימה מלאה"
+      }
+    }
+  ],
+  "expect": {
+    "intent": "receiving.today",
+    "tools": [
+      {
+        "name": "receiving.todayExpectations",
+        "args": {}
+      }
+    ],
+    "forbiddenFields": [
+      "ils|agorot|amount|total|price"
+    ],
+    "forbiddenText": [
+      "₪",
+      "\\d+[.,]\\d{2}"
+    ],
+    "buttons": [],
+    "noButtons": [],
+    "listRows": 3,
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {}
+  }
+}

@@ -51,6 +51,11 @@ export const en = {
     body: 'The order has {lines, plural, one {# item} other {# items}} and has not been received yet. Contact the supplier or update the status.',
     cta: 'View the order',
     text: 'The order is {late}. Expected: {date}. {lines, plural, one {# item} other {# items}}, not received yet.',
+    sendToSupplier: 'Message the supplier:',
+    whatsapp: 'WhatsApp',
+    emailLink: 'Email',
+    noContact: 'No supplier contact details · add them on the supplier card',
+    receiverBody: 'The manager is following up with the supplier.',
   },
   orderNotPlaced: {
     subject: 'No order placed with {supplier}',

@@ -206,7 +206,7 @@ describe('consolidatedProposal reads only closed receipts and counted lines', ()
     expect(missing.every((f) => !f.countsAsLeak && f.deliveryNoteNumber === '7703')).toBe(true);
   });
 
-  it('a ריכוז billing its closed note at the PO price plus a not-yet-received note reads "matched", never a false alarm', async () => {
+  it('a ריכוז billing its closed note at the PO price plus a not-yet-received note reads neutral "pending" (Q6), never a false alarm', async () => {
     const T = await seedTenant(db, 'A');
     const { milk, note, consolidated } = await setup(T);
     await note('7701', 'partial', [{ productId: milk, qty: '4' }]);
@@ -223,7 +223,7 @@ describe('consolidatedProposal reads only closed receipts and counted lines', ()
     expect(p.claim).toEqual({ exclIls: 0, inclIls: 0 });
     expect(p.pendingNotes).toEqual([{ number: '7702', billedIls: 51 }]);
     expect(p.reviewItems).toEqual([]);
-    expect(p.status).toBe('matched');
+    expect(p.status).toBe('pending'); // Q6: neutral "ממתינה" until counting ends, still no false alarm
   });
 
   it('once the pending note is closed it is cross-matched like any other', async () => {

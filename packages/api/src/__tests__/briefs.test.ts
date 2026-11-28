@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  briefDedupeKey,
   briefPayload,
   eveningBrief,
   findingIdentity,
@@ -17,6 +16,8 @@ import {
   waDigits,
   waMeLink,
 } from '../briefs';
+import { notifyDedupeKey } from '../notifications/notify';
+import { formatIlsAgorot } from '../reports/money';
 
 /** AU-04 · the pure role-brief builders (no DB). Fixed instants, Israel time. */
 const RID = '11111111-1111-4111-8111-111111111111';
@@ -62,7 +63,7 @@ describe('links', () => {
   });
 });
 
-describe('A3 receiver morning brief', () => {
+describe('A4 receiver morning brief', () => {
   const deliveries = [
     { supplierName: 'תנובה', expectedAt: at('2026-10-25T06:00:00Z'), lineCount: 12 },
     { supplierName: 'שטראוס', expectedAt: at('2026-10-25T08:30:00Z'), lineCount: 5 },
@@ -78,8 +79,9 @@ describe('A3 receiver morning brief', () => {
     expect(m.deepLink).toBe(goLink(BASE, RID, '/dashboard/receiving'));
     expect(m.html).toContain('dir="rtl"');
     expect(m.dedupeSuffix).toBe('2026-10-25');
-    expect(m.automationId).toBe('A3');
-    expect(briefDedupeKey(m, RID, 'u1')).toBe(`au:A3:${RID}:u1:2026-10-25`);
+    expect(m.automationId).toBe('A4');
+    // The key the producer really writes: notify() on event `au:A4:<IL day>`, entity = the restaurant.
+    expect(notifyDedupeKey(`au:A4:${m.dedupeSuffix}`, RID, RID, 'u1', 'email')).toBe(`au:A4:2026-10-25:${RID}:${RID}:u1:email`);
   });
 
   it('en renders LTR', () => {
@@ -93,7 +95,7 @@ describe('A3 receiver morning brief', () => {
   });
 });
 
-describe('A4 evening digest', () => {
+describe('A7 evening digest', () => {
   const full = {
     ...ctx,
     ilDate: '2026-10-25',
@@ -203,7 +205,10 @@ describe('A6 late truck', () => {
 
   it('receiver: day 1 only, no supplier link', () => {
     const r = lateTruckReceiverBrief(base)!;
-    expect(r.text).toContain('המשלוח מתנובה מאחר (תוכנן ל-24/10)');
+    expect(r.subject).toBe('איחור באספקה מ-תנובה');
+    expect(r.text).toContain('ההזמנה באיחור של יום אחד. מועד צפוי: 24/10.');
+    expect(r.text).toContain('ההנהלה מטפלת מול הספק.');
+    expect(r.text).not.toContain('שלחו לספק');
     expect(r.text).not.toContain('wa.me');
     expect(r.text).not.toContain('mailto:');
     expect(lateTruckReceiverBrief({ ...base, daysLate: 3 })).toBeNull();
@@ -211,7 +216,7 @@ describe('A6 late truck', () => {
   });
 });
 
-describe('A7 match alert on re-match', () => {
+describe('A1 match alert on re-match', () => {
   const k = (type: string, line: string) => findingIdentity({ invoiceId: 'inv-1', type, poLineId: line });
 
   it('identity prefers po_line, then invoice_line, then gr_line', () => {
@@ -234,7 +239,9 @@ describe('A7 match alert on re-match', () => {
     const m = matchAlertBrief({ ...ctx, invoiceId: 'inv-1', invoiceRef: '7781', supplierName: 'שטראוס', newKeys: [k('PRICE_HIGHER', 'c')], leakAgorot: 4550 })!;
     expect(m.dedupeSuffix).toBe(`inv-1:${identitySetHash([k('PRICE_HIGHER', 'c')])}`);
     expect(m.text).toContain('נמצא פער חדש בחשבונית 7781 של שטראוס.');
-    expect(m.text).toMatch(/אפשר לבקש זיכוי: .*46/);
+    // The first-match alert's precision (formatIlsAgorot, up to 2 decimals), never rounded to whole ₪.
+    expect(m.text).toContain(`אפשר לבקש זיכוי: ${formatIlsAgorot(4550, { maximumFractionDigits: 2 })}`);
+    expect(m.text).toMatch(/45\.5/);
     expect(m.text).not.toMatch(BANNED_HE);
     expect(m.deepLink).toBe(goLink(BASE, RID, '/dashboard/invoices/inv-1'));
   });
@@ -244,6 +251,12 @@ describe('A7 match alert on re-match', () => {
     const m = matchAlertBrief({ ...ctx, invoiceId: 'i', invoiceRef: '1', supplierName: 's', newKeys: ['x', 'y'], leakAgorot: null })!;
     expect(m.text).not.toContain('₪');
     expect(m.subject).toBe('2 פערים חדשים בחשבונית של s');
+    // A small claim keeps its agorot (never "₪0"); a zero claim prints no ₪ line at all.
+    const small = matchAlertBrief({ ...ctx, invoiceId: 'i', invoiceRef: '1', supplierName: 's', newKeys: ['x'], leakAgorot: 40 })!;
+    expect(small.text).toContain(formatIlsAgorot(40, { maximumFractionDigits: 2 }));
+    expect(small.text).toMatch(/0\.4/);
+    const zero = matchAlertBrief({ ...ctx, invoiceId: 'i', invoiceRef: '1', supplierName: 's', newKeys: ['x'], leakAgorot: 0 })!;
+    expect(zero.text).not.toContain('₪');
   });
 });
 
@@ -279,7 +292,7 @@ describe('link helpers are linear on hostile input (CodeQL)', () => {
 describe('payload.invoiceId (AU-07 "acted within 48 h" join)', () => {
   it('A7 always carries the invoice; A6 only when the PO has one; others never', () => {
     const a7 = matchAlertBrief({ ...ctx, invoiceId: 'inv-1', invoiceRef: '1', supplierName: 's', newKeys: ['k'], leakAgorot: null })!;
-    expect(briefPayload(a7)).toEqual({ automationId: 'A7', invoiceId: 'inv-1' });
+    expect(briefPayload(a7)).toEqual({ automationId: 'A1', invoiceId: 'inv-1' });
     const late = { ...ctx, poId: 'po-1', poRef: '1', supplierName: 's', restaurantName: 'r', expectedAt: at('2026-10-24T06:00:00Z'), daysLate: 1, lineCount: 1 };
     expect(briefPayload(lateTruckManagerBrief(late))).toEqual({ automationId: 'A6' });
     expect(briefPayload(lateTruckManagerBrief({ ...late, invoiceId: 'inv-9' }))).toEqual({ automationId: 'A6', invoiceId: 'inv-9' });

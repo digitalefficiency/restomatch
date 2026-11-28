@@ -353,6 +353,41 @@ export async function purchasesInPeriod(
 }
 
 /**
+ * W3-02b · food purchases per product for local dates (fromYmd, toYmd]: the
+ * itemised invoice lines (food, not beverage) of invoices dated in the period,
+ * live duplicates left out — the same invoice set as `purchasesInPeriod`.
+ * Header-only invoices, delivery-note accruals and credits are NOT itemised
+ * here; the control room shows them as one reconciling row.
+ */
+export async function foodPurchasesByProduct(
+  db: Database,
+  restaurantId: string,
+  tz: string,
+  fromYmd: string,
+  toYmd: string,
+): Promise<Array<{ productId: string; name: string; nameEn: string | null; category: string | null; agorot: number }>> {
+  const d = sql`(coalesce(i.invoice_date, i.created_at) at time zone ${tz})::date`;
+  const rows = (await db.execute(sql`
+    select p.id as pid, p.canonical_name as name, p.name_en as "nameEn", p.category,
+           sum(l.line_total)::numeric(14,2)::text as total
+    from invoices i
+    join invoice_lines l on l.invoice_id = i.id
+    join products p on p.id = l.product_id and p.restaurant_id = ${restaurantId}
+    where i.restaurant_id = ${restaurantId}
+      and ${d} > ${fromYmd}::date and ${d} <= ${toYmd}::date
+      and not exists (
+        select 1 from match_runs mr
+        join discrepancies d on d.match_run_id = mr.id and d.restaurant_id = ${restaurantId}
+        where mr.invoice_id = i.id and mr.restaurant_id = ${restaurantId} and ${LIVE_DUPLICATE}
+      )
+      and not (coalesce(p.category, '') ~* ${NON_FOOD_PATTERN})
+      and not (coalesce(p.category, '') ~* ${BEVERAGE_PATTERN})
+    group by 1, 2, 3, 4
+  `)) as unknown as Array<{ pid: string; name: string; nameEn: string | null; category: string | null; total: string }>;
+  return rows.map((r) => ({ productId: r.pid, name: r.name, nameEn: r.nameEn, category: r.category, agorot: agorot(r.total) }));
+}
+
+/**
  * Receipt-date accrual for delivery notes (תעודות משלוח: goods receipts tagged
  * `ת.מ. <n>`, no invoice of their own, billed later on a consolidated invoice
  * that lists them in ocr_payload.raw.deliveryNotes). A note received in the

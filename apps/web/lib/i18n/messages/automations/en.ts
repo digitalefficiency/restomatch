@@ -82,6 +82,16 @@ export const en: Shape<typeof he> = {
       what: 'Which deliveries are due today and what to check on receipt.',
       when: 'Every day at 06:00',
     },
+    receiverLateNotice: {
+      name: 'Late delivery: notice to the receiver',
+      what: 'Day one of a delay: the receiver hears management is on it.',
+      when: 'Every day at 10:00',
+    },
+    rematchAlerts: {
+      name: 'New gap after a re-check',
+      what: 'A re-check (correction, count or product link) found a new gap.',
+      when: 'As soon as a re-check finds a new gap',
+    },
     matchAlerts: {
       name: 'Invoice gap alert',
       what: 'An invoice was checked and a gap was found against the order or the agreed price.',
