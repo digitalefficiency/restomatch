@@ -1,4 +1,4 @@
-import { CheckCircle2, ClipboardList, Truck } from 'lucide-react';
+import { CheckCircle2, ClipboardList, Clock, Truck } from 'lucide-react';
 import type { ConsolidatedProposal } from '@restomatch/api';
 import { Badge, type BadgeTone } from '@/lib/components/Badge';
 import { Card } from '@/lib/components/Card';
@@ -192,6 +192,16 @@ export function ConsolidatedPanel({
           <div className="print:hidden">
             {/* TODO(H-03): link to the supplier's claim letter (W2-10) instead, once the claims page includes ריכוז findings. */}
             <PrintButton label={t('print')} primary scope="xmatch" />
+          </div>
+        </Card>
+      ) : proposal.status === 'pending' ? (
+        // T4 (G-04 Q6, owner 11.11 (ב)): a listed note is still being counted —
+        // neutral until counting ends, never the green "matched".
+        <Card padding="md" className="mb-4 flex items-start gap-3" data-testid="xmatch-pending">
+          <Clock className="mt-0.5 h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
+          <div>
+            <p className="font-semibold text-ink">{t('status.pending')}</p>
+            <p className="text-sm text-muted">{t('status.pendingBody')}</p>
           </div>
         </Card>
       ) : proposal.status === 'matched' ? (
