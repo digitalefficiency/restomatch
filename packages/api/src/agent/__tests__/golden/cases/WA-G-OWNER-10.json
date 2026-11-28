@@ -1,0 +1,47 @@
+{
+  "id": "WA-G-OWNER-10",
+  "role": "owner",
+  "adversarial": false,
+  "flow": "O3",
+  "title": "Ambiguous supplier → \"למי התכוונת?\" list",
+  "neverList": [],
+  "ownerRules": [],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {
+      "extraSuppliers": [
+        "ירקות השומרון"
+      ]
+    }
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "כמה דלף אצל ירקות הש"
+    }
+  ],
+  "expect": {
+    "intent": "leak.bySupplier",
+    "tools": [
+      {
+        "name": "suppliers.resolve",
+        "args": {
+          "query": "ירקות הש"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "listRows": 2,
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {}
+  }
+}

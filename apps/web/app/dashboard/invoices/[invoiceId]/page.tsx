@@ -125,6 +125,7 @@ export default async function InvoiceCockpitPage({
     doc: t('cockpit.doc'),
     lines: t('cockpit.lines'),
     segLabel: t('cockpit.segLabel'),
+    notCounted: t('cockpit.notCounted'),
     viewer: {
       title: t('correction.viewScan'),
       zoomIn: t('cockpit.zoomIn'),

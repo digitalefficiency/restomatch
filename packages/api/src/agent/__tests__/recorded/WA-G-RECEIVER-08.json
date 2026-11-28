@@ -1,0 +1,45 @@
+{
+  "caseId": "WA-G-RECEIVER-08",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "receiving.photo",
+      "toolCalls": [
+        {
+          "name": "scans.upload",
+          "args": {
+            "source": "whatsapp",
+            "mediaId": "media.LAB.WA-G-RECEIVER-08.0"
+          },
+          "result": {
+            "scanId": "scan-2",
+            "kind": "delivery_note",
+            "supplier": "משקאות שטיינברג",
+            "lineCount": 14
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "reaction",
+          "text": "✅"
+        },
+        {
+          "origin": "server",
+          "kind": "cta",
+          "text": "קיבלתי תעודת משלוח ממשקאות שטיינברג, 14 שורות. משלוח ארוך נוח יותר לספור באפליקציה.",
+          "cta": {
+            "title": "ספירה באפליקציה",
+            "url": "https://app.restomatch.test/dashboard/go?r=lab&to=receiving/scan-2"
+          }
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "ingestJobs": 1
+  }
+}

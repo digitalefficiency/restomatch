@@ -57,6 +57,9 @@ export const APP_ERROR_CODES = [
   'lifecycle.refused',
   // AU-01: the owner tried to switch a flag that is admin-only (not on OWNER_TOGGLEABLE).
   'automations.notOwnerToggleable',
+  // G-15b: ₪N and above, or a new supplier's first invoice → only the owner approves for
+  // payment (owner 11.11). params: reasons ('over_amount,new_supplier'), amount, threshold.
+  'payment.ownerApprovalRequired',
 ] as const;
 
 export type AppErrorCode = (typeof APP_ERROR_CODES)[number];

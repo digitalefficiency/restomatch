@@ -1,0 +1,143 @@
+{
+  "caseId": "WA-G-MANAGER-08",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "document.assign",
+      "toolCalls": [
+        {
+          "name": "suppliers.list",
+          "args": {},
+          "result": {
+            "suppliers": [
+              {
+                "supplierId": "sup-0",
+                "name": "ירקות השרון"
+              },
+              {
+                "supplierId": "sup-1",
+                "name": "קצביית הכרם"
+              },
+              {
+                "supplierId": "sup-2",
+                "name": "מאפיית ברנר"
+              },
+              {
+                "supplierId": "sup-3",
+                "name": "דגי הים התיכון"
+              },
+              {
+                "supplierId": "sup-4",
+                "name": "מחלבות הגליל"
+              },
+              {
+                "supplierId": "sup-5",
+                "name": "תבליני פרשמן"
+              },
+              {
+                "supplierId": "sup-6",
+                "name": "משקאות שטיינברג"
+              },
+              {
+                "supplierId": "sup-7",
+                "name": "יבשים בן-עמי"
+              },
+              {
+                "supplierId": "sup-8",
+                "name": "חד״פ מהיר"
+              },
+              {
+                "supplierId": "sup-9",
+                "name": "עמית חומרי ניקוי"
+              }
+            ]
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "list",
+          "text": "לאיזה ספק לשייך?",
+          "list": {
+            "button": "בחרו ספק",
+            "rows": [
+              {
+                "id": "row:0",
+                "title": "ירקות השרון"
+              },
+              {
+                "id": "row:1",
+                "title": "קצביית הכרם"
+              },
+              {
+                "id": "row:2",
+                "title": "מאפיית ברנר"
+              },
+              {
+                "id": "row:3",
+                "title": "דגי הים התיכון"
+              },
+              {
+                "id": "row:4",
+                "title": "מחלבות הגליל"
+              },
+              {
+                "id": "row:5",
+                "title": "תבליני פרשמן"
+              },
+              {
+                "id": "row:6",
+                "title": "משקאות שטיינברג"
+              },
+              {
+                "id": "row:7",
+                "title": "יבשים בן-עמי"
+              },
+              {
+                "id": "row:8",
+                "title": "חד״פ מהיר"
+              },
+              {
+                "id": "row:9",
+                "title": "עמית חומרי ניקוי"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "intent": null,
+      "toolCalls": [
+        {
+          "name": "ingest.approveDocument",
+          "args": {
+            "documentId": "doc-77",
+            "supplierId": "sup-veg"
+          },
+          "result": {
+            "status": "queued"
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "cta",
+          "text": "שויך: החשבונית נוספה לירקות השרון ותיבדק עכשיו. המספר לא נוסף לשולחים המורשים; את זה עושים באפליקציה.",
+          "cta": {
+            "title": "הגדרות קליטה",
+            "url": "https://app.restomatch.test/dashboard/go?r=lab&to=settings-intake"
+          }
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "documentsAssigned": 1,
+    "allowListChanged": 0
+  }
+}

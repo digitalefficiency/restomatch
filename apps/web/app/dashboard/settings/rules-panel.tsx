@@ -18,7 +18,8 @@ export interface EffectiveRules {
     | 'cumulativeLargeAmount'
     | 'cumulativeLargePct'
     | 'cumulativeMediumAmountMin'
-    | 'cumulativeMediumPctMin',
+    | 'cumulativeMediumPctMin'
+    | 'payApprovalOverAmount',
     Eff
   >;
   ocrReviewThreshold: Eff;
@@ -82,6 +83,11 @@ export function RulesPanel({ rules, history }: { rules: EffectiveRules; history:
           key: 'noPo',
           text: sentence(t('rules.largeInvoiceWithoutPo'), [{ amount: a.largeInvoiceWithoutPo.value }]),
           chip: chip(a.largeInvoiceWithoutPo),
+        },
+        {
+          key: 'payApproval',
+          text: sentence(t('rules.payApprovalOverAmount'), [{ amount: a.payApprovalOverAmount.value }]),
+          chip: chip(a.payApprovalOverAmount),
         },
         {
           key: 'unordered',

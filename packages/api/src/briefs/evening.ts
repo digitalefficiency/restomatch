@@ -9,7 +9,7 @@ export type EveningRole = 'owner' | 'manager' | 'bookkeeper';
 export const EVENING_ROLES: readonly EveningRole[] = ['owner', 'manager', 'bookkeeper'];
 
 /**
- * A4 · the 19:00 decision digest, one per person. Every figure is optional: a
+ * A7 · the 19:00 decision digest, one per person. Every figure is optional: a
  * source that has not merged yet (W2-03 due dates, AU-03 overdue claims, AU-02
  * intake) is passed as `null/undefined` and its line is omitted — never shown as 0.
  * ₪ comes ONLY from `awaitingDecision` (G-12) and AU-03's claims, in integer
@@ -59,5 +59,5 @@ export function eveningBrief(input: EveningInput): BriefMessage | null {
   const subject = c.subject(lines.length);
   const text = `${c.heading}\n\n${lines.map((l) => `• ${l.text}\n  ${l.href}`).join('\n')}`;
   const html = briefHtml({ locale, preview: lines[0]!.text, heading: c.heading, lines });
-  return { subject, text, html, deepLink, dedupeSuffix: input.ilDate, automationId: 'A4' };
+  return { subject, text, html, deepLink, dedupeSuffix: input.ilDate, automationId: 'A7' };
 }

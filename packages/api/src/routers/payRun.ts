@@ -578,11 +578,25 @@ const ITEM = z.object({
   /** The status the client saw; a stale one is a CONFLICT (G-05 `expectedFrom`). */
   expectedStatus: z.enum(invoiceStatus.enumValues),
 });
+/**
+ * The payment methods mark-paid accepts — exactly H-03's signed 0072 `invoices_payment_method_check`
+ * and G-05's `PAYMENT_METHODS` (lifecycle/machines.ts). A parity test pins the two together.
+ * 'offset' = a supplier credit used as payment.
+ */
+export const PAY_RUN_PAYMENT_METHODS = ['bank_transfer', 'check', 'cash', 'card', 'offset', 'other'] as const;
+export type PayRunPaymentMethod = (typeof PAY_RUN_PAYMENT_METHODS)[number];
+/** Legacy spellings a stale client may still send; normalised before validation. */
+const LEGACY_PAYMENT_METHOD: Record<string, PayRunPaymentMethod> = { credit_card: 'card' };
+export const paymentMethodInput = z.preprocess(
+  (v) => (typeof v === 'string' && v in LEGACY_PAYMENT_METHOD ? LEGACY_PAYMENT_METHOD[v] : v),
+  z.enum(PAY_RUN_PAYMENT_METHODS),
+);
+
 const MARK_PAID_INPUT = z.object({
   items: z.array(ITEM).min(1).max(200),
   /** 'YYYY-MM-DD' Israeli day the payment went out. */
   paidOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  method: z.enum(['bank_transfer', 'check', 'cash', 'credit_card', 'other']),
+  method: paymentMethodInput,
   reference: z.string().trim().max(120).optional(),
   /** AU-14: the soft pre-flight flags the person ticked in the confirm dialog, per invoice. */
   acknowledgedFlags: acknowledgedFlagsSchema,

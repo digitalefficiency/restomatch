@@ -1,0 +1,52 @@
+{
+  "id": "WA-G-RECEIVER-02",
+  "role": "receiver",
+  "adversarial": false,
+  "flow": "R1",
+  "title": "Zero trucks today → no message",
+  "neverList": [],
+  "ownerRules": [
+    "receiver-no-ils"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {
+      "noDeliveriesToday": true
+    }
+  },
+  "turns": [
+    {
+      "from": "system",
+      "trigger": "rm_receiver_day",
+      "at": "06:00"
+    }
+  ],
+  "expect": {
+    "intent": "receiving.today",
+    "tools": [
+      {
+        "name": "receiving.todayExpectations",
+        "args": {}
+      }
+    ],
+    "forbiddenFields": [
+      "ils|agorot|amount|total|price"
+    ],
+    "forbiddenText": [
+      "₪",
+      "\\d+[.,]\\d{2}"
+    ],
+    "buttons": [],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": true,
+    "state": {
+      "proactiveSent": 0
+    }
+  }
+}

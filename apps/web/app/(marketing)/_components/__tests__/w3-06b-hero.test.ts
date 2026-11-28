@@ -6,6 +6,7 @@ import {
   APPROVED_MEDIA_FILES,
   PHONE_MEDIA,
   REJECTED_PHONE_LOOP_SHA256,
+  REJECTED_PROMO_SHA256,
   heroMedia,
   loopSourcesFor,
   phoneLoopFor,
@@ -47,16 +48,23 @@ describe('W3-06b · the phone gets the 9:16 loop, never both', () => {
     const paths = referencedMediaPaths(withPromo);
     expect(paths).toContain('/media/promo-he-720.mp4');
     expect(paths).toContain('/media/promo-poster-he.jpg');
-    // …and the old-figure promo files are not approved.
-    expect(APPROVED_MEDIA_FILES['/media/promo-he-720.mp4']).toBeUndefined();
+    // …and the old-figure promo bytes can never be the approved ones.
+    for (const hash of Object.values(APPROVED_MEDIA_FILES)) expect(REJECTED_PROMO_SHA256).not.toContain(hash);
   });
 
-  it('M1: the promo film is off for Thu 12.11 (old ₪760 figures) — no "Watch 60 seconds" button', () => {
-    // S10 re-renders the films from sampleMonth.ts after Thursday; re-enable only
-    // with the NEW files SHA-allow-listed in APPROVED_MEDIA_FILES.
-    expect(heroMedia.promoVideo).toBeNull();
-    expect(promoVideoFor('he')).toBeNull();
-    expect(promoVideoFor('en')).toBeNull();
+  it('promo re-enabled on S10\'s sample-month render (#318): both locales, SHA-pinned, old cut rejected', () => {
+    expect(promoVideoFor('he')).toEqual({ src: '/media/promo-he-720.mp4', poster: '/media/promo-poster-he.jpg' });
+    expect(promoVideoFor('en')).toEqual({ src: '/media/promo-en-720.mp4', poster: '/media/promo-poster-en.jpg' });
+    for (const f of ['/media/promo-he-720.mp4', '/media/promo-en-720.mp4', '/media/promo-poster-he.jpg', '/media/promo-poster-en.jpg']) {
+      expect(APPROVED_MEDIA_FILES[f]).toMatch(/^[0-9a-f]{64}$/);
+      expect(REJECTED_PROMO_SHA256).not.toContain(APPROVED_MEDIA_FILES[f]);
+    }
+  });
+
+  it('Q4: phones get the 9:16 poster as WebP (540w/810w), JPEG kept as the href fallback', () => {
+    expect(heroMedia.phoneLoop?.posterSrcSet).toBe('/media/hero-poster-9x16-540.webp 540w, /media/hero-poster-9x16-810.webp 810w');
+    expect(heroMedia.phoneLoop?.poster).toBe('/media/hero-poster-9x16.jpg');
+    expect(referencedMediaPaths()).toEqual(expect.arrayContaining(['/media/hero-poster-9x16-540.webp', '/media/hero-poster-9x16-810.webp']));
   });
 
   it('Q1: the Hebrew-only 9:16 cut is served to Hebrew phones only; English phones get HeroMatch', () => {

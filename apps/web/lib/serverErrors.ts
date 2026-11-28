@@ -47,6 +47,7 @@ const BY_APP_CODE: Record<AppErrorCode, Key> = {
   'invoice.pageQuestionOpen': 'invoicePageQuestionOpen',
   'invoice.partialHeaderClear': 'invoicePartialHeaderClear',
   'invoice.claimInProgress': 'invoiceClaimInProgress',
+  'payment.ownerApprovalRequired': 'paymentOwnerApprovalRequired',
   'invoice.unlinkedLines': 'invoiceUnlinkedLines',
   'order.unlinkedLines': 'orderUnlinkedLines',
   // Wave-1 (S15) codes: generic fallbacks here; the owning screens (growth /

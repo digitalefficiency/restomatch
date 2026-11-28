@@ -18,6 +18,7 @@ import { useLocale, useT } from '@/lib/i18n/client';
 import { payRun as payRunNs } from '@/lib/i18n/messages/payRun';
 import { formatIls } from '@/lib/money';
 import { trpc } from '@/lib/trpc/client';
+import type { PayRunPaymentMethod } from '@restomatch/api';
 
 /** One selectable pay-run row, as the server rendered it. */
 export interface SelectableRow {
@@ -41,7 +42,8 @@ const SelectionProvider = SelectionCtx.Provider as unknown as React.ComponentTyp
   children?: ReactNode;
 }>;
 
-const METHODS = ['bank_transfer', 'check', 'cash', 'credit_card', 'other'] as const;
+// Mirrors PAY_RUN_PAYMENT_METHODS (= H-03 0072 / G-05 PAYMENT_METHODS); `satisfies` breaks the build on drift.
+const METHODS = ['bank_transfer', 'check', 'cash', 'card', 'offset', 'other'] as const satisfies readonly PayRunPaymentMethod[];
 type Method = (typeof METHODS)[number];
 
 /**

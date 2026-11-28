@@ -418,11 +418,12 @@ export const adminRouter = router({
       z.object({
         restaurantId: z.string().uuid(),
         features: FeaturePatchSchema,
-        // Optional until AU-01's FeaturesPanel sends it (W3-07a carve-out); then required.
+        // Runtime-required like the other admin writes (AU-01's panel sends it).
         reason: AdminReason.optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      const reason = requireReason(input.reason);
       let orderQuestionsOff = false;
       const out = await ctx.db.transaction(async (tx) => {
         const [r] = await tx
@@ -454,7 +455,7 @@ export const adminRouter = router({
           entityType: 'restaurant',
           entityId: r.id,
           before,
-          after: input.reason ? { ...after, reason: input.reason } : after,
+          after: { ...after, reason },
         });
         return { features: featureState(updated?.settings) };
       });

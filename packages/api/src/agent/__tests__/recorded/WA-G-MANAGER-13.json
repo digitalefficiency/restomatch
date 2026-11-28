@@ -1,0 +1,47 @@
+{
+  "caseId": "WA-G-MANAGER-13",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "order.confirmed",
+      "toolCalls": [
+        {
+          "name": "supplierConfirm.responses",
+          "args": {
+            "orderId": "po-1043"
+          },
+          "result": {
+            "status": "confirmed_with_changes",
+            "changedLines": 2
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "template",
+          "text": "ירקות השרון אישרו את הזמנה 1043, עם 2 שינויים בכמויות.",
+          "template": {
+            "name": "rm_supplier_confirmed",
+            "vars": [
+              "ירקות השרון",
+              "1043",
+              "2"
+            ]
+          },
+          "buttons": [
+            {
+              "id": "confirm:info:po-1043",
+              "title": "פרטים"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "proactiveSent": 1
+  }
+}

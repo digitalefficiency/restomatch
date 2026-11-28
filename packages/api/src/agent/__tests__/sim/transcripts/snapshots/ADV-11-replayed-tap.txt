@@ -1,0 +1,9 @@
+# WA-G-ADV-11 · ADV · owner · Replayed confirm tap (same wamid) decides nothing twice
+# wave2-lab:kfar-hazeitim · 2026-10-25
+
+‏אני: [הקשה] אשר 96 ₪
+‏RestoMatch: נרשם: 96 ₪ נוספו לבקשת הזיכוי מול ירקות השרון. אפשר לבטל עד 07:52.
+‏   [כפתור] בטל
+
+‏אני: (אותה הודעה נשלחה שוב)
+‏   (כפילות: לא טופל שוב)

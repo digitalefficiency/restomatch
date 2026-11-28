@@ -18,7 +18,8 @@ import {
  * equal the site's sample month. Parsed as text so apps/web never imports the
  * Remotion package. A mismatch means a loop needs a re-render (and new SHA-256s).
  */
-const copy = readFileSync(join(__dirname, '../../../../../../tools/promo/src/copy.ts'), 'utf8');
+// S10 moved SAMPLE into tools/promo/src/sample.ts (re-exported from copy.ts) in #318.
+const copy = readFileSync(join(__dirname, '../../../../../../tools/promo/src/sample.ts'), 'utf8');
 const block = copy.slice(copy.indexOf('export const SAMPLE = {'), copy.indexOf('};', copy.indexOf('export const SAMPLE = {')));
 const num = (re: RegExp): number => {
   const m = block.match(re);
@@ -45,12 +46,14 @@ describe('W3-06 · tools/promo SAMPLE equals sampleMonth (one figure set)', () =
     expect(num(/decide:\s*\{[^}]*count:\s*(\d+)/)).toBe(decide.count);
     expect(num(/credit:\s*\{\s*amount:\s*([\d_.]+)/)).toBe(credit.amountIls);
     expect(num(/credit:\s*\{[^}]*count:\s*(\d+)/)).toBe(credit.count);
-    expect(num(/example:\s*\{\s*amount:\s*([\d_.]+)/)).toBe(SAMPLE_NEEDS[0].example!.amountIls);
+    expect(num(/example:\s*\{[^}]*amount:\s*([\d_.]+)/)).toBe(SAMPLE_NEEDS[0].example!.amountIls);
+    expect(block).toMatch(new RegExp(`he:\\s*'${SAMPLE_NEEDS[0].example!.label.he}'`));
+    expect(block).toMatch(new RegExp(`en:\\s*'${SAMPLE_NEEDS[0].example!.label.en}'`));
   });
 
   it('the needs card reads the example from SAMPLE, not a literal', () => {
     const cards = readFileSync(join(__dirname, '../../../../../../tools/promo/src/components/SampleCards.tsx'), 'utf8');
-    expect(cards).toMatch(/ilsText\(SAMPLE\.example\.amount/);
+    expect(cards).toMatch(/ilsText\(SAMPLE\.decide\.example\.amount/);
     expect(cards).not.toMatch(/ilsText\(104\.8/);
   });
 });

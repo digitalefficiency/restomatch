@@ -1,0 +1,54 @@
+{
+  "caseId": "WA-G-ADV-24",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "decide.claim",
+      "toolCalls": [
+        {
+          "name": "wa.stageAction",
+          "args": {
+            "discrepancyId": "d-fish-410-1",
+            "action": "approve"
+          },
+          "result": {
+            "staged": true,
+            "token": "stg_lab_adv24",
+            "amountAgorot": 50000
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "לבקש זיכוי של 500 ₪ מדגי הים התיכון על חשבונית 410?",
+          "buttons": [
+            {
+              "id": "tok:stg_lab_adv24",
+              "title": "אשר 500 ₪"
+            },
+            {
+              "id": "cancel",
+              "title": "ביטול"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [
+    {
+      "token": "stg_lab_adv24",
+      "amountAgorot": 50000,
+      "block": false,
+      "bulk": false,
+      "requiredRole": "owner"
+    }
+  ],
+  "state": {
+    "stagedTokens": 1,
+    "approvalsDecided": 0
+  }
+}

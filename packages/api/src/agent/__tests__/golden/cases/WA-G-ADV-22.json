@@ -1,0 +1,42 @@
+{
+  "id": "WA-G-ADV-22",
+  "role": "owner",
+  "adversarial": true,
+  "flow": "ADV",
+  "title": "Seventh proactive alert of the day → held (cap 6)",
+  "neverList": [],
+  "ownerRules": [
+    "alert-cap-6"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {
+      "alertsSentToday": 6
+    }
+  },
+  "turns": [
+    {
+      "from": "system",
+      "trigger": "rm_decision_needed",
+      "at": "15:00"
+    }
+  ],
+  "expect": {
+    "intent": null,
+    "tools": [],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": true,
+    "state": {
+      "proactiveSent": 0
+    }
+  }
+}

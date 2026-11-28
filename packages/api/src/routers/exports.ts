@@ -24,6 +24,7 @@ import { discrepancyDecidableSql } from '../lifecycle/predicates';
 const exportProcedure = bookkeeperProcedure.use(requireFeature('accounting_export'));
 import { toCsv } from '../exports/csv';
 import { toUniform1000Lines, type Uniform1000Invoice } from '../exports/uniform-1000';
+import { computeExportPreview, type ExportPreview } from '../exports/preview';
 import {
   DEFAULT_EXPORT_TZ,
   EXPORTABLE_INVOICE_STATUSES,
@@ -122,6 +123,17 @@ export const exportsRouter = router({
       missingBusinessIdCount: rows.filter((r) => !r.supplierBusinessId).length,
     };
   }),
+
+  /**
+   * W3-05b: the export BEFORE the download — count, ₪ incl. VAT, VAT, disputed,
+   * and every invoice of the period left out, by reason (ids for fix links).
+   * The included set is `fetchInvoices`, the file's own query. See exports/preview.ts.
+   */
+  preview: exportProcedure
+    .input(PeriodSchema)
+    .query(({ ctx, input }): Promise<ExportPreview> =>
+      computeExportPreview(ctx.db, ctx.session.restaurantId, input.from, input.to),
+    ),
 
   /**
    * Israeli uniform file (קובץ 1000) — record type C100 only for now.
@@ -232,7 +244,7 @@ export async function fetchInvoices(
  * purchase twice. Only the latest run counts, so a re-match that clears the
  * flag (e.g. after fixing a misread invoice number) brings the invoice back.
  */
-function unacceptedDuplicate(db: import('@restomatch/db').Database, restaurantId: string) {
+export function unacceptedDuplicate(db: import('@restomatch/db').Database, restaurantId: string) {
   const latestRun = alias(matchRuns, 'latest_run');
   const latestRunId = db
     .select({ id: latestRun.id })

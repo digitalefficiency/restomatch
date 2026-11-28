@@ -199,6 +199,7 @@ export const he = {
     zoom: 'זום {pct}%',
     ordered: 'הוזמן',
     received: 'התקבל',
+    notCounted: 'לא נספר',
     billed: 'חויב',
     expected: 'מחיר צפוי',
     expectedSource: { po_price: 'הזמנה', receipt: 'קבלת סחורה', invoice: 'חשבונית' },

@@ -18,8 +18,12 @@ export interface BriefMessage {
    * dedupes and a next-day run does not.
    */
   dedupeSuffix: string;
-  /** The research-catalogue id (A3..A7), carried as `payload.automationId` (AU-07 KPI hook). */
-  automationId: 'A3' | 'A4' | 'A5' | 'A6' | 'A7';
+  /**
+   * The AU-01 registry id (automations/registry.ts), carried as `payload.automationId`
+   * and in the outbox key prefix `au:<id>:` (AU-07 KPI hook): A4 receiver brief,
+   * A5 order reminder, A6 late truck, A7 evening digest, A1 match alert.
+   */
+  automationId: 'A1' | 'A4' | 'A5' | 'A6' | 'A7';
   /**
    * The one invoice the message concerns, carried as `payload.invoiceId` (AU-07
    * joins "acted within 48 h" through it). A7: always; A6: the PO's invoice if any.

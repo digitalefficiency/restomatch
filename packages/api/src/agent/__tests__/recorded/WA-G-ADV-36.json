@@ -1,0 +1,24 @@
+{
+  "caseId": "WA-G-ADV-36",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": null,
+      "refusal": "chef.noLeak",
+      "toolCalls": [],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "text",
+          "text": "פערים בחשבוניות רואים הבעלים והמנהל. אני יכול לעזור עם הזמנות, טיוטות ומשלוחים.",
+          "buttons": []
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "stagedTokens": 0
+  }
+}

@@ -82,6 +82,16 @@ export const en: Shape<typeof he> = {
     saved: 'Saved ✓',
     noChanges: 'No changes to save',
     confirm: 'Save {count} changes?\n{list}',
+    colSource: 'Source',
+    activeTitle: 'Active features: {count} of {total}',
+    activeNone: 'No features are active for this restaurant.',
+    source: {
+      killed: 'Off for everyone (FEATURES_OFF)',
+      stored: 'Set for this restaurant',
+      demo: 'Demo tenant (all)',
+      default: 'On by default',
+      none: 'Not set',
+    },
   },
   twoFactor: {
     title: 'Two-step verification required',

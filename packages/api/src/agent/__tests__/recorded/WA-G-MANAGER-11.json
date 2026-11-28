@@ -1,0 +1,30 @@
+{
+  "caseId": "WA-G-MANAGER-11",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "queue.mine",
+      "toolCalls": [
+        {
+          "name": "approvals.myQueue",
+          "args": {},
+          "result": {
+            "items": [],
+            "ownerOnlyCount": 2
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "text",
+          "text": "אין כרגע פערים שמחכים לך. 2 פערים מחכים לבעלים.",
+          "buttons": []
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {}
+}
