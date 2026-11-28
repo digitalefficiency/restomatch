@@ -1,5 +1,6 @@
 import type { LeakBreakdownInvoice, LeakBreakdownLine } from '@restomatch/charts';
 import { DISCREPANCY_CLAIMABLE, DISCREPANCY_CLAIMED, DISCREPANCY_DECIDABLE } from '../lifecycle/predicates';
+import { OPEN_STATUSES } from '../recovery/lifecycle';
 
 /**
  * The claimable-line rule (₪) shared by the supplier credit letters
@@ -17,8 +18,8 @@ import { DISCREPANCY_CLAIMABLE, DISCREPANCY_CLAIMED, DISCREPANCY_DECIDABLE } fro
  *    rows get what is left; (created_at, id) inside a tier. The owner-signed rule (G-14, 11.11
  *    line 17): "קודם דרישות זיכוי קיימות…, אחר כך פערים שהוחלטו, ולפערים שלא הוחלטו נשאר מה שנשאר".
  *    A line holding a live claim is emitted `claimed` at what is still outstanding on it
- *    (its capped ₪ less what was credited; ₪0 once written off) — never `undecided`, whatever
- *    its resolution status.
+ *    (its capped ₪ less what was credited, while the claim is open; ₪0 once it is recovered or
+ *    written off) — never `undecided`, whatever its resolution status.
  */
 /**
  * Decided "ask the supplier" statuses. Owner decision 7.11 (M5): 'resolved' counts as decided,
@@ -114,8 +115,12 @@ export interface ClaimLine {
   claimed: boolean;
 }
 
-/** Claim statuses whose outstanding ₪ is nothing (written off: given up on what did not come back). */
-const NOTHING_OUTSTANDING = new Set<string>(['written_off']);
+/**
+ * Claim statuses whose remaining ₪ is still owed (recovery lifecycle OPEN_STATUSES). A closed claim
+ * — `recovered` (short or not) or `written_off` — has nothing outstanding (G-14 Q3 R4-1), exactly
+ * as the tracker shows it.
+ */
+const OWED = new Set<string>(OPEN_STATUSES);
 
 /** The claimable lines of one invoice: the leak ledger's allocation (see the module note). */
 export function claimableLines(inv: LeakBreakdownInvoice): ClaimLine[] {
@@ -128,7 +133,7 @@ export function claimableLines(inv: LeakBreakdownInvoice): ClaimLine[] {
       const led = l.ledger;
       if (!led || !askable(l)) continue;
       if (led.liveClaim) {
-        const ag = NOTHING_OUTSTANDING.has(led.claimStatus ?? '') ? 0 : Math.max(0, led.cappedAgorot - led.creditedAgorot);
+        const ag = OWED.has(led.claimStatus ?? '') ? Math.max(0, led.cappedAgorot - led.creditedAgorot) : 0;
         if (ag > 0) out.push({ line: l, amount: ag / 100, basis: vatBasisOf(l.type), undecided: false, claimed: true });
         continue;
       }

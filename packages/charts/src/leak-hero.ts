@@ -386,10 +386,7 @@ async function breakdownLines(
       il.raw_description AS line_desc, il.raw_description_en AS line_desc_en,
       d.tolerance_used, il.qty_billed, COALESCE(il.unit, pl.unit) AS unit, il.unit_price_billed,
       pl.unit_price_expected, pl.unit AS po_unit, po.id AS po_id, po.created_at AS po_at,
-      gr.notes AS receipt_note, gr.received_at AS gr_at,
-      al.discrepancy_id AS al_id, al.tier AS al_tier, al.effect AS al_effect, al.capped_agorot AS al_capped,
-      al.claim_status AS al_claim_status, al.claim_amount AS al_claim_amount,
-      al.credited_agorot AS al_credited, al.live_claim AS al_live
+      gr.notes AS receipt_note, gr.received_at AS gr_at
     FROM discrepancies d
     JOIN match_runs mr ON mr.id = d.match_run_id AND mr.restaurant_id = ${restaurantId}
     LEFT JOIN products p ON p.id = d.product_id AND p.restaurant_id = ${restaurantId}
@@ -398,11 +395,13 @@ async function breakdownLines(
     LEFT JOIN purchase_orders po ON po.id = COALESCE(pl.po_id, mr.po_id) AND po.restaurant_id = ${restaurantId}
     LEFT JOIN gr_lines grl ON grl.id = d.gr_line_id
     LEFT JOIN goods_receipts gr ON gr.id = COALESCE(grl.gr_id, mr.gr_id) AND gr.restaurant_id = ${restaurantId}
-    LEFT JOIN (${invoiceAllocationSql(restaurantId, ids, counts)}) al ON al.discrepancy_id = d.id
     WHERE d.restaurant_id = ${restaurantId}
       AND mr.invoice_id IN (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})
     ORDER BY ABS(d.delta_amount) DESC, d.id
   `);
+  // The allocator as its own query (never joined inline: a windowed subquery on the inner side of
+  // a nested loop re-runs per line — R4-3), attached by discrepancy id.
+  const allocation = await computeLineAllocation(db, restaurantId, ids, counts);
   const linesByInvoice = new Map<string, LeakBreakdownLine[]>();
   for (const l of rowsOf(lineRes)) {
     const key = String(l.invoice_id);
@@ -418,7 +417,7 @@ async function breakdownLines(
       countsAsLeak: Boolean(l.counts),
       tolerated: Boolean(l.tolerated),
       createdAt: l.created_at == null ? undefined : iso(l.created_at),
-      ledger: lineLedgerOf(l),
+      ledger: allocation.get(String(l.id)) ?? null,
       productName: (l.product_name as string | null) ?? null,
       productNameEn: (l.product_name_en as string | null) ?? null,
       lineDescription: (l.line_desc as string | null) ?? null,
@@ -536,18 +535,35 @@ function invoiceOf(r: Row, lines: Map<string, LeakBreakdownLine[]>): LeakBreakdo
 
 const numOrNull = (v: unknown): number | null => (v == null ? null : Number(v));
 
-/** The allocator's columns of one breakdown row (al_*), or null when the line is outside the ledger. */
-function lineLedgerOf(l: Row): LineLedger | null {
-  if (l.al_id == null) return null;
-  return {
-    tier: Number(l.al_tier) as 1 | 2 | 3,
-    effect: String(l.al_effect) as Effect,
-    cappedAgorot: Number(l.al_capped ?? 0),
-    claimStatus: (l.al_claim_status as ClaimStatus | null) ?? null,
-    claimAmountAgorot: l.al_claim_amount == null ? null : Number(l.al_claim_amount),
-    creditedAgorot: Number(l.al_credited ?? 0),
-    liveClaim: Boolean(l.al_live),
-  };
+/**
+ * G-14 Q3 · THE allocator's result for every counting line of the given invoices (whatever their
+ * dates), keyed by discrepancy id: leak-ledger invoiceAllocationSql, one linear query per batch.
+ * `counts` defaults to LEAK_FILTER (the unfiltered ledger). Lines outside the ledger are absent.
+ * The claims tracker / letters read it too, so a claim's outstanding ₪ is its capped share.
+ */
+export async function computeLineAllocation(
+  db: Database,
+  restaurantId: string,
+  invoiceIds: readonly string[],
+  counts: ReturnType<typeof sql> = LEAK_FILTER,
+): Promise<Map<string, LineLedger>> {
+  const out = new Map<string, LineLedger>();
+  const ids = [...new Set(invoiceIds)];
+  for (let at = 0; at < ids.length; at += INVOICE_BATCH) {
+    const res = await db.execute(invoiceAllocationSql(restaurantId, ids.slice(at, at + INVOICE_BATCH), counts));
+    for (const r of rowsOf(res)) {
+      out.set(String(r.discrepancy_id), {
+        tier: Number(r.tier) as 1 | 2 | 3,
+        effect: String(r.effect) as Effect,
+        cappedAgorot: Number(r.capped_agorot ?? 0),
+        claimStatus: (r.claim_status as ClaimStatus | null) ?? null,
+        claimAmountAgorot: r.claim_amount == null ? null : Number(r.claim_amount),
+        creditedAgorot: Number(r.credited_agorot ?? 0),
+        liveClaim: Boolean(r.live_claim),
+      });
+    }
+  }
+  return out;
 }
 
 /** The W2-09c evidence fields of one breakdown row (raw facts; packages/api verifies the math). */

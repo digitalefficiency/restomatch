@@ -11,6 +11,7 @@ import {
   type RecoveryStatus,
 } from '@restomatch/db';
 import { TOLERATED_SQL } from '@restomatch/charts';
+import { owedAgorot } from './owed';
 import { assertSupplierOwned } from '../tenant';
 import { appError } from '../errors';
 import { HELD_FOR_RECEIPTS_KEY } from '@restomatch/charts';
@@ -513,7 +514,7 @@ export async function listClaims(
     SELECT
       c.id, c.discrepancy_id, c.status, c.amount_agorot, c.credited_agorot, c.supplier_id, c.invoice_id,
       c.claimed_at, c.letter_sent_at, c.acknowledged_at, c.credited_at, c.recovered_at, c.closed_at,
-      c.last_reminder_at, c.note,
+      c.last_reminder_at, c.note, GREATEST(0, c.amount_agorot - c.credited_agorot) AS outstanding,
       s.name AS supplier_name, s.name_en AS supplier_name_en,
       round(COALESCE(s.vat_rate, tz.vat_rate) * 10000)::int AS vat_rate_bp,
       i.invoice_number,
@@ -521,6 +522,7 @@ export async function listClaims(
       p.canonical_name AS product_name, p.name_en AS product_name_en,
       il.raw_description AS line_description, il.raw_description_en AS line_description_en,
       cn.number AS credit_note_number,
+      mr.invoice_id AS finding_invoice_id,
       -- Ageing in the restaurant's calendar days (Asia/Jerusalem by default).
       ((${now.toISOString()}::timestamptz AT TIME ZONE tz.tz)::date - (c.claimed_at AT TIME ZONE tz.tz)::date) AS age_days,
       -- Overdue: exactly the reminder job's rule (findOverdue), so the badge and the email agree;
@@ -532,6 +534,7 @@ export async function listClaims(
     FROM recovery_claims c
     CROSS JOIN (SELECT COALESCE(timezone, 'Asia/Jerusalem') AS tz, vat_rate FROM restaurants WHERE id = ${restaurantId}) tz
     JOIN discrepancies d ON d.id = c.discrepancy_id AND d.restaurant_id = ${restaurantId}
+    LEFT JOIN match_runs mr ON mr.id = d.match_run_id AND mr.restaurant_id = ${restaurantId}
     LEFT JOIN suppliers s ON s.id = c.supplier_id AND s.restaurant_id = ${restaurantId}
     LEFT JOIN invoices i ON i.id = c.invoice_id AND i.restaurant_id = ${restaurantId}
     LEFT JOIN products p ON p.id = d.product_id AND p.restaurant_id = ${restaurantId}
@@ -545,7 +548,13 @@ export async function listClaims(
       c.claimed_at ASC, c.id
     ${limit === null ? sql`` : sql`LIMIT ${limit}`}
   `);
-  return rowsOf(res).map((r) => {
+  const rows = rowsOf(res);
+  // G-14 Q3 R4-2: what is still owed on a claim is its share of the invoice cap from the one
+  // allocator (live claims first, at LEAST(claim, |Δ|)), less what was credited — the same ₪ the
+  // hero, report, pay run and dock slip use. When an invoice's total drops below its claims, the
+  // tracker and the letters ask for the cap, never Σ of the stored claim amounts.
+  const owedOf = await owedAgorot(db, restaurantId, rows as never);
+  return rows.map((r, k) => {
     const status = String(r.status) as RecoveryStatus;
     const amount = int(r.amount_agorot);
     const credited = int(r.credited_agorot);
@@ -556,7 +565,7 @@ export async function listClaims(
       status,
       amountAgorot: amount,
       creditedAgorot: credited,
-      outstandingAgorot: open ? Math.max(0, amount - credited) : 0,
+      outstandingAgorot: open ? owedOf[k]! : 0,
       supplierId: (r.supplier_id as string | null) ?? null,
       supplierName: (r.supplier_name as string | null) ?? null,
       supplierNameEn: (r.supplier_name_en as string | null) ?? null,

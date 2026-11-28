@@ -232,13 +232,19 @@ export async function awaitingDecisionDetail(
       : all.filter((r) => canRead(role, r.requiredRole));
 
   const money = canViewMoney(role);
-  const decide = rows.filter(isClaimableRow);
 
   // Per-invoice leak once for every invoice in scope, then the letters' rule.
   const invoiceIds = [...new Set(rows.map((r) => r.invoiceId).filter((v): v is string => !!v))];
   const leaks = invoiceIds.length
     ? await invoicesLeak(db, rid, invoiceIds)
     : new Map<string, LeakBreakdownInvoice>();
+  // A reopened row that still holds a live claim is already claimed (G-14 Q3 R4-4): it has no ₪ to
+  // decide, so it is not counted "to decide" either (it shows under review, count only) — the
+  // count matches the ₪ and the leak report's open lines.
+  const claimedRows = new Set<string>();
+  for (const inv of leaks.values()) for (const l of inv.lines) if (l.ledger?.liveClaim) claimedRows.add(l.discrepancyId);
+  const toDecide = (r: (typeof rows)[number]) => isClaimableRow(r) && !claimedRows.has(r.id);
+  const decide = rows.filter(toDecide);
   const claimAgorot = new Map<string, { agorot: number; basis: VatBasis }>();
   for (const inv of leaks.values()) {
     // Only the undecided ₪ (the ledger's tier 3) is "to decide": a row holding a live claim is

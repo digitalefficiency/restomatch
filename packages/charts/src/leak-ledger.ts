@@ -81,8 +81,9 @@ export interface LeakLedgerRow {
   /** Where paidAt came from; 'interim' = the updated_at estimate until H-03/H-04 (label it). */
   paidSource: PaidSource;
   /**
-   * Part of cappedAgorot that a written-off claim never got back: the row's state is
-   * `credited` for its credited agorot only; this remainder is reported as `waived`.
+   * Part of cappedAgorot that a closed claim never got back (written off with part credited, or
+   * recovered short — shortfallAgorot): the row's state covers what came back only; this
+   * remainder is reported as `waived`.
    */
   writtenOffAgorot: number;
   claimId: string | null;
@@ -304,8 +305,7 @@ function toLedgerRow(r: Row): LeakLedgerRow {
     paidAt,
     caughtBeforePayment: caughtBefore(createdAt, resolvedAt, paidAt, String(r.tz ?? ISRAEL_TZ)),
     paidSource: (r.paid_source as PaidSource) ?? null,
-    writtenOffAgorot:
-      claimStatus === 'written_off' && creditedAgorot > 0 ? Math.max(0, int(r.capped_agorot) - creditedAgorot) : 0,
+    writtenOffAgorot: shortfallAgorot(claimStatus, creditedAgorot, int(r.capped_agorot)),
     claimId: r.claim_id == null ? null : String(r.claim_id),
     claimStatus,
     claimAmountAgorot: r.claim_amount == null ? null : int(r.claim_amount),
@@ -315,6 +315,19 @@ function toLedgerRow(r: Row): LeakLedgerRow {
     createdAt,
     resolvedAt,
   };
+}
+
+/**
+ * The part of a closed claim's capped ₪ that never came back, reported as waived (G-14 line 16):
+ * a written-off claim with part credited, and — its twin — a claim closed as `recovered` short of
+ * its amount (recovery books that shortfall as written off; G-14 Q3 R4-1). Main counted a short
+ * recovery as fully recovered. An open claim, or a written-off one with ₪0 back (not live), has none.
+ */
+export function shortfallAgorot(status: ClaimStatus | null, creditedAgorot: number, cappedAgorot: number): number {
+  if (status === 'recovered' || (status === 'written_off' && creditedAgorot > 0)) {
+    return Math.max(0, cappedAgorot - creditedAgorot);
+  }
+  return 0;
 }
 
 export const ISRAEL_TZ = 'Asia/Jerusalem';

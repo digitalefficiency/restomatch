@@ -826,11 +826,97 @@ describe('G-14 Q3 round 3: one allocator — live claims first, on every screen'
     const s = await seed();
     const { invoiceId, matchRunId } = await run(s, '100.00');
     const d = await insertD(s, { matchRunId, deltaAmount: '6.00' });
+    const countBefore = (await ownerOf(s).approvals.queueSummary()).toDecide.count;
     await db.insert(recoveryClaims).values({ restaurantId: s.restaurantId, discrepancyId: d.id, status: 'disputed', amountAgorot: 600 });
     const v = await screens(s, invoiceId);
     expect(v.report.status.claimedIls).toBe(6);
     expect(v.report.status.stillOpenIls).toBe(0);
     expect([v.toDecide, v.rowsAgorot, v.ask, v.lettersUndecided, v.pay.pendingIls]).toEqual([0, 0, 0, 0, 0]);
+    // R4-4: the count follows the ₪ — the claimed row leaves "to decide" (the report counts it open: 0).
+    expect((await ownerOf(s).approvals.queueSummary()).toDecide.count).toBe(countBefore - 1);
+    expect(v.report.status.stillOpenCount).toBe(0);
+  });
+
+  it('R4-1: a claim closed as recovered short of its amount owes ₪0 — pay credit 0, tracker 0, report claimed 6 / waived 4', async () => {
+    const { listClaims } = await import('../recovery/service');
+    const s = await seed();
+    const { invoiceId, matchRunId } = await run(s, '100.00');
+    const d = await insertD(s, { matchRunId, type: 'PRICE_HIGHER', deltaAmount: '10.00' });
+    await managerOf(s).approvals.approve({ discrepancyId: d.id });
+    const [claim] = await db.select().from(recoveryClaims).where(eq(recoveryClaims.discrepancyId, d.id));
+    expect(claim!.amountAgorot).toBe(1000);
+    // ₪6 of ₪10 came back (a credit note), then the claim is closed as recovered, with a reason.
+    await db.update(recoveryClaims).set({ status: 'credited', creditedAgorot: 600, creditedAt: new Date() }).where(eq(recoveryClaims.id, claim!.id));
+    // Closed as recovered with a reason (recovery.transition's short-recovery edge; the flag is off in this seed).
+    await db.update(recoveryClaims).set({ status: 'recovered', recoveredAt: new Date(), note: 'סגרנו: הספק לא יזכה ביתרה' }).where(eq(recoveryClaims.id, claim!.id));
+    const v = await screens(s, invoiceId);
+    const tracker = (await listClaims(db, s.restaurantId, { limit: null })).find((c) => c.id === claim!.id)!;
+    expect(tracker.status).toBe('recovered');
+    expect(tracker.outstandingAgorot).toBe(0);
+    expect(v.pay.creditIls).toBe(0);
+    expect(v.pay.status).toBe('pay');
+    expect(v.report.status.claimedIls).toBe(6);
+    expect(v.report.status.waivedIls).toBe(4);
+  });
+
+  it('R4-2: claims above a lowered invoice total — tracker, letters and reminders ask for the cap, like every other screen', async () => {
+    const { listClaims } = await import('../recovery/service');
+    const { buildClaimLetters } = await import('../recovery/letters');
+    const s = await seed();
+    const { invoiceId, matchRunId } = await run(s, '20.00');
+    const a = await insertD(s, { matchRunId, deltaAmount: '8.00' });
+    const b = await insertD(s, { matchRunId, type: 'QTY_SHORT', deltaAmount: '8.00' });
+    await managerOf(s).approvals.approve({ discrepancyId: a.id });
+    await managerOf(s).approvals.approve({ discrepancyId: b.id });
+    // The invoice total is corrected down to ₪10 after both ₪8 claims were made.
+    await db.update(invoices).set({ totalInclVat: '10.00' }).where(eq(invoices.id, invoiceId));
+    const v = await screens(s, invoiceId);
+    const claims = await listClaims(db, s.restaurantId, { limit: null });
+    const letters = await buildClaimLetters(db, s.restaurantId);
+    expect(v.report.status.claimedIls).toBe(10);
+    expect(v.pay.creditIls).toBe(10);
+    expect(claims.reduce((t, c) => t + c.outstandingAgorot, 0)).toBe(1000);
+    expect(letters.reduce((t, l) => t + l.totalAgorot, 0)).toBe(1000);
+  });
+
+  it('R4-3: the per-line allocation is one linear query — a medium tenant beside a large one stays fast', async () => {
+    const { computeInvoicesLeak, invoiceAllocationSql, LEAK_FILTER } = await import('@restomatch/charts');
+    const { sql } = await import('@restomatch/db');
+    // A large neighbour (4,000 rows) and a medium tenant (120 invoices × 12 rows, a claim on every third).
+    const [bigR] = await db.insert(restaurants).values({ name: 'שכן גדול' }).returning();
+    const bigRun = await run({ restaurantId: bigR!.id } as Scenario, '1000000.00');
+    const filler = Array.from({ length: 4000 }, () => ({ restaurantId: bigR!.id, matchRunId: bigRun.matchRunId, type: 'PRICE_HIGHER' as const, severity: 'warn' as const, deltaAmount: '1.00', resolutionStatus: 'open' as const }));
+    for (let i = 0; i < filler.length; i += 1000) await db.insert(discrepancies).values(filler.slice(i, i + 1000));
+    const s = await seed();
+    const ids: string[] = [];
+    for (let k = 0; k < 120; k += 1) {
+      const r = await run(s, '50.00');
+      ids.push(r.invoiceId);
+      const ds = await db
+        .insert(discrepancies)
+        .values(Array.from({ length: 12 }, (_, j) => ({ restaurantId: s.restaurantId, matchRunId: r.matchRunId, type: 'PRICE_HIGHER' as const, severity: 'warn' as const, deltaAmount: '5.00', resolutionStatus: (j % 3 === 0 ? 'accepted' : 'open') as 'accepted' | 'open', resolvedAt: j % 3 === 0 ? new Date() : null })))
+        .returning({ id: discrepancies.id });
+      await db.insert(recoveryClaims).values(ds.filter((_, j) => j % 3 === 0).map((d) => ({ restaurantId: s.restaurantId, discrepancyId: d.id, amountAgorot: 300 })));
+    }
+    await db.execute(sql`ANALYZE discrepancies; ANALYZE recovery_claims; ANALYZE match_runs; ANALYZE invoices`);
+    const t0 = Date.now();
+    const leaks = await computeInvoicesLeak(db, s.restaurantId, ids.slice(0, 100));
+    const ms = Date.now() - t0;
+    expect(leaks.size).toBe(100);
+    expect([...leaks.values()].every((inv) => inv.lines.every((l) => l.ledger != null))).toBe(true);
+    // r3 ran this in tens of ms; the inline join re-ran the window per line (seconds). Generous bound.
+    expect(ms).toBeLessThan(2000);
+    // And the allocator itself runs its window once (no WindowAgg on the inner side of a loop).
+    const plan = (await db.execute(sql`EXPLAIN (ANALYZE, FORMAT JSON) ${invoiceAllocationSql(s.restaurantId, ids.slice(0, 100), LEAK_FILTER)}`)) as unknown as Array<{ 'QUERY PLAN': unknown }>;
+    const windows: Array<{ loops: number }> = [];
+    const walk = (n: Record<string, unknown>) => {
+      if (n['Node Type'] === 'WindowAgg') windows.push({ loops: Number(n['Actual Loops']) });
+      for (const c of (n.Plans as Record<string, unknown>[] | undefined) ?? []) walk(c);
+    };
+    const root = plan[0]!['QUERY PLAN'] as Array<{ Plan: Record<string, unknown> }>;
+    walk(root[0]!.Plan);
+    expect(windows.length).toBeGreaterThan(0);
+    expect(windows.every((w) => w.loops === 1)).toBe(true);
   });
 
   it('the hand-built mirror (lines without a ledger row: a ריכוז proposal) = the SQL allocator when no claim is involved', async () => {

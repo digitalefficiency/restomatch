@@ -18,6 +18,7 @@ export {
 export {
   computeInvoiceLeak,
   computeInvoicesLeak,
+  computeLineAllocation,
   computeLeakBreakdown,
   computeLeakHero,
   expectedSourceOf,
@@ -126,6 +127,7 @@ export {
   computeLeakPartition,
   heroLeakByInvoice,
   partitionOf,
+  invoiceAllocationSql,
   type LeakLedgerRow,
   type LeakPartition,
   type PaidSource,
