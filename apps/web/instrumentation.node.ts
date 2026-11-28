@@ -9,7 +9,7 @@
  * plan v2 T0).
  */
 export async function registerNode(): Promise<void> {
-  const { assertWebEnv, assertAppRoleNoBypass, assertRlsEnabled, applyRepairedDbEnv } = await import('./lib/env');
+  const { assertWebEnv, applyRepairedDbEnv } = await import('./lib/env');
   // Fail fast on a misconfigured production environment (missing
   // DATABASE_URL_APP/RESEND/etc.) instead of booting and degrading silently.
   assertWebEnv();
@@ -22,7 +22,7 @@ export async function registerNode(): Promise<void> {
   // The SDK is imported HERE by its literal name so Next's file tracing ships
   // @sentry/node in the Vercel bundle; the package's own opaque import() is
   // invisible to tracing and would end in "sdk-missing" once a DSN is set.
-  const { initSentryFromEnv } = await import('@restomatch/observability');
+  const { initSentryFromEnv, captureException } = await import('@restomatch/observability');
   await initSentryFromEnv({
     service: 'web',
     loadSdk: async () =>
@@ -40,22 +40,19 @@ export async function registerNode(): Promise<void> {
   const { registerJobKick } = await import('./lib/jobKick');
   registerJobKick();
 
-  // Tenant-boundary boot guards (Epic 0.1/0.3). Only meaningful when we are
-  // actually serving tenant traffic on the app role: in production the role is
-  // mandatory; in dev we still run the guard when DATABASE_URL_APP is set (to
-  // catch a role pointed at the owner) but skip it for the ALLOW_OWNER_DB
-  // owner-fallback path, which is intentionally RLS-bypassing for local work.
-  const usingAppRole = !!process.env.DATABASE_URL_APP;
-  const isProd = process.env.NODE_ENV === 'production';
-  if (usingAppRole || isProd) {
-    const { db } = await import('./lib/db');
-    const { retryTransientDb } = await import('./lib/bootRetry');
-    // A misconfigured DATABASE_URL_APP pointing at owner/service_role would make
-    // RLS silently inert — fail the boot loudly instead. Only a dropped
-    // connection is retried: a failed boot hook 500s every request on the
-    // instance until it is recycled.
-    await retryTransientDb('app-role guard', () => assertAppRoleNoBypass(db));
-    // And prove the policies were actually applied (no forgotten/new table).
-    await retryTransientDb('RLS guard', () => assertRlsEnabled(db));
+  // Tenant-boundary guards (Epic 0.1/0.3): started here, NOT awaited. Next
+  // caches a rejected register() for the life of the instance — every request
+  // then 500s "An error occurred while loading instrumentation hook" — so one
+  // CONNECT_TIMEOUT at boot took the whole site down, marketing pages included,
+  // until the instance was recycled. lib/db now holds every tenant query until
+  // the guard passed (lib/tenantGuard.ts), so tenant access stays fail-closed;
+  // starting it early still reports a bad role or a table without RLS at boot.
+  const { tenantGuardRequired, warmUpTenantGuard } = await import('./lib/tenantGuard');
+  if (tenantGuardRequired()) {
+    // No I/O (postgres.js connects lazily), but an unusable tenant URL still fails the boot.
+    const { ensureTenantGuard } = await import('./lib/db');
+    // Never rejects: a verdict → console.error, anything else → console.warn;
+    // both → captureException. Not awaited.
+    void warmUpTenantGuard(ensureTenantGuard, captureException);
   }
 }

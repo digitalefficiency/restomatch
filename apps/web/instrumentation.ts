@@ -1,7 +1,8 @@
 /**
  * Next.js startup hook. Runs once per server process, for BOTH runtimes; only
- * the Node runtime does real work (env + tenant-boundary boot guards live in
- * instrumentation.node.ts). Keep the dynamic import INSIDE the constant-guarded
+ * the Node runtime does real work (instrumentation.node.ts). It must do no
+ * awaited DB I/O: Next caches a rejected register() and 500s every request on
+ * the instance after it. Keep the dynamic import INSIDE the constant-guarded
  * `if` — see instrumentation.node.ts for why an early return is not enough.
  */
 export async function register() {
