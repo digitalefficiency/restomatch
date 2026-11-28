@@ -65,8 +65,6 @@ export interface OcrSweepResult {
   raced: string[];
   /** G-09: held multi-page pages released to the match after the hold cap. */
   released?: string[];
-  /** G-09 (round 12 #9): "checked together" re-matches re-enqueued after a lost enqueue. */
-  rematched?: string[];
 }
 
 /** G-09: a page held for its siblings' OCR is released to the match after this long. */
@@ -305,28 +303,41 @@ export async function runOcrSweep(
     );
     if (inserted) result.released.push(inv.id);
   }
-  // Round 12 (#9): a "checked together" re-match whose enqueue was lost (the answer
-  // stamped raw.groupRematchPending in its own transaction; the job clears it).
-  const rematchBefore = new Date(now.getTime() - G09_REMATCH_RETRY_MS);
-  const rematchPending = await sql<Array<{ id: string; restaurant_id: string }>>`
+  // end G-09 sweep
+
+  return result;
+}
+
+/**
+ * G-09 (rounds 12/13 #9/#8): a "checked together" re-match whose enqueue was lost — the
+ * answer stamped raw.groupRematchPending in its own transaction; the job clears it once a
+ * run was saved. Runs for EVERY tenant (an answer is never real-OCR-only), in its own step.
+ */
+export async function runGroupRematchSweep(sql: Sql, now = new Date()): Promise<string[]> {
+  const before = new Date(now.getTime() - G09_REMATCH_RETRY_MS);
+  // A group exists only where multi-page was ever switched on (the key is set, ON or OFF):
+  // only those tenants' invoices are looked at — by restaurant, never a whole-table scan.
+  const tenants = await sql<Array<{ id: string }>>`
+    SELECT id FROM restaurants WHERE coalesce(settings -> 'features', '{}'::jsonb) ? 'multiPage'`;
+  if (tenants.length === 0) return [];
+  const pending = await sql<Array<{ id: string; restaurant_id: string }>>`
     SELECT i.id, i.restaurant_id FROM invoices i
-     WHERE i.restaurant_id::text = ANY(string_to_array(${only.join(',')}, ','))
+     WHERE i.restaurant_id::text = ANY(string_to_array(${tenants.map((t) => t.id).join(',')}, ','))
        AND (i.ocr_payload -> 'raw') ? ${REMATCH_PENDING_KEY}
-       AND (i.ocr_payload -> 'raw' ->> ${REMATCH_PENDING_KEY})::timestamptz < ${rematchBefore}
+       AND (i.ocr_payload -> 'raw' ->> ${REMATCH_PENDING_KEY})::timestamptz < ${before}
      ORDER BY i.updated_at
      LIMIT ${OCR_SWEEP_BATCH}`;
-  for (const inv of rematchPending) {
+  const requeued: string[] = [];
+  for (const inv of pending) {
     const inserted = await insertJob(
       sql,
       'match-invoice',
       { restaurantId: inv.restaurant_id, invoiceId: inv.id, rematch: true },
       { restaurantId: inv.restaurant_id, dedupeKey: `g09-rematch-${inv.id}-${Math.floor(now.getTime() / 3_600_000)}`, maxAttempts: 3 },
     );
-    if (inserted) (result.rematched ??= []).push(inv.id);
+    if (inserted) requeued.push(inv.id);
   }
-  // end G-09 sweep
-
-  return result;
+  return requeued;
 }
 
 export function startOcrSweepWorker() {
@@ -335,6 +346,9 @@ export function startOcrSweepWorker() {
 
 /** The ocr-sweep job: run by the worker loop (above) and by the serverless runner (handlers.ts). */
 export async function processOcrSweep(job: WorkerJob<OcrSweepJob>) {
+  // G-09 (round 13 #8): lost group re-matches, for every tenant — before the real-OCR gate.
+  const rematched = await runGroupRematchSweep(workerSql(), job.data.now ? new Date(job.data.now) : new Date());
+  if (rematched.length) console.log(`[ocr-sweep] group re-matches re-enqueued: ${rematched.length}`);
   const only = claudeOcrRestaurantIds();
   if (only.size === 0) return { skipped: 'no tenant on real OCR (ANTHROPIC_API_KEY + OCR_REAL_RESTAURANT_IDS)' };
   const result = await runOcrSweep(workerSql(), job.data.now ? new Date(job.data.now) : new Date(), only);

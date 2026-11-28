@@ -6,7 +6,7 @@ const copy: RegisterCopy = {
   col: { date: 'd', supplier: 's', number: 'n', total: 't', due: 'du', gap: 'g', status: 'st', allocation: 'a' },
   state: {
     in_ocr: '1', awaiting_count: '2', awaiting_link: '3', clean: '4', flagged_open: '5',
-    claim_open: '6', held_duplicate: '7', approved: '8', paid: '9',
+    claim_open: '6', held_duplicate: '7', approved: '8', paid: '9', included: '10',
   },
   allocationYes: 'y',
   allocationNo: 'n',
@@ -60,5 +60,15 @@ describe('register columns (W2-02)', () => {
     expect(inTab(row({ hasAllocation: false }), 'noAllocation')).toBe(true);
     expect(inTab(row({ hasAllocation: false, state: 'in_ocr', tab: 'awaiting' }), 'noAllocation')).toBe(false);
     expect(inTab(row({}), 'intake')).toBe(false);
+  });
+});
+
+describe('G-09 round 13 #5: a page "included" in another invoice', () => {
+  it('is listed but never summed (its ₪ is its carrier\'s), and never "missing an allocation number"', () => {
+    const carrier = row({ id: 'c', totalInclVatAgorot: 117_000, gapAgorot: 0 });
+    const page = row({ id: 'p', totalInclVatAgorot: 47_200, gapAgorot: 500, state: 'included', tab: 'included', hasAllocation: false });
+    expect(visibleTotals([carrier, page])).toEqual({ count: 2, sumAgorot: 117_000, gapAgorot: 0 });
+    expect(inTab(page, 'noAllocation')).toBe(false);
+    expect(inTab(page, 'awaiting')).toBe(false);
   });
 });

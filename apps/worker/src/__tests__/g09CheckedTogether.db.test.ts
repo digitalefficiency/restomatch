@@ -23,7 +23,7 @@ import {
 import { queueSql } from '@restomatch/queue';
 import { resolvePageFlag } from '@restomatch/api';
 import { matchInvoiceForJob } from '../jobs/matchInvoice';
-import { runOcrSweep } from '../jobs/ocrSweep';
+import { runGroupRematchSweep } from '../jobs/ocrSweep';
 
 /** One shot, AFTER the job assembled its input and before it persists (the #7 window). */
 const h = vi.hoisted(() => ({ afterBuild: null as null | (() => Promise<void>) }));
@@ -95,7 +95,8 @@ async function pair(number: string, p2Raw: (p1: string) => Record<string, unknow
 }
 
 beforeAll(async () => {
-  const [r] = await db.insert(restaurants).values({ name: 'G-09 r12 worker', settings: {} as never }).returning({ id: restaurants.id });
+  // multiPage switched OFF (the key is set): a group can exist; never a real-OCR tenant
+  const [r] = await db.insert(restaurants).values({ name: 'G-09 r12 worker', settings: { features: { multiPage: false } } as never }).returning({ id: restaurants.id });
   rid = r!.id;
   const [s] = await db.insert(suppliers).values({ restaurantId: rid, name: 'תנובה בע"מ' }).returning({ id: suppliers.id });
   supplierId = s!.id;
@@ -112,6 +113,51 @@ afterAll(async () => {
 });
 
 describe('round 12 · checked together, through the worker', () => {
+  const runsOf = (id: string) => db.select().from(matchRuns).where(eq(matchRuns.invoiceId, id));
+  const undoDoc = (documentId: string) =>
+    resolvePageFlag(db, { restaurantId: rid, documentId, action: 'undo_checked_together', userId: null }, { enqueueMatch: async () => true });
+
+  it('round 13 #1/#7: answered → the REAL re-match moves the carrier (matched → disputed) → undo is still exact: status, runs, no stale pending stamp', async () => {
+    const { p1, p2, documentId } = await pair('A-1301');
+    const [r1] = await runsOf(p1);
+    await resolvePageFlag(db, { restaurantId: rid, documentId, action: 'checked_together', payableInvoiceId: p2, userId: null }, { enqueueMatch: async () => true });
+    const out = await matchInvoiceForJob(db, { restaurantId: rid, invoiceId: p2, rematch: true });
+    expect(out.persisted).not.toBeNull();
+    const moved = (await db.select().from(invoices).where(eq(invoices.id, p2)))[0]!.status;
+    expect(moved).not.toBe('matched'); // the matcher's own status (findings → disputed)
+    await undoDoc(documentId);
+    expect((await db.select().from(invoices).where(eq(invoices.id, p2)))[0]!.status).toBe('matched');
+    expect((await runsOf(p1)).map((r) => r.id)).toEqual([r1!.id]);
+    expect(await runsOf(p2)).toHaveLength(0);
+    expect((await rawOf(p2)).groupRematchPending).toBeUndefined();
+    expect((await rawOf(p2)).carrierOf).toBeUndefined();
+  });
+
+  it('round 13 #2: an undo committing while the carrier\'s re-match runs → the job saves nothing (the group changed); no line in two runs', async () => {
+    const { p1, p2, documentId } = await pair('A-1302');
+    await resolvePageFlag(db, { restaurantId: rid, documentId, action: 'checked_together', payableInvoiceId: p2, userId: null }, { enqueueMatch: async () => true });
+    h.afterBuild = async () => {
+      await undoDoc(documentId);
+    };
+    const out = await matchInvoiceForJob(db, { restaurantId: rid, invoiceId: p2, rematch: true });
+    expect(out.skipped).toBe('group_changed');
+    expect(await runsOf(p2)).toHaveLength(0);
+    expect(await runsOf(p1)).toHaveLength(1); // page 1's ₪400 in exactly one run: its own, restored
+  });
+
+  it('round 13 #3: a job on an INCLUDED page (its hold released, a re-read…) re-matches its carrier, never itself', async () => {
+    const { p1, p2, documentId } = await pair('A-1303');
+    await resolvePageFlag(db, { restaurantId: rid, documentId, action: 'checked_together', payableInvoiceId: p2, userId: null }, { enqueueMatch: async () => true });
+    await db.execute(sql`update invoices set ocr_payload = jsonb_set(ocr_payload, '{raw}', (ocr_payload -> 'raw') - 'groupRematchPending') where id = ${p2}::uuid`);
+    const out = await matchInvoiceForJob(db, { restaurantId: rid, invoiceId: p1 });
+    expect(out.skipped).toBe('included');
+    expect(await runsOf(p1)).toHaveLength(0);
+    expect(typeof (await rawOf(p2)).groupRematchPending).toBe('string');
+    const jobs = await qsql<Array<{ payload: { rematch?: boolean } }>>`
+      SELECT payload FROM job_queue WHERE queue = 'match-invoice' AND payload->>'invoiceId' = ${p2}`;
+    expect(jobs.map((j) => j.payload.rematch)).toContain(true);
+  });
+
   it('#2/#13: a carrier stamped "duplicate" of its own page 1 → answered → the REAL re-match runs on the whole document: one run, no DUPLICATE_INVOICE, no TOTAL_MISMATCH', async () => {
     const { p1, p2, documentId } = await pair('A-1201', (p1) => ({ duplicateOf: { invoiceId: p1, invoiceNumber: 'A-1201' } }), 'parsed');
     await resolvePageFlag(db, { restaurantId: rid, documentId, action: 'checked_together', payableInvoiceId: p2, userId: null }, { enqueueMatch: async () => true });
@@ -132,6 +178,12 @@ describe('round 12 · checked together, through the worker', () => {
     );
     // #9: the job ran — the stamp is cleared
     expect((await rawOf(p2)).groupRematchPending).toBeUndefined();
+    // round 13 (#1): undo AFTER the real re-match (it moved the carrier's status) is exact
+    await resolvePageFlag(db, { restaurantId: rid, documentId, action: 'undo_checked_together', userId: null }, { enqueueMatch: async () => true });
+    expect((await db.select().from(invoices).where(eq(invoices.id, p2)))[0]!.status).toBe('parsed');
+    expect((await rawOf(p2)).duplicateOf).toMatchObject({ invoiceId: p1 });
+    expect(await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, p2))).toHaveLength(0);
+    expect(await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, p1))).toHaveLength(1);
   });
 
   it('#7: a member\'s first match racing the answer saves no run once it is "included" (re-checked under the row lock)', async () => {
@@ -151,9 +203,9 @@ describe('round 12 · checked together, through the worker', () => {
     const now = new Date();
     const stale = await invoice({ number: 'A-1209', status: 'matched', line: '100.00', raw: { groupRematchPending: new Date(now.getTime() - 10 * 60_000).toISOString() } });
     const fresh = await invoice({ number: 'A-1210', status: 'matched', line: '100.00', raw: { groupRematchPending: new Date(now.getTime() - 60_000).toISOString() } });
-    const result = await runOcrSweep(qsql, now, [rid]);
-    expect(result.rematched ?? []).toContain(stale);
-    expect(result.rematched ?? []).not.toContain(fresh);
+    const rematched = await runGroupRematchSweep(qsql, now);
+    expect(rematched).toContain(stale);
+    expect(rematched).not.toContain(fresh);
     const jobs = await qsql<Array<{ payload: { rematch?: boolean } }>>`
       SELECT payload FROM job_queue WHERE queue = 'match-invoice' AND payload->>'invoiceId' = ${stale}`;
     expect(jobs.map((j) => j.payload.rematch)).toEqual([true]);

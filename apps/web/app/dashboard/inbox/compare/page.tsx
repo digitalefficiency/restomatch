@@ -134,6 +134,7 @@ export default async function PageQuestionPage({ searchParams }: { searchParams:
         otherInvoiceId={other?.id ?? null}
         otherIncludedIn={q.otherIncludedIn ?? null}
         options={ordered.map((p) => ({ id: p.id, role: p.role, supplier: p.supplier, number: p.number, total: p.total }))}
+        coverage={q.coverage}
         pageTotal={page?.total ?? null}
         otherTotal={other?.total ?? null}
         supplier={page?.supplier ?? other?.supplier ?? null}

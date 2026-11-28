@@ -35,6 +35,8 @@ export function PageAnswers(props: {
    * the carrier the head is already included in — with its supplier, number and ₪.
    */
   options?: CarrierOption[];
+  /** Round 13 (#10): the server's coverage verdict per head → invoice (ingest.pageQuestionOf). */
+  coverage?: Record<string, Record<string, boolean>>;
 }) {
   const t = useT(ingest);
   const locale = useLocale();
@@ -46,7 +48,7 @@ export function PageAnswers(props: {
   const headOptions = options.filter((o) => o.role === 'head');
   const [withHead, setWithHead] = useState<string | null>(props.otherInvoiceId);
   const [picked, setPayable] = useState<string | null>(null);
-  const { offered, totalCarrier, payable } = carrierChoice(options, withHead, picked);
+  const { offered, totalCarrier, payable, short } = carrierChoice(options, withHead, picked, props.coverage);
   const [smallerOk, setSmallerOk] = useState(false);
   const [pickMissing, setPickMissing] = useState(false);
   if (!props.canManage) return <p className="text-sm text-muted">{t('inbox.compareManagerOnly')}</p>;
@@ -68,7 +70,7 @@ export function PageAnswers(props: {
               payableInvoiceId: payable,
               ...(withHead ? { withInvoiceId: withHead } : {}),
               // Round 12 (#8): the person explicitly confirmed a carrier with a smaller printed total.
-              ...(smallerPick && smallerOk ? { acceptShortTotal: true } : {}),
+              ...(short && smallerOk ? { acceptShortTotal: true } : {}),
             }
           : {}),
       });
@@ -161,11 +163,13 @@ export function PageAnswers(props: {
                   ))}
               </span>
               {/* Round 11 (M5): making the invoice with the bigger printed total "included" in a smaller one needs an explicit yes. */}
-              {smallerPick ? (
+              {smallerPick || short ? (
                 <label className="flex min-h-11 cursor-pointer items-start gap-2 rounded-xl border border-warn/50 bg-surface-2 px-3 py-2 text-sm">
                   <input type="checkbox" checked={smallerOk} onChange={(e) => setSmallerOk(e.target.checked)} />
                   <span>
-                    {t('inbox.pageTogetherSmallerConfirm', { bigger: ils(totalCarrier?.total ?? null), picked: ils(pickedOption?.total ?? null) })}
+                    {smallerPick ? t('inbox.pageTogetherSmallerConfirm', { bigger: ils(totalCarrier?.total ?? null), picked: ils(pickedOption?.total ?? null) }) : null}
+                    {/* Round 13 (#11): a pick whose total misses lines leaves a total mismatch (a leak) — said before the yes. */}
+                    {short ? <span className="block">{t('inbox.pageTogetherShortGap')}</span> : null}
                   </span>
                 </label>
               ) : null}
@@ -197,7 +201,7 @@ export function PageAnswers(props: {
         }}
         onConfirm={() => {
           const a = confirm;
-          if (a === 'checked_together' && (!payable || (smallerPick && !smallerOk))) {
+          if (a === 'checked_together' && (!payable || ((smallerPick || short) && !smallerOk))) {
             setPickMissing(true);
             return;
           }

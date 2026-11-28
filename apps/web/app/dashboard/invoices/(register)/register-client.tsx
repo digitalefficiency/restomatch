@@ -46,7 +46,7 @@ const BTN = cn(
 );
 
 export function inTab(r: RegisterRow, tab: Tab): boolean {
-  if (tab === 'noAllocation') return !r.hasAllocation && r.state !== 'in_ocr';
+  if (tab === 'noAllocation') return !r.hasAllocation && r.state !== 'in_ocr' && r.state !== 'included';
   if (tab === 'intake' || tab === 'lines') return false;
   return r.tab === tab;
 }

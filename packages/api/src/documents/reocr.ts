@@ -194,6 +194,10 @@ export async function retireInvoice(
     .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
     .limit(1);
   if (!before) return { ok: false, reason: 'not_found' };
+  // Round 13 (#12): the carrier the retired invoice was included in (its group changes too).
+  const [formerCarrier] = (await tx.execute(sql`
+    select ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' as id from ${invoices}
+     where id = ${invoiceId}::uuid and restaurant_id = ${restaurantId}`)) as unknown as Array<{ id: string | null }>;
   // Undecided runs only (the blocker refused decided ones and receipt runs).
   await tx.delete(matchRuns).where(and(eq(matchRuns.invoiceId, invoiceId), eq(matchRuns.restaurantId, restaurantId)));
   const gone = await tx
@@ -224,6 +228,10 @@ export async function retireInvoice(
          set ocr_payload = jsonb_set(ocr_payload, '{raw}', (ocr_payload -> 'raw') - 'paidWith'), updated_at = now()
        where restaurant_id = ${restaurantId} and ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' = ${invoiceId}`);
   }
+  // Round 13 (#12): every carrier whose group moved records it again (raw.carrierOf).
+  for (const carrier of [args.absorbedInto, formerCarrier?.id ?? null]) {
+    if (carrier && carrier !== invoiceId) await recordCarrierGroup(tx, restaurantId, carrier);
+  }
   await tx.insert(auditLog).values({
     restaurantId,
     userId: args.userId,
@@ -234,4 +242,21 @@ export async function retireInvoice(
     after: { absorbedInto: args.absorbedInto } as never,
   });
   return { ok: true };
+}
+
+/**
+ * Round 13 (#12): a carrier's group (raw.carrierOf) re-read from the links that point at it
+ * — after a retire moved them. Empty → the key goes. A rare action, so the scan is fine here.
+ */
+export async function recordCarrierGroup(tx: Database, restaurantId: string, carrierId: string): Promise<void> {
+  await tx.execute(sql`
+    update ${invoices} c
+       set ocr_payload = case when g.ids is null
+                              then jsonb_set(c.ocr_payload, '{raw}', (c.ocr_payload -> 'raw') - 'carrierOf')
+                              else jsonb_set(c.ocr_payload, '{raw,carrierOf}', g.ids, true) end,
+           updated_at = now()
+      from (select (select jsonb_agg(m.id::text order by m.created_at, m.id) from ${invoices} m
+                     where m.restaurant_id = ${restaurantId}
+                       and m.ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' = ${carrierId}::text) as ids) g
+     where c.restaurant_id = ${restaurantId} and c.id = ${carrierId}::uuid and jsonb_typeof(c.ocr_payload -> 'raw') = 'object'`);
 }

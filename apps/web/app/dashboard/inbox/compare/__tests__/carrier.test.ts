@@ -23,3 +23,13 @@ describe('G-09 · the "checked together" dialog\'s carrier (round 12 #10)', () =
     expect(carrierChoice([page, headA, carrier], 'headA', null).payable).toBe('carrier');
   });
 });
+
+describe('G-09 · the dialog uses the SERVER\'s coverage (round 13 #10)', () => {
+  it('a pick the server marks uncovered is "short" — whatever the client\'s ₪ comparison says', () => {
+    const coverage = { headA: { page: false, headA: false } };
+    expect(carrierChoice([page, headA, headB], 'headA', null, coverage)).toMatchObject({ payable: 'page', short: true });
+    expect(carrierChoice([page, headA, headB], 'headA', null, { headA: { page: true } }).short).toBe(false);
+    // unknown coverage is never "short" on the client (the answer re-checks on the server)
+    expect(carrierChoice([page, headA, headB], 'headA', null).short).toBe(false);
+  });
+});

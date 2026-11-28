@@ -21,6 +21,7 @@ export {
   computeLeakBreakdown,
   computeLeakHero,
   expectedSourceOf,
+  includedInLiveCarrierSql,
   invoiceLeakStateCte,
   monthInvoicesCte,
   type LeakBreakdownInvoice,

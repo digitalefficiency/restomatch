@@ -173,6 +173,7 @@ export const he = {
     flagged_open: 'פער פתוח',
     claim_open: 'לבקשת זיכוי',
     held_duplicate: 'כפולה אפשרית',
+    included: 'נכלל בחשבונית אחרת',
     approved: 'אושרה לתשלום',
     paid: 'שולמה',
   },

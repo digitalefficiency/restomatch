@@ -172,6 +172,7 @@ export const en: Shape<typeof he> = {
     flagged_open: 'Open gap',
     claim_open: 'To the credit request',
     held_duplicate: 'Possible duplicate',
+    included: 'Included in another invoice',
     approved: 'Approved to pay',
     paid: 'Paid',
   },

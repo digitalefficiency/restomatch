@@ -33,7 +33,7 @@ import { featureEnabled } from '../lib/features';
 import { enqueueIngestJobs, INGEST_FEATURE, messageStatus, registerIngestedDocument } from '../ingest/pipeline';
 import { PAGE_FLAGS, PAGE_ONE_FLAGS } from '../documents/settle';
 import { openFlagSql, openPageQuestionSql, pageOfIncludesSql } from '../documents/questions';
-import { resolvePageFlag } from '../documents/resolve';
+import { carrierCoverage, groupOfInvoices, resolvePageFlag } from '../documents/resolve';
 import { assertSupplierOwned } from '../tenant';
 import { captureSourceRef } from '../orders/captureOrder';
 import { can, financeProcedure, managerProcedure, router } from '../trpc';
@@ -95,11 +95,29 @@ function questionOf(r: QuestionRow, asPageOne: boolean) {
  * "checked together" answer) — the compare page says so and offers it as the payable one.
  */
 async function withIncluded(db: Database, rid: string, q: ReturnType<typeof questionOf>) {
-  if (!q.otherInvoiceId) return { ...q, otherIncludedIn: null as string | null };
+  const coverage = await coverageOf(db, rid, q);
+  if (!q.otherInvoiceId) return { ...q, otherIncludedIn: null as string | null, coverage };
   const [r] = (await db.execute(sql`
     select ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' as inc
       from ${invoices} where id = ${q.otherInvoiceId} and restaurant_id = ${rid}`)) as unknown as Array<{ inc: string | null }>;
-  return { ...q, otherIncludedIn: r?.inc ?? null };
+  return { ...q, otherIncludedIn: r?.inc ?? null, coverage };
+}
+
+/**
+ * Round 13 (#10): the SERVER's verdict, per head the page may be compared with, on whether
+ * each invoice of that group prints a total covering the group's lines — the answer's own
+ * rule (carrierCoverage), so the dialog never judges "short" on its own.
+ */
+async function coverageOf(db: Database, rid: string, q: ReturnType<typeof questionOf>) {
+  const page = q.pageInvoiceId ?? null;
+  const heads = [...new Set([...q.heads, ...(q.otherInvoiceId ? [q.otherInvoiceId] : [])])];
+  const out: Record<string, Record<string, boolean>> = {};
+  if (!page) return out;
+  for (const head of heads) {
+    const group = await groupOfInvoices(db, rid, [page, head]);
+    out[head] = Object.fromEntries([...(await carrierCoverage(db, rid, group))].map(([id, c]) => [id, c.ok]));
+  }
+  return out;
 }
 
 async function ownDocument(db: Database, restaurantId: string, documentId: string) {

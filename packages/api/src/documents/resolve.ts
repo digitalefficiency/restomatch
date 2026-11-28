@@ -42,6 +42,68 @@ export const PAGE_SEPARATED_ACTION = 'document.page_separated';
  */
 export const REMATCH_PENDING_KEY = 'groupRematchPending';
 
+/** Round 13 (#12): on a carrier, the invoices included in it — read by id, never scanned for. */
+export const CARRIER_OF_KEY = 'carrierOf';
+
+/** Round 13 (#9): the references a restored run / finding holds — all ON DELETE SET NULL. */
+const RUN_REFS: Array<[string, string]> = [['gr_id', 'goods_receipts'], ['po_id', 'purchase_orders'], ['invoice_id', 'invoices']];
+const FINDING_REFS: Array<[string, string]> = [
+  ['gr_line_id', 'gr_lines'],
+  ['invoice_line_id', 'invoice_lines'],
+  ['po_line_id', 'po_lines'],
+  ['product_id', 'products'],
+  ['resolved_by', 'users'],
+];
+/** The snapshot row with every reference to a row that no longer exists set to null. */
+function nullDangling(row: unknown, refs: Array<[string, string]>) {
+  const json = JSON.stringify(row);
+  const overrides = refs.map(
+    ([col, table]) => sql`case when ${json}::jsonb ->> ${col}::text is not null
+                               and not exists (select 1 from ${sql.raw(table)} t where t.id = (${json}::jsonb ->> ${col}::text)::uuid)
+                          then jsonb_build_object(${col}::text, null) else '{}'::jsonb end`,
+  );
+  return sql`(${json}::jsonb || ${sql.join(overrides, sql` || `)})`;
+}
+
+/**
+ * Rounds 10/11 (P4/Q4): ONE group — the seed invoices, any invoice included in one of them,
+ * and the one they are included in, transitively (id order).
+ */
+export async function groupOfInvoices(tx: Database, restaurantId: string, seed: string[]): Promise<string[]> {
+  if (seed.length === 0) return [];
+  const r = (await tx.execute(sql`
+    with recursive grp(id) as (
+      select unnest(array[${sql.join(seed.map((id) => sql`${id}::uuid`), sql`, `)}])
+      union
+      select i.id from ${invoices} i, grp
+       where i.restaurant_id = ${restaurantId}
+         and (i.id::text = (select g.ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' from ${invoices} g where g.id = grp.id and g.restaurant_id = ${restaurantId})
+              or (i.ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId') = grp.id::text))
+    select id::text as id from grp order by id`)) as unknown as Array<{ id: string }>;
+  return r.map((x) => x.id);
+}
+
+/**
+ * Round 12 (#8) / round 13 (#10): for each invoice of a group, whether its printed total
+ * (before VAT) covers every line of the group (±₪0.10, the engine's rounding allowance) —
+ * ONE rule, used by the answer and shown on the compare page (never judged twice).
+ */
+export async function carrierCoverage(
+  tx: Database,
+  restaurantId: string,
+  memberIds: string[],
+): Promise<Map<string, { ok: boolean; printed: number | null; lines: number }>> {
+  if (memberIds.length === 0) return new Map();
+  const list = sql.join(memberIds.map((id) => sql`${id}::uuid`), sql`, `);
+  const rows = (await tx.execute(sql`
+    with l as (select coalesce(sum(il.line_total), 0) as lines from invoice_lines il join ${invoices} i on i.id = il.invoice_id
+                where i.restaurant_id = ${restaurantId} and i.id in (${list}))
+    select c.id::text as id, c.total_excl_vat::text as printed, l.lines::text as lines,
+           (c.total_excl_vat is not null and c.total_excl_vat + 0.10 >= l.lines) as ok
+      from ${invoices} c, l where c.restaurant_id = ${restaurantId} and c.id in (${list})`)) as unknown as Array<{ id: string; printed: string | null; lines: string; ok: boolean }>;
+  return new Map(rows.map((r) => [r.id, { ok: r.ok, printed: r.printed === null ? null : Number(r.printed), lines: Number(r.lines) }]));
+}
+
 /** Round 12 (#6): answers and undos of one restaurant run one at a time. */
 async function lockTogether(tx: Database, restaurantId: string): Promise<void> {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${'g09.checked_together:' + restaurantId}, 0))`);
@@ -53,7 +115,7 @@ const ANSWER_STAMP = sql.raw(`coalesce((a.after ->> 'stampedAt')::timestamptz, a
 /** The prior state an answer records, and its undo restores (round 11 M3, round 12 #2/#3). */
 interface TogetherSnapshot {
   flag?: string;
-  members?: Array<{ id: string; paidWith: string | null; status?: string; duplicateOf?: unknown; releasedFromReview?: boolean }>;
+  members?: Array<{ id: string; paidWith: string | null; status?: string; duplicateOf?: unknown; releasedFromReview?: boolean; carrierOf?: string[] | null }>;
   /** Every member's own match_runs row, and its findings, as they were (row_to_json). */
   runs?: unknown[];
   findings?: unknown[];
@@ -102,6 +164,9 @@ export async function resolvePageFlag(
       .limit(1)
       .for('update');
     if (!doc || !doc.invoiceId) throw documentNotFound();
+    // Round 13 (#6): an answer or undo takes the restaurant's lock right after its own
+    // document row, BEFORE any invoice or finding row — one lock order everywhere.
+    if (action === 'checked_together' || action === 'undo_checked_together') await lockTogether(tx, restaurantId);
     let flag = doc.error as PageFlag | null;
     // Round 6: "separate" on a possible duplicate is reversible — a page a
     // person separated while it was page_duplicate can still be deleted.
@@ -130,7 +195,6 @@ export async function resolvePageFlag(
     // run, a member moved on) the undo is refused — never a half-undo.
     if (action === 'undo_checked_together') {
       if (flag !== (PAGE_CHECKED_TOGETHER as string)) throw new TRPCError({ code: 'CONFLICT', message: 'not_flagged' });
-      await lockTogether(tx, restaurantId);
       const [was] = (await tx.execute(sql`
         select a.id::text as id, a.before, a.after, ${ANSWER_STAMP} as stamp
           from ${auditLog} a
@@ -163,25 +227,36 @@ export async function resolvePageFlag(
       if (memberList) {
         await tx.execute(sql`select id from ${invoices} where restaurant_id = ${restaurantId} and id in (${memberList}) order by id for update`);
       }
+      const payable = after.payableInvoiceId ?? null;
       if (exact && memberList) {
-        const payable = after.payableInvoiceId ?? null;
         const now = (await tx.execute(sql`
           select i.id::text as id, i.status from ${invoices} i where i.restaurant_id = ${restaurantId} and i.id in (${memberList})`)) as unknown as Array<{ id: string; status: string }>;
         const statusOf = new Map(now.map((r) => [r.id, r.status]));
-        // the carrier was signed off or paid on the combined document: its pages can't be un-included
-        if (payable && isInvoiceRematchLocked(statusOf.get(payable) ?? '')) throw new TRPCError({ code: 'CONFLICT', message: 'already_paid' });
-        // a person decided on the carrier's combined run (or a claim hangs on it): that decision stays
         if (payable) {
-          const [decidedOnCarrier] = (await tx.execute(sql`
+          // Round 13 (#1): the carrier's status is the MATCHER's (its re-match sets matched ↔
+          // disputed) — never a reason to refuse. Only a carrier signed off or paid on the
+          // combined document is final.
+          if (isInvoiceRematchLocked(statusOf.get(payable) ?? '')) throw new TRPCError({ code: 'CONFLICT', message: 'already_paid' });
+          // …or a decision a PERSON took after the answer on the carrier's run (a resolve
+          // stamped after it, an escalation that is not the re-match's carried copy, any claim
+          // — the answer refused a carrier with one). Decisions the re-match only carried
+          // forward from before the answer come back with the snapshot.
+          const [decidedSince] = (await tx.execute(sql`
             select 1 as hit from ${matchRuns} mr join ${discrepancies} d on d.match_run_id = mr.id and d.restaurant_id = mr.restaurant_id
-             where mr.restaurant_id = ${restaurantId} and mr.invoice_id = ${payable}::uuid and ${A_PERSONS_DECISION}
+             where mr.restaurant_id = ${restaurantId} and mr.invoice_id = ${payable}::uuid
+               and ((d.resolved_at is not null and d.resolved_at > ${was.stamp}::timestamptz)
+                    or exists (select 1 from ${auditLog} e
+                                where e.restaurant_id = d.restaurant_id and e.entity_type = 'discrepancy' and e.entity_id = d.id
+                                  and e.action = 'discrepancy.escalated' and e.at > ${was.stamp}::timestamptz
+                                  and coalesce(e.after ->> 'carried', 'false') <> 'true')
+                    or exists (select 1 from recovery_claims c where c.discrepancy_id = d.id and c.restaurant_id = d.restaurant_id))
              limit 1`)) as unknown as Array<{ hit: number }>;
-          if (decidedOnCarrier) throw new TRPCError({ code: 'CONFLICT', message: 'decided' });
+          if (decidedSince) throw new TRPCError({ code: 'CONFLICT', message: 'decided' });
         }
-        // a member that moved on since the answer can't come back exactly
+        // an INCLUDED member never runs on its own: one that moved on can't come back exactly
         for (const m of before.members ?? []) {
-          const expected = m.releasedFromReview ? 'matched' : m.status;
-          if (expected && statusOf.get(m.id) !== expected) throw new TRPCError({ code: 'CONFLICT', message: 'decided' });
+          if (m.id === payable) continue;
+          if (m.status && statusOf.get(m.id) !== m.status) throw new TRPCError({ code: 'CONFLICT', message: 'decided' });
         }
       }
       // restore EXACTLY the snapshot (an earlier answer's links stay as they were)
@@ -202,10 +277,24 @@ export async function resolvePageFlag(
         if (m.duplicateOf) {
           await tx.execute(sql`
             update ${invoices}
-               set ocr_payload = jsonb_set(ocr_payload, '{raw,duplicateOf}', ${JSON.stringify(m.duplicateOf)}::jsonb, true),
-                   status = case when ${Boolean(m.releasedFromReview)} then ${m.status ?? 'parsed'} else status end,
+               set ocr_payload = jsonb_set(ocr_payload, '{raw,duplicateOf}', ${JSON.stringify(m.duplicateOf)}::jsonb, true), updated_at = now()
+             where restaurant_id = ${restaurantId} and id = ${m.id}::uuid and jsonb_typeof(ocr_payload -> 'raw') = 'object'`);
+        }
+        // Round 13 (#12): the group each member carried before (raw.carrierOf) comes back.
+        if (exact) {
+          await tx.execute(sql`
+            update ${invoices}
+               set ocr_payload = case when ${m.carrierOf ? JSON.stringify(m.carrierOf) : null}::jsonb is null
+                                      then jsonb_set(ocr_payload, '{raw}', (ocr_payload -> 'raw') - ${CARRIER_OF_KEY})
+                                      else jsonb_set(ocr_payload, ${`{raw,${CARRIER_OF_KEY}}`}::text[], ${m.carrierOf ? JSON.stringify(m.carrierOf) : null}::jsonb, true) end,
                    updated_at = now()
              where restaurant_id = ${restaurantId} and id = ${m.id}::uuid and jsonb_typeof(ocr_payload -> 'raw') = 'object'`);
+        }
+        // Round 13 (#1): the carrier's status comes back with its run (its re-match moved it).
+        if (exact && m.id === payable && m.status) {
+          await tx.execute(sql`
+            update ${invoices} set status = ${m.status}, updated_at = now()
+             where restaurant_id = ${restaurantId} and id = ${m.id}::uuid and status <> ${m.status}`);
         }
       }
       if (!before.members) {
@@ -233,21 +322,36 @@ export async function resolvePageFlag(
       let rematch: string[] = members;
       if (exact && memberList) {
         await tx.execute(sql`delete from ${matchRuns} where restaurant_id = ${restaurantId} and invoice_id in (${memberList})`);
+        // Round 13 (#9): a row a snapshot points at may have gone since the answer (a
+        // receipt, a re-read line, a product). Every such reference is ON DELETE SET NULL, so
+        // it is nulled exactly as the database itself would have — the restore never fails.
         for (const run of before.runs ?? []) {
-          await tx.execute(sql`insert into ${matchRuns} select * from jsonb_populate_record(null::match_runs, ${JSON.stringify(run)}::jsonb)`);
+          await tx.execute(sql`insert into ${matchRuns} select * from jsonb_populate_record(null::match_runs, ${nullDangling(run, RUN_REFS)})`);
         }
         for (const f of before.findings ?? []) {
-          await tx.execute(sql`insert into ${discrepancies} select * from jsonb_populate_record(null::discrepancies, ${JSON.stringify(f)}::jsonb)`);
+          await tx.execute(sql`insert into ${discrepancies} select * from jsonb_populate_record(null::discrepancies, ${nullDangling(f, FINDING_REFS)})`);
         }
         // only an invoice that had no run of its own goes to the matcher (its own gates decide)
+        // — never the page whose question this undo re-opens: before the answer it waited for
+        // that question, unmatched, and so it does again (round 13 #7: exact, no stale stamp).
         const hadRun = new Set((before.runs ?? []).map((r) => (r as { invoice_id?: string }).invoice_id));
-        rematch = members.filter((id) => !hadRun.has(id));
+        rematch = members.filter((id) => !hadRun.has(id) && id !== doc.invoiceId);
       }
       const restore = before.flag && (PAGE_ONE_FLAGS as readonly string[]).includes(before.flag) ? before.flag : 'page_not_merged';
       await tx
         .update(ingestDocuments)
         .set({ error: restore, updatedAt: new Date() })
         .where(and(eq(ingestDocuments.restaurantId, restaurantId), eq(ingestDocuments.invoiceId, doc.invoiceId), eq(ingestDocuments.error, PAGE_CHECKED_TOGETHER)));
+      // Round 13 (#7): an invoice restored exactly needs no re-match — the answer's pending
+      // stamp goes (else the sweep would re-match the carrier alone over its restored run).
+      const restored = members.filter((id) => !rematch.includes(id));
+      if (restored.length > 0) {
+        await tx.execute(sql`
+          update ${invoices}
+             set ocr_payload = jsonb_set(ocr_payload, '{raw}', (ocr_payload -> 'raw') - ${REMATCH_PENDING_KEY}), updated_at = now()
+           where restaurant_id = ${restaurantId} and id in (${sql.join(restored.map((id) => sql`${id}::uuid`), sql`, `)})
+             and (ocr_payload -> 'raw') ? ${REMATCH_PENDING_KEY}`);
+      }
       await markRematchPending(tx, restaurantId, rematch);
       await tx.insert(auditLog).values({
         restaurantId,
@@ -368,8 +472,6 @@ export async function resolvePageFlag(
 
     if (action === 'checked_together') {
       if (!(PAGE_ONE_FLAGS as readonly string[]).includes(flag)) throw new TRPCError({ code: 'CONFLICT', message: 'not_comparable' });
-      // Round 12 (#6): one answer / undo at a time per restaurant, before anything is read.
-      await lockTogether(tx, restaurantId);
       // Round 9 (N4): ONE invoice stays payable. Round 10 (P9): the pair is the page's
       // invoice and its LIKELIEST head (raw.pageOf.invoiceId — what every compare shows).
       const [pair] = (await tx.execute(sql`
@@ -389,18 +491,7 @@ export async function resolvePageFlag(
       // re-pointed to the carrier picked now (order-independent: exactly one payable).
       // Round 11 (L3): the members are LOCKED in id order and the group is re-read inside
       // the lock until it is stable — two answers at once never build on a stale group.
-      const groupOf = async (seed: string[]): Promise<string[]> => {
-        const r = (await tx.execute(sql`
-          with recursive grp(id) as (
-            select unnest(array[${sql.join(seed.map((id) => sql`${id}::uuid`), sql`, `)}])
-            union
-            select i.id from ${invoices} i, grp
-             where i.restaurant_id = ${restaurantId}
-               and (i.id::text = (select g.ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' from ${invoices} g where g.id = grp.id and g.restaurant_id = ${restaurantId})
-                    or (i.ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId') = grp.id::text))
-          select id::text as id from grp order by id`)) as unknown as Array<{ id: string }>;
-        return r.map((x) => x.id);
-      };
+      const groupOf = (seed: string[]) => groupOfInvoices(tx, restaurantId, seed);
       const lockAll = async (ids: string[]) => {
         await tx.execute(sql`
           select id from ${invoices}
@@ -424,6 +515,15 @@ export async function resolvePageFlag(
                i.ocr_payload -> 'raw' -> 'duplicateOf' as dup_json,
                (coalesce(jsonb_array_length(case when jsonb_typeof(i.ocr_payload -> 'raw' -> 'reviewReasons') = 'array' then i.ocr_payload -> 'raw' -> 'reviewReasons' end), 0) > 0
                  or coalesce(i.ocr_payload -> 'raw' -> 'ocrFailed' = 'true'::jsonb, false)) as other_review,
+               coalesce(i.ocr_payload -> 'raw' -> 'ocrFailed' = 'true'::jsonb, false) as ocr_failed,
+               -- the matcher's own hold (matchInvoice's race guard): held for links, or typed
+               -- by hand, while a non-charge line has no product
+               ((coalesce(i.ocr_payload ? 'linkReleasedAt', false)
+                  or coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ?| array['unlinked', 'unlinkedPo']
+                  or coalesce(i.ocr_payload -> 'raw' -> 'manualLines' = 'true'::jsonb, false))
+                and exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.product_id is null
+                             and not (coalesce(i.ocr_payload -> 'chargeLineIds', '[]'::jsonb) ? il.id::text))) as link_held,
+               i.ocr_payload -> 'raw' -> ${CARRIER_OF_KEY} as carrier_of,
                exists (select 1 from ${matchRuns} mr join ${discrepancies} d on d.match_run_id = mr.id and d.restaurant_id = mr.restaurant_id
                         where mr.invoice_id = i.id and mr.restaurant_id = i.restaurant_id
                           and d.type = 'DUPLICATE_INVOICE' and d.resolution_status in ('open', 'escalated', 'accepted')) as dup_finding
@@ -438,6 +538,9 @@ export async function resolvePageFlag(
         dup_of: string | null;
         dup_json: unknown;
         other_review: boolean;
+        ocr_failed: boolean;
+        link_held: boolean;
+        carrier_of: unknown;
         dup_finding: boolean;
       }>;
       const pairRows = rows.filter((r) => r.id === invoiceId || r.id === head);
@@ -456,6 +559,13 @@ export async function resolvePageFlag(
       const inDocument = new Set([...memberIds, ...recorded]);
       const realDuplicate = (r: (typeof rows)[number]) => r.dup_finding || (r.dup_stamp && !(r.dup_of && inDocument.has(r.dup_of)));
       if (rows.some(realDuplicate)) throw new TRPCError({ code: 'CONFLICT', message: 'duplicate_on_file' });
+      // Round 13 (#3): a page still held for a person (its read failed, it waits for review,
+      // or for a product link) is never folded into the carrier's match — its lines would be
+      // matched before that person answered. Except a stamp naming a page of this group (#2):
+      // the one review this answer itself settles.
+      const groupStampOnly = (r: (typeof rows)[number]) => r.dup_stamp && !!r.dup_of && memberIds.includes(r.dup_of) && !r.other_review;
+      const onHold = (r: (typeof rows)[number]) => r.ocr_failed || r.link_held || (r.status === 'parsed' && !groupStampOnly(r));
+      if (rows.some(onHold)) throw new TRPCError({ code: 'CONFLICT', message: 'member_on_hold' });
       if (rows.some((r) => r.status === 'paid' && r.id !== payable)) throw new TRPCError({ code: 'CONFLICT', message: 'already_paid' });
       const marked = memberIds.filter((id) => id !== payable);
       const markedList = sql.join(marked.map((id) => sql`${id}::uuid`), sql`, `);
@@ -484,11 +594,7 @@ export async function resolvePageFlag(
       // total (before VAT) covers every line of the group (±₪0.10, the engine's rounding
       // allowance). Otherwise its match would read a phantom TOTAL_MISMATCH. The person may
       // still pick a smaller carrier, but only by saying so (acceptShortTotal).
-      const [covered] = (await tx.execute(sql`
-        select (c.total_excl_vat is not null and c.total_excl_vat + 0.10 >= (
-                  select coalesce(sum(il.line_total), 0) from invoice_lines il join ${invoices} i on i.id = il.invoice_id
-                   where i.restaurant_id = ${restaurantId} and i.id in (${memberList}))) as ok
-          from ${invoices} c where c.id = ${payable}::uuid and c.restaurant_id = ${restaurantId}`)) as unknown as Array<{ ok: boolean }>;
+      const covered = (await carrierCoverage(tx, restaurantId, memberIds)).get(payable);
       if (!covered?.ok && !args.acceptShortTotal) throw new TRPCError({ code: 'CONFLICT', message: 'carrier_total_short' });
       // Round 11 (M3) + round 12 (#2/#3): the exact prior state of every member — its link,
       // its status, the carrier's own-document stamp, and every member's run and findings
@@ -501,17 +607,21 @@ export async function resolvePageFlag(
       // Round 12 (#2): a carrier stamped as a "duplicate" of one of this document's own pages
       // (a continuation repeating its page 1's number) is the same document: the stamp goes
       // (else its re-match waits for review forever) and comes back on undo.
-      const ownStamp = Boolean(carrierRow.dup_stamp && carrierRow.dup_of && inDocument.has(carrierRow.dup_of));
+      // Round 13 (#4): only a stamp naming a page OF THIS GROUP is the same document (the rule
+      // buildMatchInput uses). One naming a recorded head outside the group stays — its
+      // DUPLICATE_INVOICE against that still-payable invoice must not be lost.
+      const ownStamp = Boolean(carrierRow.dup_stamp && carrierRow.dup_of && memberIds.includes(carrierRow.dup_of));
       // The OCR held the carrier ('parsed') for that stamp; when it was the ONLY reason on
       // record (no other review reason, not a failed read), the person's answer settles it:
       // the carrier goes to the matcher like any read invoice. Any other reason keeps it held.
-      const releaseFromReview = ownStamp && carrierRow.status === 'parsed' && !carrierRow.other_review;
+      const releaseFromReview = ownStamp && carrierRow.status === 'parsed';
       const snapshot = rows.map((r) => ({
         id: r.id,
         paidWith: r.paid_with,
         status: r.status,
         ...(r.id === payable && ownStamp ? { duplicateOf: r.dup_json } : {}),
         ...(r.id === payable && releaseFromReview ? { releasedFromReview: true } : {}),
+        carrierOf: Array.isArray(r.carrier_of) ? (r.carrier_of as string[]) : null,
       }));
       await tx.execute(sql`
         update ${invoices}
@@ -519,11 +629,19 @@ export async function resolvePageFlag(
                  coalesce(ocr_payload -> 'raw', '{}'::jsonb) || jsonb_build_object('paidWith', jsonb_build_object('invoiceId', ${payable}::text))),
                updated_at = now()
          where restaurant_id = ${restaurantId} and id in (${markedList})`);
-      // the carrier itself is payable — never "included" in anything
+      // the carrier itself is payable — never "included" in anything. Round 13 (#12): it
+      // records the group by id (raw.carrierOf), so the matcher reads members by key, never
+      // by scanning every invoice of the restaurant; no included invoice carries a group.
       await tx.execute(sql`
         update ${invoices}
-           set ocr_payload = jsonb_set(ocr_payload, '{raw}', (ocr_payload -> 'raw') - 'paidWith'), updated_at = now()
-         where restaurant_id = ${restaurantId} and id = ${payable}::uuid and (ocr_payload -> 'raw') ? 'paidWith'`);
+           set ocr_payload = jsonb_set(ocr_payload, '{raw}', (ocr_payload -> 'raw') - ${CARRIER_OF_KEY}), updated_at = now()
+         where restaurant_id = ${restaurantId} and id in (${markedList}) and (ocr_payload -> 'raw') ? ${CARRIER_OF_KEY}`);
+      await tx.execute(sql`
+        update ${invoices}
+           set ocr_payload = jsonb_set(ocr_payload, '{raw}',
+                 ((ocr_payload -> 'raw') - 'paidWith') || jsonb_build_object(${CARRIER_OF_KEY}::text, ${JSON.stringify(marked)}::jsonb)),
+               updated_at = now()
+         where restaurant_id = ${restaurantId} and id = ${payable}::uuid and jsonb_typeof(ocr_payload -> 'raw') = 'object'`);
       if (ownStamp) {
         await tx.execute(sql`
           update ${invoices}

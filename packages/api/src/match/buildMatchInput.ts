@@ -62,6 +62,8 @@ export interface BuiltMatchInput {
    * as if unpinned (usually UNORDERED_ARRIVAL). Additive and optional (G-04).
    */
   pinSkipped?: 'po_draft';
+  /** G-09 (round 13 #2): the invoices included in this carrier whose lines were read (empty: none). */
+  groupMemberIds?: string[];
 }
 
 const num = (v: string | null, fallback = 0): number => (v == null ? fallback : Number(v));
@@ -164,11 +166,25 @@ export async function buildMatchInputForInvoice(
   // same storage order main reads a single invoice's lines in (round 12 #1: the engine
   // pairs a PO line with the FIRST unpaired invoice line of its product, so the order
   // of a single invoice's lines must stay exactly main's).
-  const groupRows = await db
-    .select({ id: invoices.id, ocrPayload: invoices.ocrPayload })
-    .from(invoices)
-    .where(and(eq(invoices.restaurantId, restaurantId), sql`${invoices.ocrPayload} -> 'raw' -> 'paidWith' ->> 'invoiceId' = ${invoiceId}::text`))
-    .orderBy(asc(invoices.createdAt), asc(invoices.id));
+  // Round 13 (#12): the group is read BY ID from the carrier's own record (raw.carrierOf)
+  // — never a scan of the restaurant's invoices: no group ⇒ no extra query at all. Only
+  // members still linked back to this carrier count.
+  const carrierOf = (inv.ocrPayload?.raw as { carrierOf?: unknown } | null | undefined)?.carrierOf;
+  const claimedIds = Array.isArray(carrierOf) ? carrierOf.filter((id): id is string => typeof id === 'string' && UUID_RE.test(id)) : [];
+  const groupRows =
+    claimedIds.length === 0
+      ? []
+      : await db
+          .select({ id: invoices.id, ocrPayload: invoices.ocrPayload, createdAt: invoices.createdAt })
+          .from(invoices)
+          .where(
+            and(
+              eq(invoices.restaurantId, restaurantId),
+              inArray(invoices.id, claimedIds),
+              sql`${invoices.ocrPayload} -> 'raw' -> 'paidWith' ->> 'invoiceId' = ${invoiceId}::text`,
+            ),
+          )
+          .orderBy(asc(invoices.createdAt), asc(invoices.id));
   const groupMemberIds = groupRows.map((r) => r.id);
   const groupMembers = new Set(groupMemberIds);
   // A scan whose number another invoice of this supplier already holds is
@@ -246,8 +262,13 @@ export async function buildMatchInputForInvoice(
       .where(eq(invoiceLines.invoiceId, id));
   // No group ⇒ exactly main's single query. A group ⇒ the carrier's lines first (as main
   // reads them), then each member's lines appended after.
-  const invLineRows = await linesOf(invoiceId);
-  for (const memberId of groupMemberIds) invLineRows.push(...(await linesOf(memberId)));
+  // Round 13 (nit): the whole document in arrival order — the carrier among its pages by
+  // created_at (then id), each invoice's lines in storage order. No group ⇒ main's query.
+  const order = [{ id: invoiceId, createdAt: inv.createdAt }, ...groupRows]
+    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id))
+    .map((r) => r.id);
+  const invLineRows = await linesOf(order[0]!);
+  for (const id of order.slice(1)) invLineRows.push(...(await linesOf(id)));
   if (invLineRows.length === 0) return null;
 
   // G-08 charge: lines a person answered "שורת חיוב — לא מוצר" (deposit, delivery,
@@ -686,7 +707,7 @@ export async function buildMatchInputForInvoice(
     ...(po?.expectedDeliveryAt ? { expectedDeliveryDate: po.expectedDeliveryAt } : {}),
   };
 
-  return { input, poId: po?.id ?? null, grId, ...(pinSkipped ? { pinSkipped } : {}) };
+  return { input, poId: po?.id ?? null, grId, ...(pinSkipped ? { pinSkipped } : {}), ...(groupMemberIds.length > 0 ? { groupMemberIds } : {}) };
 }
 
 /** The printed VAT in agorot; when none is printed but the subtotal and total are, their gap (round 7 LOW-2). */

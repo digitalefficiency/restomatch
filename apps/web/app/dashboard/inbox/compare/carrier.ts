@@ -14,9 +14,17 @@ export interface CarrierOption {
  * Round 11 (M5): the default is the offered invoice with the largest printed ₪ (the one
  * printing the document total); a pick that is no longer offered falls back to it.
  */
-export function carrierChoice(options: CarrierOption[], withHead: string | null, picked: string | null) {
+export function carrierChoice(
+  options: CarrierOption[],
+  withHead: string | null,
+  picked: string | null,
+  /** Round 13 (#10): the server's verdict per head → invoice: does its printed total cover the group's lines? */
+  coverage?: Record<string, Record<string, boolean>>,
+) {
   const offered = options.filter((o) => o.role === 'page' || o.role === 'carrier' || o.id === withHead);
   const totalCarrier = offered.filter((o) => o.total !== null).sort((x, y) => (y.total ?? 0) - (x.total ?? 0))[0] ?? null;
   const payable = picked && offered.some((o) => o.id === picked) ? picked : (totalCarrier?.id ?? null);
-  return { offered, totalCarrier, payable };
+  // the SERVER's rule only (carrierCoverage) — unknown is never "short" here; the answer re-checks
+  const short = Boolean(withHead && payable && coverage?.[withHead]?.[payable] === false);
+  return { offered, totalCarrier, payable, short };
 }

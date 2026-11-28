@@ -28,6 +28,7 @@ import {
   REMATCH_PENDING_KEY,
 } from '@restomatch/api';
 import { and, desc, eq, invoices, matchRuns, restaurants, sql, suppliers, type Database } from '@restomatch/db';
+import { enqueueMatchInvoice } from '@restomatch/queue';
 import { computeInvoiceLeak } from '@restomatch/charts';
 import { runMatch, type MatchOutput } from '@restomatch/matching';
 import { makeWorker, type WorkerJob } from '../queue';
@@ -130,7 +131,9 @@ export interface MatchJobOutcome {
     | 'receipt_open'
     | 'claim_in_progress'
     /** G-09 (round 12 #7): the invoice was "checked together" into another meanwhile — its lines are matched with the carrier's. */
-    | 'included';
+    | 'included'
+    /** G-09 (round 13 #2): the carrier's group changed between the build and the save. */
+    | 'group_changed';
 }
 
 /**
@@ -150,9 +153,10 @@ export async function matchInvoiceForJob(
   data: MatchInvoiceJob,
 ): Promise<MatchJobOutcome> {
   const out = await matchInvoiceOnce(db, data);
-  // G-09 (round 12 #9): a group re-match the answer (or its undo) stamped has now run —
-  // whatever its outcome. A job that threw keeps the stamp: the sweep retries it.
-  if (data.rematch) {
+  // G-09 (rounds 12/13 #9/#8): a group re-match the answer (or its undo) stamped is done
+  // only once a run was SAVED. Any skip (a receipt still open, an order question, the group
+  // changed meanwhile) or a throw keeps the stamp: the sweep retries it.
+  if (out.persisted) {
     await db.execute(sql`
       update invoices set ocr_payload = jsonb_set(ocr_payload, '{raw}', (ocr_payload -> 'raw') - ${REMATCH_PENDING_KEY})
        where id = ${data.invoiceId}::uuid and restaurant_id = ${data.restaurantId}
@@ -191,6 +195,22 @@ async function matchInvoiceOnce(db: Database, data: MatchInvoiceJob): Promise<Ma
       inv.status = 'matched';
       pinPoId = rel.pinPoId;
     }
+  }
+  // G-09 (round 13 #3): an invoice "checked together" into another is never matched on its
+  // own — whatever brought it here (its hold released, a re-read, a receipt) changed the
+  // carrier's document: the CARRIER is matched again (stamped first, so it is never lost).
+  const carrierId = (inv.ocrPayload as { raw?: { paidWith?: { invoiceId?: unknown } } } | null)?.raw?.paidWith?.invoiceId;
+  if (typeof carrierId === 'string') {
+    await db.execute(sql`
+      update invoices
+         set ocr_payload = jsonb_set(ocr_payload, ${`{raw,${REMATCH_PENDING_KEY}}`}::text[], to_jsonb(now()), true), updated_at = now()
+       where id = ${carrierId}::uuid and restaurant_id = ${restaurantId} and jsonb_typeof(ocr_payload -> 'raw') = 'object'`);
+    try {
+      await enqueueMatchInvoice({ restaurantId, invoiceId: carrierId, rematch: true });
+    } catch (err) {
+      console.warn(`[match-invoice] carrier re-match for invoice=${carrierId} not enqueued (the sweep retries it)`, err);
+    }
+    return { result: CLEAN, persisted: null, replaced: false, skipped: 'included' };
   }
   // A person already signed this invoice off (a receipt submit never rewrites
   // its match — only match.runForInvoice, a manager action, may), or the OCR
@@ -299,14 +319,46 @@ async function matchInvoiceOnce(db: Database, data: MatchInvoiceJob): Promise<Ma
              (coalesce(i.ocr_payload -> 'raw' -> 'ocrFailed' = 'true'::jsonb, false)
                or coalesce(i.ocr_payload -> 'raw' -> 'manualLines' = 'true'::jsonb, false)) as hand_entered,
              coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ?| ${LINK_HOLD_REASONS} as question_reason,
-             coalesce((i.ocr_payload -> 'raw') ? 'paidWith', false) as included
+             coalesce((i.ocr_payload -> 'raw') ? 'paidWith', false) as included,
+             -- G-09 (round 13 #2): the carrier's group as it stands NOW, under this lock
+             (select coalesce(jsonb_agg(m.id::text order by m.id), '[]'::jsonb) from invoices m
+               where m.restaurant_id = i.restaurant_id
+                 and m.id::text in (select jsonb_array_elements_text(case when jsonb_typeof(i.ocr_payload -> 'raw' -> 'carrierOf') = 'array' then i.ocr_payload -> 'raw' -> 'carrierOf' else '[]'::jsonb end))
+                 and m.ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' = i.id::text) as group_now,
+             -- G-09 (round 13 #3): a page of the group still held for its product links
+             exists (select 1 from invoices m
+                      where m.restaurant_id = i.restaurant_id
+                        and m.ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' = i.id::text
+                        and m.id::text in (select jsonb_array_elements_text(case when jsonb_typeof(i.ocr_payload -> 'raw' -> 'carrierOf') = 'array' then i.ocr_payload -> 'raw' -> 'carrierOf' else '[]'::jsonb end))
+                        and (coalesce(m.ocr_payload ? 'linkReleasedAt', false)
+                             or coalesce(m.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ?| ${LINK_HOLD_REASONS}
+                             or coalesce(m.ocr_payload -> 'raw' -> 'ocrFailed' = 'true'::jsonb, false)
+                             or coalesce(m.ocr_payload -> 'raw' -> 'manualLines' = 'true'::jsonb, false))
+                        and exists (select 1 from invoice_lines il where il.invoice_id = m.id and il.product_id is null
+                                     and not (coalesce(m.ocr_payload -> 'chargeLineIds', '[]'::jsonb) ? il.id::text))) as group_unlinked
         from invoices i where i.id = ${invoiceId}::uuid and i.restaurant_id = ${restaurantId}
        for no key update
-    `)) as unknown as Array<{ status: string; has_run: boolean; unlinked: boolean; link_held: boolean; hand_entered: boolean; question_reason: boolean; included: boolean }>;
+    `)) as unknown as Array<{
+      status: string;
+      has_run: boolean;
+      unlinked: boolean;
+      link_held: boolean;
+      hand_entered: boolean;
+      question_reason: boolean;
+      included: boolean;
+      group_now: string[];
+      group_unlinked: boolean;
+    }>;
     if (!race || race.status === 'ocr_pending') return 'ocr_pending' as const;
     // G-09 (round 12 #7): "checked together" into another invoice while this job was
     // matching (the answer takes this row lock too) — never a second run for its lines.
     if (race.included) return 'included' as const;
+    // G-09 (round 13 #2): the group this input was built from changed meanwhile (an undo, a
+    // new answer): never persist a run of a stale document. The pending stamp stays — the
+    // change that moved the group re-matches it (or the sweep does).
+    const built_ = [...(built.groupMemberIds ?? [])].sort();
+    if (built_.length !== race.group_now.length || built_.some((id, k) => id !== race.group_now[k])) return 'group_changed' as const;
+    if (race.group_unlinked) return 'awaiting_review' as const;
     if ((race.link_held || race.hand_entered) && race.unlinked) return 'awaiting_review' as const;
     if (race.status === 'parsed' && race.question_reason) return 'awaiting_review' as const;
     if (priorRun && !race.has_run) return 'awaiting_review' as const;
