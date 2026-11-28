@@ -19,6 +19,7 @@ import {
   restaurants,
   sql,
   suppliers,
+  type UserRole,
 } from '@restomatch/db';
 import { can, financeProcedure, invoiceReaderProcedure, router } from '../trpc';
 import { canViewPrices } from '../lib/capabilities';
@@ -34,6 +35,24 @@ import {
   type InvoiceState,
   type InvoiceStateRow,
 } from '../invoices/state';
+import {
+  HOLDING_MAX_IDS,
+  gapRoleOf,
+  isQueueRow,
+  leadingRolesFor,
+  placeOf,
+  reasonOfRule,
+  type DecisionRecord,
+  type GapReason,
+  type GapRole,
+  type Holding,
+  type InvoiceHoldingEntry,
+  type PassedOn,
+  type PlaceId,
+  type PlaceSummary,
+} from '../invoices/holding';
+import type { Allocation, PayBy, Payment } from '../invoices/payment';
+import type { InvoiceHistory } from '../invoices/history';
 
 /**
  * Invoice register, cockpit and intake (wave 2, W2-02).
@@ -109,6 +128,23 @@ export interface RegisterRow {
   consolidated: boolean;
 }
 
+/**
+ * INV-00 · an `invoices.list` row: the register row plus the facts every screen of the
+ * invoices area reads from one definition (`invoices/holding.ts`, `invoices/payment.ts`).
+ */
+export interface InvoiceListRow extends RegisterRow {
+  /** With whom its open gaps are, since when and why; null when it has no open gap. */
+  holding: Holding | null;
+  /** The last decision a person took on one of its gaps; null when none (what the system closed is never one). */
+  lastDecision: DecisionRecord | null;
+  /** Its place in the month, for the caller's role (every invoice in exactly one place). */
+  place: PlaceId;
+  /** The pay run holds it for a missing or malformed allocation number (`vatAtRisk()`), the pay run's own rule. */
+  allocationMissing: boolean;
+  /** The pay run's date (`computeDueDate`), or null when it is unknown. `dueDate` stays the date a person typed. */
+  payBy: PayBy | null;
+}
+
 /** Israel calendar day of an invoice date (the VAT threshold is by invoice date). */
 const IL_TZ = 'Asia/Jerusalem';
 export function allocationRequiredFor(invoiceDate: Date | string | null, totalExclVat: string | number | null): boolean {
@@ -171,14 +207,45 @@ async function intakeCount(db: Parameters<typeof invoiceStatesForMonth>[0], rest
   return Number(r?.n ?? 0);
 }
 
-function countTabs(rows: readonly RegisterRow[], intake: number): Record<RegisterTab, number> {
+function countTabs(
+  rows: readonly RegisterRow[],
+  intake: number,
+  allocationMissing: number,
+): Record<RegisterTab, number> & { allocationMissing: number } {
   const out = Object.fromEntries(REGISTER_TABS.map((t) => [t, 0])) as Record<RegisterTab, number>;
   for (const r of rows) {
     out[r.tab] += 1;
     if (!r.hasAllocation && r.state !== 'in_ocr') out.noAllocation += 1;
   }
   out.intake = intake;
-  return out;
+  // INV-00: `noAllocation` keeps its value (every invoice with no number); this one counts the
+  // rows the pay run holds for a missing number (`allocationMissing`, decision 5).
+  return { ...out, allocationMissing };
+}
+
+/**
+ * INV-00 · the list rows' new facts. Contract (slice 0): the place from the canonical state
+ * and the leading open gap's role; `holding`, `lastDecision`, `payBy` and `places` empty.
+ */
+async function listRowsOf(
+  db: Parameters<typeof invoiceStatesForMonth>[0],
+  session: { restaurantId: string; role: UserRole },
+  rows: readonly RegisterRow[],
+): Promise<{ rows: InvoiceListRow[]; places: PlaceSummary[]; allocationMissing: number }> {
+  const held = rows.filter((r) => r.state === 'flagged_open' || r.state === 'held_duplicate').map((r) => r.id);
+  const roles = await leadingRolesFor(db, session.restaurantId, session.role, held);
+  return {
+    rows: rows.map((r) => ({
+      ...r,
+      holding: null,
+      lastDecision: null,
+      place: placeOf(r.state, roles.get(r.id) ?? null, false),
+      allocationMissing: false,
+      payBy: null,
+    })),
+    places: [],
+    allocationMissing: 0,
+  };
 }
 
 const MonthInput = z.object({ monthOffset: z.number().int().min(-24).max(0).default(0) }).default({});
@@ -239,7 +306,12 @@ export const invoicesRouter = router({
         .default({}),
     )
     .query(async ({ ctx, input }) => {
-      const rows = await registerRows(ctx.db, ctx.session.restaurantId, input.monthOffset);
+      const area = await listRowsOf(
+        ctx.db,
+        ctx.session,
+        await registerRows(ctx.db, ctx.session.restaurantId, input.monthOffset),
+      );
+      const rows = area.rows;
       const visible = !input.tab
         ? rows
         : input.tab === 'noAllocation'
@@ -249,12 +321,18 @@ export const invoicesRouter = router({
             : rows.filter((r) => r.tab === input.tab);
       return {
         rows: visible,
-        counts: countTabs(rows, await intakeCount(ctx.db, ctx.session.restaurantId)),
+        counts: countTabs(rows, await intakeCount(ctx.db, ctx.session.restaurantId), area.allocationMissing),
         /** Σ visible rows, integer agorot (the TotalsRow). */
         totals: {
           totalInclVatAgorot: visible.reduce((s, r) => s + r.totalInclVatAgorot, 0),
           gapAgorot: visible.reduce((s, r) => s + r.gapAgorot, 0),
         },
+        /**
+         * INV-00 · the places of the month for the caller's role, every place with its count (zeros
+         * included), in the order of PLACE_IDS; the screens order them (`apps/web/lib/invoices/places.ts`).
+         * They partition the month (all rows, whatever `tab` filtered).
+         */
+        places: area.places,
       };
     }),
 
@@ -262,8 +340,12 @@ export const invoicesRouter = router({
   counts: can('money.view')
     .input(MonthInput)
     .query(async ({ ctx, input }) => {
-      const rows = await registerRows(ctx.db, ctx.session.restaurantId, input.monthOffset);
-      return countTabs(rows, await intakeCount(ctx.db, ctx.session.restaurantId));
+      const area = await listRowsOf(
+        ctx.db,
+        ctx.session,
+        await registerRows(ctx.db, ctx.session.restaurantId, input.monthOffset),
+      );
+      return countTabs(area.rows, await intakeCount(ctx.db, ctx.session.restaurantId), area.allocationMissing);
     }),
 
   /**
@@ -349,6 +431,10 @@ export const invoicesRouter = router({
             deltaAmount: discrepancies.deltaAmount,
             toleranceUsed: discrepancies.toleranceUsed,
             resolutionStatus: discrepancies.resolutionStatus,
+            // INV-00: the routing facts of each finding (no ₪, no name).
+            requiresRole: discrepancies.requiresRole,
+            ruleId: discrepancies.ruleId,
+            createdAt: discrepancies.createdAt,
           })
           .from(discrepancies)
           .where(and(eq(discrepancies.matchRunId, run.id), eq(discrepancies.restaurantId, rid)))
@@ -402,6 +488,14 @@ export const invoicesRouter = router({
         expectedAt: run?.runAt ?? null,
         deltaAgorot: money && f.deltaAmount != null ? agorot(f.deltaAmount) : null,
         toleranceUsed: f.toleranceUsed,
+        // INV-00 · an undecided gap (one of the approvals queue's rows: open or escalated, not
+        // the ₪0 twin): the role it waits for, its rule and since when. A decided one: the
+        // decision. All null without money.view (the receiver reads this procedure).
+        routing: (money && isQueueRow(f) ? gapRoleOf(f.requiresRole) : null) as GapRole | null,
+        reason: (money && isQueueRow(f) ? reasonOfRule(f.ruleId, f.type) : null) as GapReason | null,
+        since: (money && isQueueRow(f) ? f.createdAt : null) as Date | null,
+        passedOn: null as PassedOn | null,
+        decision: null as DecisionRecord | null,
       };
     };
 
@@ -483,6 +577,19 @@ export const invoicesRouter = router({
             .filter((f) => f.resolutionStatus === 'open' || f.resolutionStatus === 'escalated')
             .reduce((s, f) => s + Math.abs(agorot(f.deltaAmount)), 0)
         : null,
+      // ── INV-00 · every new field is null without money.view (the receiver reads this). ──
+      /** With whom its open gaps are, since when and why (as on the list row); null when none is open. */
+      holding: null as Holding | null,
+      /** The rows the approvals desk shows for this invoice (`openCount` also counts the ₪0 twin and keeps its value). */
+      queueOpenCount: null as number | null,
+      /** Held, payable, paid or being read, in the pay run's terms, with the reasons. */
+      payment: null as Payment | null,
+      /** The allocation number: required, the number, valid, missing (the pay run's rule), the VAT at risk. */
+      allocation: null as Allocation | null,
+      /** The pay run's date (`computeDueDate`), or null when unknown. */
+      payBy: null as PayBy | null,
+      /** When the order of the latest match run was sent to the supplier. */
+      orderSentAt: null as Date | null,
     };
   }),
   /**
@@ -553,6 +660,36 @@ export const invoicesRouter = router({
     }
     return { count: out.length, rows: out };
   }),
+
+  /**
+   * INV-00 · `holding` and `lastDecision` for the given invoices, in one read (the pay run asks
+   * for every row it lists, in chunks of HOLDING_MAX_IDS). One entry per id that is the caller's;
+   * a foreign or unknown id is simply absent. Purchase ₪ → `money.view`.
+   */
+  holding: can('money.view')
+    .input(z.object({ invoiceIds: z.array(z.string().uuid()).max(HOLDING_MAX_IDS) }))
+    .query(async (): Promise<InvoiceHoldingEntry[]> => {
+      // Contract (slice 0): no entry yet.
+      return [];
+    }),
+
+  /**
+   * INV-00 · an invoice's story, newest first: the order, the receipt, the reading, each check,
+   * the routing with its rule, each pass-on, decision and undo. Roles only: no user id, name or
+   * e-mail; "it was you" is a flag. A foreign or unknown id → NOT_FOUND.
+   */
+  history: can('money.view')
+    .input(z.object({ invoiceId: z.string().uuid() }))
+    .query(async ({ ctx, input }): Promise<InvoiceHistory> => {
+      const [own] = await ctx.db
+        .select({ id: invoices.id })
+        .from(invoices)
+        .where(and(eq(invoices.id, input.invoiceId), eq(invoices.restaurantId, ctx.session.restaurantId)))
+        .limit(1);
+      if (!own) throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
+      // Contract (slice 0): an empty story.
+      return { events: [], rematched: false };
+    }),
 });
 
 export { INVOICE_STATES };

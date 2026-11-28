@@ -44,6 +44,8 @@ import {
 import { recipientsForRestaurant } from '../notifications/recipients';
 import { enqueueNotification } from '../notifications/outbox';
 import { stripTrailingSlashes } from '../lib/urls';
+import { byRoutingOf, gapFactsOf, type OpenInvoicesSummary } from '../invoices/holding';
+import { DECIDED_PERIODS, type DecidedRow } from '../invoices/history';
 import type { Database } from '@restomatch/db';
 
 const ResolutionEnum = z.enum(['accepted', 'rejected', 'escalated']);
@@ -332,6 +334,8 @@ export const approvalsRouter = router({
             .orderBy(PRIORITY_KEY)
             .limit(limit)
             .offset(input?.afterId ? 0 : (input?.offset ?? 0));
+      // INV-00: each row's reason (a structure, never words) and its pass-on, read by the row ids.
+      const gapFacts = await gapFactsOf(ctx.db, rid, rows);
       // A PO line from another tenant can never be joined in (its PO join is
       // tenant-scoped); drop its orphan facts rather than show them.
       // The claimable ₪ per row (lib/claims rule, per-invoice cap): the group
@@ -344,6 +348,9 @@ export const approvalsRouter = router({
         canAct: canActOn(ctx.session.role, r.requiredRole),
         /** Who decides it: its routed role, or 'unrouted' (owner / manager). */
         waitingOn: (r.requiredRole ?? 'unrouted') as AwaitingRouting,
+        /** INV-00: why it is with its role (`invoices/holding.ts` GapReason), and who passed it on. */
+        reason: gapFacts.reasonOf(r),
+        passedOn: gapFacts.passedOnOf(r.id),
       }));
     }),
 
@@ -631,6 +638,25 @@ export const approvalsRouter = router({
         )
         .orderBy(desc(auditLog.at), desc(auditLog.id));
       return input.limit ? q.limit(input.limit) : q;
+    }),
+
+  /**
+   * INV-00 · a person's decisions of a period ("הוחלט היום"), newest first, by the restaurant's
+   * own day: each row carries the facts the desk shows for an open gap plus the decision (the
+   * role, in whose place, the reason). An undone decision leaves the list; what the system
+   * closed by itself is never in it. Roles only: no user id, name or e-mail.
+   */
+  decided: financeProcedure
+    .input(
+      z.object({
+        period: z.enum(DECIDED_PERIODS),
+        /** One invoice's decisions (the desk opened on `?invoice=`). Foreign ids match nothing. */
+        invoiceIds: z.array(z.string().uuid()).max(50).optional(),
+      }),
+    )
+    .query(async (): Promise<DecidedRow[]> => {
+      // Contract (slice 0): an empty list.
+      return [];
     }),
 });
 
@@ -1312,5 +1338,9 @@ export async function computeQueueSummary(
       amountIls: lanes.reduce((n, l) => n + laneAgorot(l), 0) / 100,
       byRole: lanes.map((l) => ({ role: l.role as string, count: l.count, amountIls: laneAgorot(l) / 100 })),
     },
+    /** INV-00: every open row by the role that decides it, ₪ in integer agorot by VAT basis. */
+    byRouting: byRoutingOf(all?.byRole ?? [], role),
+    /** INV-00: the invoices with an open gap under these filters, and Σ their totals incl. VAT. */
+    invoices: { count: 0, totalInclVatAgorot: 0 } as OpenInvoicesSummary,
   };
 }
