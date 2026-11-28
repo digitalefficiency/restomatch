@@ -22,41 +22,56 @@ positive), danger `#B80F2A` (leak), gold `#755C00` (caught / new); dark stage: `
 
 | # | Time | Beat | On-screen copy (he) | On-screen copy (en) | Motion |
 |---|---|---|---|---|---|
-| 1 | 0:00–0:06 | **Hook** | כמה כסף / **דלף לך** / החודש? · ₪760 · "רוב בעלי המסעדות לא יודעים לענות." · "מסעדת הדגמה · אוקטובר 2026" | How much / **money leaked** / this month? · ₪760 · "Most restaurant owners can’t answer." · "Demo restaurant · October 2026" | Masked line rises, slow push-in, slot-machine ₪ reel with vertical motion blur, glow + specular sweep |
-| 2 | 0:06–0:12.5 | **Problem** | עשרות משלוחים בשבוע. / חשבונית לכל אחד. / ואף אחד לא משווה שורה מול שורה. · stamps: "מחיר עלה +10.6%", "חויב על 3 ק״ג שלא הגיעו", "לא הוזמן" | Dozens of deliveries a week. / An invoice for each one. / And nobody checks them line by line. · "Price up +10.6%", "Billed 3 kg that never came", "Not ordered" | 9 Hebrew supplier invoices fly in from depth (3D, speed-blur), pile + camera shake, stamps slam; pile collapses into a scan line |
+| 1 | 0:00–0:06 | **Hook** | כמה כסף / **דולף לכם** / החודש? · ₪2,250 · "רוב בעלי המסעדות לא יודעים לענות." · "דוגמה · מסעדה בדויה · אוקטובר" | How much / **money leaked** / this month? · ₪2,250 · "Most restaurant owners can’t answer." · "Sample · fictional restaurant · October" | Masked line rises, slow push-in, slot-machine ₪ reel with vertical motion blur, glow + specular sweep |
+| 2 | 0:06–0:12.5 | **Problem** | עשרות משלוחים בשבוע. / חשבונית לכל אחד. / ואף אחד לא משווה שורה מול שורה. · stamps: "מחיר עלה +10.1%", "חויב על 3 ק״ג שלא הגיעו", "לא הוזמן" | Dozens of deliveries a week. / An invoice for each one. / And nobody checks them line by line. · "Price up +10.1%", "Billed 3 kg that never came", "Not ordered" | 9 Hebrew supplier invoices fly in from depth (3D, speed-blur), pile + camera shake, the three stamped cards rest on top (fixed spots) and the stamps slam; pile collapses into a scan line |
 | 3 | 0:12.5–0:15 | **3-way match** | הזמנה · קבלת סחורה · חשבונית — "RestoMatch משווה כל חשבונית להזמנה ולמה שבאמת הגיע" | Order · Delivery · Invoice — "RestoMatch checks every invoice against the order and what really arrived" | Icons rise, connector draws, check-marks lock |
-| 4 | 0:14.7–0:33 | **Product — owner** (REAL screens, demo data; label "מסך אמיתי · נתוני הדגמה") | 01 מספר אחד. בשקלים. · 02 בלש הדליפות · 03 מסמנים לפני התשלום · 04 מכתב דרישת זיכוי · callouts: דלף החודש 760 ₪ · 1.8% מהרכש │ בירה מהחבית: 520 ₪ ← 575 ₪ +10.6% │ ממתין לאישור שלך: 104.80 ₪ │ סה״כ לזיכוי: 104.80 ₪ | 01 One number. In shekels. · 02 Leak detective · 03 Flag it before you pay · 04 Credit-request letters · same callouts in English | 3D laptop in the device zone; per screen: light-wipe in → camera push-in → **spotlight** (outside dimmed to ~33% + blur + vignette; the focus rect lifted ×1.04 with +exposure and an accent glow, revealed by a mask opening from its centre line; 12-frame ramps) → ~1.5 s hold with the callout in the caption zone → pull back |
-| 5 | 0:33–0:41.3 | **Receiver in English** (headline feature) | חדש · פיצ׳ר הדגל · מקבל הסחורה לא קורא עברית? **לא בעיה.** · callout "Cherry tomatoes ← עגבניות שרי" | New · flagship feature · Your receiver can’t read Hebrew? **No problem.** | Phone (real receiver screens in English) + the Hebrew→English morph panel (4 real invoice lines: the beam wipes the Hebrew, then the English rises in), then push-in + spotlight on the "Cherry tomatoes / עגבניות שרי" card on the phone |
-| 6 | 0:41–0:46 | **Chains & branches** (REAL `/dashboard/chain`, S8, `seed:chain-demo`) | רשתות וסניפים · callout "הסניף הכי דולף: ירושלים 3.1%" | Chains & branches · "Leakiest branch: Jerusalem 3.1%" | Laptop push-in + spotlight on branch-ranking row #1 |
-| 7 | 0:46–0:55 | **Value** | דלף החודש ₪760 (1.8% מתוך 42,263 ₪ רכש) · נתפס לפני תשלום ₪296 · נדרש מהספקים ₪464 → "בלי לשנות את העבודה היומיומית." · 1 מצלמים את החשבונית · 2 המערכת משווה שורה מול שורה · 3 מאשרים — לפני התשלום | Leaked this month ₪760 (1.8% of ₪42,263) · Caught before payment ₪296 · Claimed from suppliers ₪464 → "Without changing your daily routine." + 3 steps | Count-ups + sweeps, blur-out, kinetic line, steps stagger |
-| 8 | 0:55–1:00 | **CTA** | RestoMatch · המספר שכל בעל מסעדה צריך · [תאמו הדגמה קצרה] · restomatch.co.il | RestoMatch · The number every restaurant owner needs · [Book a short demo] · restomatch.co.il | Ring burst, logo draws on, wordmark de-blurs, sweep |
+| 4 | 0:14.7–0:33.2 | **Product — owner** (screens DRAWN from components on the sample month; label "דוגמה · מסעדה בדויה, מספרים להמחשה") | 01 מספר אחד. בשקלים. · 02 מחירים שעלו · 03 מסמנים לפני התשלום · 04 בקשת זיכוי לכל ספק · callouts: דליפה החודש ₪2,250 · 1.5% מהרכש │ בירה מהחבית: ₪520.00 ← ₪572.40 +10.1% │ ממתין להחלטה שלך: ₪910 │ אושר לבקשת זיכוי: ₪720 (T2) | 01 One number. In shekels. · 02 Price rises · 03 Flag it before you pay · 04 A credit request per supplier · same callouts in English | 3D laptop; per screen: light-wipe in → camera push-in → spotlight → ~1.5 s hold with the callout → pull back; the laptop fades out completely before the receiver beat (dip) |
+| 5 | 0:33.2–0:41.5 | **Receiver in English** (headline feature) | חדש · פיצ׳ר הדגל · מקבל הסחורה לא קורא עברית? **לא בעיה.** · callout "Cherry tomatoes ← עגבניות שרי" | New · flagship feature · Your receiver can’t read Hebrew? **No problem.** | Phone with the DRAWN English receiver screens (sample restaurant; quantities and states only — **no ₪**) + the Hebrew→English morph panel (names and quantities), then push-in + spotlight on the cherry-tomatoes card (ordered 15 kg, received 12 kg, "Short 3 kg"); dips in and out (no neighbouring ₪ shows through) |
+| 6 | 0:41.5–0:54.9 | **Value** | דליפה החודש ₪2,250 (1.5% מתוך ₪150,000 רכש, לפני מע״מ) · נתפסו לפני תשלום ₪1,530 · בקשות זיכוי לשליחה ₪720 (T2) → "בלי לשנות את העבודה היומיומית." · 1 מצלמים את החשבונית · 2 המערכת משווה שורה מול שורה · 3 מאשרים — לפני התשלום | Leak this month ₪2,250 (1.5% of ₪150,000 spend, before VAT) · Caught before payment ₪1,530 · Credit requests to send ₪720 → "Without changing your daily routine." + 3 steps | Count-ups (settle on the sample figures), blur-out, kinetic line, steps stagger |
+| 7 | 0:55–1:00 | **CTA** | RestoMatch · המספר שכל בעל מסעדה צריך · [בדיקת דליפה חינם] (= the site's CTA; no URL) | RestoMatch · The number every restaurant owner needs · [Get a free leak check] (no URL) | Ring burst, logo draws on, wordmark de-blurs, sweep |
 
-Vertical social cut (1080×1920, ~27 s): Hook → owner dashboard on a phone (real `dashboard-he-phone`
-capture) with the three ₪ chips → Receiver in English → Value → CTA.
+The old vertical social cut (demo-seed phone capture, ₪760) is retired; a 9:16 cut of the sample-month
+film is a follow-up.
 
-Landing hero loop (for S6): 12 s, 1280×720, silent; the real dashboard on a slowly orbiting laptop,
-one scan-beam pass, three floating chips (₪760 · 1.8% · ₪296) and a small "נתוני הדגמה" label.
+Landing hero loop (S10, pinned in apps/web/lib/heroMedia.ts): 12 s, 1280×720, silent; the sample month's
+dashboard on a slowly orbiting laptop, one scan-beam pass, floating chips (₪2,250 · 1.5% · ₪1,530).
 Every motion is periodic in the 360-frame loop → seamless.
 
-## Sources of every number / מקור לכל מספר
+## Sample month (2026-11) / חודש הדוגמה
 
-All demo figures are from the seeded demo tenant **"כפר הזיתים"** (`./scripts/dev-setup.sh`, seed run
-with `DEMO_TODAY=2026-10-25`), month **October 2026**, and appear on the real screens captured into `public/shots/`.
+Since the public release, the 60 s films show the site's ONE sample month, not the demo seed: `src/sample.ts`
+mirrors `apps/web/app/(marketing)/_components/sampleMonth.ts` and `scripts/check-sample.mjs` pins it (run by
+`verify.sh`). Leak ₪2,250 = 1.5% of ₪150,000 purchases; 35 invoices checked · 13 with a gap; awaiting your
+decision ₪910 (2 gaps, incl. the ₪104.80 draft-beer-keg example); credit requests to send ₪720 (3 gaps);
+caught before payment ₪1,530; ₪620 approved for offset. The product beats are drawn from components
+(`components/ProductScreens.tsx`, light tokens, Heebo) instead of demo-seed screenshots; every frame carries a
+"דוגמה · מספרים להמחשה / Sample · illustrative figures" tag; no target line; partner wording toward suppliers
+("בקשת זיכוי", "אושר לבקשת זיכוי" — never "דרישה/נדרש"). The chains beat is out (the sample month has no branch
+figures). The tables below describe the earlier demo-seed cut.
 
-| Number | Where it comes from |
+## Sources of every number / מקור לכל מספר (current cut)
+
+Every figure on screen comes from `src/sample.ts`: `SAMPLE` (= the site's `sampleMonth.ts`, pinned by
+`scripts/check-sample.mjs`) or `FILM`, the film's breakdown inside that month, which the same script
+reconciles to SAMPLE in integer agorot. No demo-seed figure and no demo restaurant name ("מסעדה לדוגמה /
+Sample restaurant") appear anywhere.
+
+| On screen | Source |
 |---|---|
-| ₪760 leaked this month | `/dashboard` hero (`owner.leakHero`), `public/shots/dashboard-he.png`; seed log: "dashboard hero (this month): leak ₪760 of ₪42263 spend (1.8%)" |
-| 1.8% of ₪42,263 | same hero ("1.8% מההוצאה על סחורה · מתוך ₪42,263 לפני מע״מ"); 760 / 42,263 = 1.80% |
-| ₪296 caught before payment | hero card "נתפס לפני תשלום"; seed log "caught before payment ₪296" |
-| ₪464 claimed from suppliers | hero card "נדרש מהספקים" (accepted to claim back). Shown as *claimed*, not "recovered" |
-| Chain: leakiest branch ירושלים 975 ₪ = 2.9%, חיפה 355 ₪ = 0.6% (chain 2,090 ₪ = 1.5% of 137,059 ₪) | `/dashboard/chain` capture `public/shots/chain-he.png` after `pnpm --filter @restomatch/worker seed:chain-demo` (same `DEMO_TODAY`; base branch unchanged at ₪760) |
-| 104.80 ₪ (approvals card / claim total) | `/dashboard/approvals` first card "ההפסד המוערך 104.80 ₪" (beer keg, Steinberg, invoice ST-24108) and `/dashboard/leaks/claims` "סה״כ לזיכוי 104.80 ₪" |
-| 13 of 35 invoices flagged | hero card "חשבוניות עם חריגה 13 מתוך 35" (not used on screen beyond the real UI) |
-| Beer keg ₪520 → ₪575 (+10.6%) | `/dashboard/leaks` table row "בירה מהחבית — חבית 30 ל׳", median ₪520.00 / latest ₪575.00 / +10.6% |
-| "Billed 3 kg that never came" | `/dashboard/approvals`: cherry tomatoes, expected 6.5 received vs 9.5 billed ("חיוב על יותר ממה שהתקבל") |
-| Receiver lines (Cherry tomatoes ₪14.00 ×15 kg, Coriander 10 bunch ×₪3.01, Romaine lettuce, Cucumbers) | the real English reconciliation `public/shots/reconcile-en.png` (local dev OCR stub; translations from `packages/translate` glossary) |
-| 1.5% | not claimed as a result anywhere in the film (pilot target, docs/ICP.md) |
+| Leak ₪2,250 · 1.5% · of ₪150,000 checked spend, before VAT | `SAMPLE.leak`, `SAMPLE.leakPct`, `SAMPLE.purchasing` (check: 150,000 × 1.5% = 2,250) |
+| 35 invoices checked · 13 with a gap | `SAMPLE.checked`, `SAMPLE.withGap` |
+| Caught before payment ₪1,530 | `SAMPLE.unpaid` (check: unpaid + paid = leak) |
+| Awaiting your decision ₪910 · 2 gaps | `SAMPLE.decide` |
+| Keg gap ₪104.80 = (₪572.40 − ₪520.00) × 2 kegs · price +10.1% | `FILM.keg` (check: = `SAMPLE.decide.example.amount`); % computed (`risePct`) |
+| The other gap ₪805.20 | `SAMPLE.decide.amount − SAMPLE.decide.example.amount` |
+| Entrecôte ₪139 → ₪149 · salmon ₪89 → ₪96 | `FILM.rises` (% computed) |
+| Credit requests ₪300 · ₪240 · ₪180 = ₪720 · 3 | `FILM.credits` (check: Σ = `SAMPLE.credit.amount`, length = count) |
+| Approved for offset ₪620 | `SAMPLE.goodNews` (check: unpaid − decide) |
+| Receiver beat: cherry tomatoes ordered 15 kg, received 12 kg ("Short 3 kg") — **no ₪** | `FILM.delivery`; `scripts/frame-check.mjs` OCRs nothing — it checks the beat's frames against a ₪-free render |
 
+Words follow `apps/web/lib/i18n/glossary.ts`: an undecided ₪ is a "פער / Gap", never "הפסד / loss"; nav and
+screen names are the app's (בית · קבלת סחורה · אישורים · דליפה · בקשות זיכוי לשליחה; "מחירים שעלו", "המחיר
+הרגיל"). No URL on the end card (the domain isn't final) — the site's dialog shows the real CTA. The old
+9:16 social cut (demo-seed phone capture) is retired; a 9:16 cut of the sample-month film is a follow-up.
 No ROI, savings-rate or customer claims are made. The paper invoices in beat 2 are illustrative props
-built from real seeded product names and prices (line totals = qty × price, totals = Σ lines). URL `restomatch.co.il` is a placeholder (the landing's canonical URL is `APP_URL`, not yet
-fixed) — change `SITE` in `src/copy.ts`.
+(line totals = qty × price, totals = Σ lines; the keg/entrecôte/salmon prices are `FILM`'s).

@@ -68,3 +68,22 @@ export function intentChip(intent: InterpretedIntent, locale: 'he' | 'en'): stri
   if (period) parts.push(period);
   return `${intentCopy[locale].understood} ${parts.join(' · ')}`;
 }
+
+/** The offline matcher's canned intents → chip topic (Claude answers carry no intent → no chip). */
+const CANNED_TOPIC: Readonly<Record<string, IntentTopic>> = {
+  leakTotal: 'leak',
+  leakChange: 'leak',
+  priceRaise: 'prices',
+  claimWeek: 'claims',
+  topSupplier: 'supplier',
+  waitingForMe: 'approvals',
+  intakeStuck: 'invoice',
+  whoOwesMe: 'claims',
+  toPayThisWeek: 'invoice',
+  vatAtRisk: 'invoice',
+};
+
+export function intentFromCanned(intent: string | null | undefined): InterpretedIntent | null {
+  const topic = intent ? CANNED_TOPIC[intent] : undefined;
+  return topic ? { topic } : null;
+}

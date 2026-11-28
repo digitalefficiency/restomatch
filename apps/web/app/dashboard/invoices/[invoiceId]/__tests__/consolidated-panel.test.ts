@@ -123,9 +123,13 @@ describe('ConsolidatedPanel · G-04 §9 review items', () => {
     expect(html).not.toContain('נא לזכות');
   });
 
-  it('a note still being counted is a calm T4 row with the ₪ billed on it; the invoice can still read "matched"', () => {
-    const html = render(proposal({ status: 'matched', pendingNotes: [{ number: '7702', billedIls: 51 }] }));
-    expect(html).toContain('data-testid="xmatch-matched"');
+  it('a note still being counted is a calm T4 row with the ₪ billed on it; the ריכוז reads neutral "pending", never green (Q6)', () => {
+    const html = render(proposal({ status: 'pending', pendingNotes: [{ number: '7702', billedIls: 51 }] }));
+    expect(textOf(html, 'xmatch-pending')).toContain('ממתינה לסיום ספירה');
+    expect(html).not.toContain('data-testid="xmatch-matched"');
+    expect(html).not.toContain('data-testid="xmatch-differences"');
+    expect(html).not.toContain('data-testid="xmatch-letter"');
+    expect(html).not.toContain('data-testid="xmatch-none"');
     const row = textOf(html, 'xmatch-review-pending')!;
     expect(row).toContain('עדיין בספירה');
     expect(row).toContain('ת.מ. 7702');
@@ -166,6 +170,11 @@ describe('ConsolidatedPanel · G-04 §9 review items', () => {
     expect(html).toContain('data-testid="xmatch-letter"');
     expect(html).not.toContain('data-testid="xmatch-review-only"');
     expect(html).toContain('data-testid="xmatch-review-note_not_in_system"');
+  });
+
+  it('en: the pending card has its own copy (parity)', () => {
+    const html = render(proposal({ status: 'pending', pendingNotes: [{ number: '7702', billedIls: 51 }] }), 'en');
+    expect(textOf(html, 'xmatch-pending')).toContain('Waiting for a count to finish');
   });
 
   it('en renders the same rows (copy parity)', () => {

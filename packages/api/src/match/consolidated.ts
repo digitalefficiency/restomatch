@@ -226,7 +226,12 @@ export interface ConsolidatedProposal {
   /** G-04 §9 review items (other month · not in the system · billed twice). */
   reviewItems?: ConsolidatedReviewItem[];
   /** matched = nothing counts as leak; differences = something does; no_delivery_notes = nothing to cross-match. */
-  status: 'matched' | 'differences' | 'no_delivery_notes';
+  /**
+   * 'pending' (G-04 Q6, owner decision 11.11 (ב)): nothing to claim and nothing
+   * blocks, but a listed note is still being counted, so the ריכוז is neutral
+   * "ממתינה" until counting ends, never green "תואמת".
+   */
+  status: 'matched' | 'pending' | 'differences' | 'no_delivery_notes';
 }
 
 const ag = (v: number) => Math.round(v * 100);
@@ -823,6 +828,7 @@ export function buildConsolidatedProposal(args: {
       })),
   ];
   const blocked = reviewItems.some((r) => r.blocksMatched);
+  const pendingNotes = [...pendingAg].filter(([number]) => !missingNumbers.has(number)).map(([number, a]) => ({ number, billedIls: ils(a) }));
   const claim = claimSplit(findings, args.base.invoice.totalInclVat);
   const leakAg = ag(claim.totalIls);
 
@@ -836,7 +842,7 @@ export function buildConsolidatedProposal(args: {
     products: productRows,
     findings,
     claim: { exclIls: claim.exclIls, inclIls: claim.inclIls },
-    pendingNotes: [...pendingAg].filter(([number]) => !missingNumbers.has(number)).map(([number, a]) => ({ number, billedIls: ils(a) })),
+    pendingNotes,
     reviewItems,
     totals: {
       deliveryNotesIls: ils(deliveryNotesAg),
@@ -847,12 +853,15 @@ export function buildConsolidatedProposal(args: {
     },
     // Never "matched" while the invoice bills more than the notes are worth at PO prices.
     // What a not-yet-received note bills is pending, not "billed above the notes".
+    // A note still being counted keeps it neutral "pending" (Q6), never "matched".
     status:
-      notes.length === 0
+      notes.length === 0 && pendingNotes.length === 0
         ? 'no_delivery_notes'
         : leakAg > 0 || blocked || subtotalAg - pendingTotalAg > deliveryNotesAg
           ? 'differences'
-          : 'matched',
+          : pendingNotes.length > 0
+            ? 'pending'
+            : 'matched',
   };
 }
 

@@ -81,7 +81,9 @@ export async function cleanup(): Promise<void> {
       .from(invitations)
       .where(inArray(invitations.restaurantId, createdRestaurants));
     for (const { id } of invs) {
-      await ownerDb.delete(verificationTokens).where(eq(verificationTokens.identifier, `join:${id}`));
+      for (const prefix of ['join:', 'join-fail-inv:', 'join-failtotal-inv:']) {
+        await ownerDb.delete(verificationTokens).where(eq(verificationTokens.identifier, `${prefix}${id}`));
+      }
     }
     // address-keyed ceilings (B5)
     for (const email of inviteEmails) {
