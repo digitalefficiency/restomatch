@@ -50,7 +50,11 @@ import {
   type PassedOn,
   type PlaceId,
   type PlaceSummary,
+  type MonthOpenGaps,
+  areaTimeZoneOf,
+  gapBasisOf,
 } from '../invoices/holding';
+import type { VatBasis } from '../lib/claims';
 import type { Allocation, PayBy, Payment } from '../invoices/payment';
 import type { InvoiceHistory } from '../invoices/history';
 
@@ -141,6 +145,12 @@ export interface InvoiceListRow extends RegisterRow {
   place: PlaceId;
   /** The pay run holds it for a missing or malformed allocation number (`vatAtRisk()`), the pay run's own rule. */
   allocationMissing: boolean;
+  /**
+   * When its allocation number was last asked of the supplier (`vatAtRisk()`'s request state),
+   * so no screen asks again for a number already asked for; null when never, or unless
+   * `allocationMissing`.
+   */
+  allocationRequestedAt: Date | null;
   /** The pay run's date (`computeDueDate`), or null when it is unknown. `dueDate` stays the date a person typed. */
   payBy: PayBy | null;
 }
@@ -225,15 +235,16 @@ function countTabs(
 
 /**
  * INV-00 · the list rows' new facts. Contract (slice 0): the place from the canonical state
- * and the leading open gap's role; `holding`, `lastDecision`, `payBy` and `places` empty.
+ * and the leading open gap's role; `holding`, `lastDecision`, `payBy`, `places` and
+ * `byRouting` empty.
  */
 async function listRowsOf(
   db: Parameters<typeof invoiceStatesForMonth>[0],
   session: { restaurantId: string; role: UserRole },
   rows: readonly RegisterRow[],
-): Promise<{ rows: InvoiceListRow[]; places: PlaceSummary[]; allocationMissing: number }> {
-  const held = rows.filter((r) => r.state === 'flagged_open' || r.state === 'held_duplicate').map((r) => r.id);
-  const roles = await leadingRolesFor(db, session.restaurantId, session.role, held);
+): Promise<{ rows: InvoiceListRow[]; places: PlaceSummary[]; allocationMissing: number; open: MonthOpenGaps }> {
+  const placed = rows.filter((r) => r.state !== 'paid' && r.state !== 'in_ocr' && r.state !== 'awaiting_count' && r.state !== 'awaiting_link');
+  const roles = await leadingRolesFor(db, session.restaurantId, session.role, placed.map((r) => r.id));
   return {
     rows: rows.map((r) => ({
       ...r,
@@ -241,14 +252,19 @@ async function listRowsOf(
       lastDecision: null,
       place: placeOf(r.state, roles.get(r.id) ?? null, false),
       allocationMissing: false,
+      allocationRequestedAt: null,
       payBy: null,
     })),
     places: [],
     allocationMissing: 0,
+    open: { count: 0, openAgorot: { excl: 0, incl: 0, vat: 0 }, byRouting: [] },
   };
 }
 
 const MonthInput = z.object({ monthOffset: z.number().int().min(-24).max(0).default(0) }).default({});
+
+/** The restaurant's IANA zone, as the invoices area counts days (`invoices/holding.ts`). */
+const areaTimeZone = areaTimeZoneOf;
 
 
 export type NeedsLinesReason = 'ocr_failed' | 'no_lines' | 'held';
@@ -333,6 +349,14 @@ export const invoicesRouter = router({
          * They partition the month (all rows, whatever `tab` filtered).
          */
         places: area.places,
+        /**
+         * INV-00 · the month's open gaps (the desk's row set of this month's invoices), their ₪
+         * and their routings (`approvals.queueSummary.byRouting`'s shape), for the list's opening
+         * sentence and the "כל החודש" card: an invoice with gaps at two roles counts in both.
+         */
+        open: area.open,
+        /** INV-00 · the restaurant's IANA zone: the calendar every wait and "today" here is counted on. */
+        timeZone: await areaTimeZone(ctx.db, ctx.session.restaurantId),
       };
     }),
 
@@ -487,6 +511,8 @@ export const invoicesRouter = router({
         expectedSource: expectedSource(f.type),
         expectedAt: run?.runAt ?? null,
         deltaAgorot: money && f.deltaAmount != null ? agorot(f.deltaAmount) : null,
+        /** INV-00: the VAT basis of `deltaAgorot` (a duplicate is incl. VAT, a VAT mismatch the VAT); null without money.view. */
+        basis: (money ? gapBasisOf(f.type) : null) as VatBasis | null,
         toleranceUsed: f.toleranceUsed,
         // INV-00 · an undecided gap (one of the approvals queue's rows: open or escalated, not
         // the ₪0 twin): the role it waits for, its rule and since when. A decided one: the
@@ -580,6 +606,8 @@ export const invoicesRouter = router({
       // ── INV-00 · every new field is null without money.view (the receiver reads this). ──
       /** With whom its open gaps are, since when and why (as on the list row); null when none is open. */
       holding: null as Holding | null,
+      /** The last decision a person took on one of its gaps (as on the list row); null when none. */
+      lastDecision: null as DecisionRecord | null,
       /** The rows the approvals desk shows for this invoice (`openCount` also counts the ₪0 twin and keeps its value). */
       queueOpenCount: null as number | null,
       /** Held, payable, paid or being read, in the pay run's terms, with the reasons. */
@@ -588,8 +616,16 @@ export const invoicesRouter = router({
       allocation: null as Allocation | null,
       /** The pay run's date (`computeDueDate`), or null when unknown. */
       payBy: null as PayBy | null,
-      /** When the order of the latest match run was sent to the supplier. */
+      /**
+       * The order's date as the approvals desk shows it (`COALESCE(purchase_orders.sent_at,
+       * created_at)`, the queue row's `poDate`), so both screens print the same date.
+       */
       orderSentAt: null as Date | null,
+      /**
+       * The restaurant's IANA zone (`restaurants.timezone`): the calendar every wait and "today"
+       * of this screen is counted on. Not money: every reader gets it.
+       */
+      timeZone: await areaTimeZone(ctx.db, rid),
     };
   }),
   /**

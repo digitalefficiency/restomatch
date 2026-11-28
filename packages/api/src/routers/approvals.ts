@@ -44,8 +44,8 @@ import {
 import { recipientsForRestaurant } from '../notifications/recipients';
 import { enqueueNotification } from '../notifications/outbox';
 import { stripTrailingSlashes } from '../lib/urls';
-import { byRoutingOf, gapFactsOf, type OpenInvoicesSummary } from '../invoices/holding';
-import { DECIDED_PERIODS, type DecidedRow } from '../invoices/history';
+import { areaTimeZoneOf, byRoutingOf, gapBasisOf, gapFactsOf, gapRoleOf, type OpenInvoicesSummary } from '../invoices/holding';
+import { DECIDED_PERIODS, type DecidedList } from '../invoices/history';
 import type { Database } from '@restomatch/db';
 
 const ResolutionEnum = z.enum(['accepted', 'rejected', 'escalated']);
@@ -351,6 +351,14 @@ export const approvalsRouter = router({
         /** INV-00: why it is with its role (`invoices/holding.ts` GapReason), and who passed it on. */
         reason: gapFacts.reasonOf(r),
         passedOn: gapFacts.passedOnOf(r.id),
+        /**
+         * INV-00: the role it reads as (`gapRoleOf`: the manager's for no routing; `waitingOn`
+         * keeps 'unrouted') and since when it waits there (its pass-on, else its creation), the
+         * same definition as `holding`, and the VAT basis of `claimAgorot`.
+         */
+        routing: gapRoleOf(r.requiredRole),
+        since: gapFacts.passedOnOf(r.id)?.at ?? r.createdAt,
+        claimBasis: gapBasisOf(r.type),
       }));
     }),
 
@@ -650,13 +658,14 @@ export const approvalsRouter = router({
     .input(
       z.object({
         period: z.enum(DECIDED_PERIODS),
-        /** One invoice's decisions (the desk opened on `?invoice=`). Foreign ids match nothing. */
-        invoiceIds: z.array(z.string().uuid()).max(50).optional(),
+        // The desk's own filters (types, severities, suppliers, one invoice: `?invoice=`).
+        // Foreign ids match nothing.
+        ...QueueFilters,
       }),
     )
-    .query(async (): Promise<DecidedRow[]> => {
+    .query(async (): Promise<DecidedList> => {
       // Contract (slice 0): an empty list.
-      return [];
+      return { rows: [], count: 0, amountAgorot: { excl: 0, incl: 0, vat: 0 } };
     }),
 });
 
@@ -1342,5 +1351,7 @@ export async function computeQueueSummary(
     byRouting: byRoutingOf(all?.byRole ?? [], role),
     /** INV-00: the invoices with an open gap under these filters, and Σ their totals incl. VAT. */
     invoices: { count: 0, totalInclVatAgorot: 0 } as OpenInvoicesSummary,
+    /** INV-00: the restaurant's IANA zone: the calendar the desk's waits and "today" are counted on. */
+    timeZone: await areaTimeZoneOf(db, rid),
   };
 }

@@ -32,7 +32,12 @@ export interface Payment {
   status: PaymentStatus;
   /** Every reason the pay run holds it, in the pay run's order; empty unless `held`. */
   reasons: HoldReasonCode[];
-  /** An open gap is the only thing that holds it: deciding the gap releases it for payment. */
+  /**
+   * True exactly when `status` is `held` and `reasons` is `['decision']`: the pay run's decision
+   * hold alone, so deciding the open gap releases the invoice for payment. False for a duplicate
+   * or a pending-link hold, even when an open gap is behind it (confirming a duplicate keeps the
+   * copy held; a decision does not link an invoice).
+   */
   onlyOpenGap: boolean;
 }
 
@@ -51,6 +56,11 @@ export interface Allocation {
   missing: boolean;
   /** The VAT that cannot be deducted without it, integer agorot; null unless `missing`. */
   vatAtRiskAgorot: number | null;
+  /**
+   * When the number was last asked of the supplier (`vatAtRisk()`'s request state), so no
+   * screen asks again for a number already asked for; null when never, or unless `missing`.
+   */
+  requestedAt: Date | null;
 }
 
 /** The pay run's date for an invoice, and where it comes from. */

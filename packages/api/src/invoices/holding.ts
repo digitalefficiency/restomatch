@@ -1,6 +1,7 @@
-import { and, discrepancies, eq, inArray, matchRuns, type Database, type UserRole } from '@restomatch/db';
+import { and, discrepancies, eq, inArray, matchRuns, restaurants, type Database, type UserRole } from '@restomatch/db';
 import { notZeroShortTwin } from '@restomatch/charts';
-import type { VatBasis } from '../lib/claims';
+import { vatBasisOf, type VatBasis } from '../lib/claims';
+import type { WAIVE_REASON_CODES } from '../routers/approvals';
 import { canActOn } from '../lib/roles';
 import { discrepancyDecidableSql } from '../lifecycle/predicates';
 import type { InvoiceState } from './state';
@@ -17,6 +18,23 @@ import type { InvoiceState } from './state';
  * structures and never a printed word: `apps/web/lib/invoices/words.ts` words them (the
  * stored `rule_name` holds the retired word "הפרש", so it is never shown).
  */
+
+/**
+ * The zone the invoices area counts days in when a restaurant stores none. Every whole day and
+ * every "today" of the area is counted on the restaurant's own calendar (`restaurants.timezone`),
+ * and each payload that feeds a wait carries that zone (`timeZone`) for the words module.
+ */
+export const DEFAULT_AREA_TIME_ZONE = 'Asia/Jerusalem';
+
+/** The restaurant's IANA zone (`restaurants.timezone`), else DEFAULT_AREA_TIME_ZONE. */
+export async function areaTimeZoneOf(db: Database, restaurantId: string): Promise<string> {
+  const [r] = await db
+    .select({ timeZone: restaurants.timezone })
+    .from(restaurants)
+    .where(eq(restaurants.id, restaurantId))
+    .limit(1);
+  return r?.timeZone?.trim() || DEFAULT_AREA_TIME_ZONE;
+}
 
 /** The roles a gap can wait for: the engine routes only to these three. */
 export const GAP_ROLES = ['owner', 'manager', 'bookkeeper'] as const satisfies ReadonlyArray<UserRole>;
@@ -102,27 +120,41 @@ export type GapSeverity = 'block' | 'warn' | 'info';
  * The leading gap: when one of the invoice's open gaps is routed to the viewer's role it is
  * the viewer's own (blocking first, then the longest wait) and `mine` is true; otherwise it
  * is the invoice's blocking-first, longest-waiting gap. `role`, `since`, `reason` and
- * `passedOn` describe the leading gap. A gap with no routed role (`requires_role` null; the
- * engine leaves none open today) reads as the manager's: `canActOn` lets exactly the owner
- * and the manager decide it, as for a manager's gap, and the engine's fallback routes there.
+ * `passedOn` describe the leading gap.
+ *
+ * A gap with no routed role (`requires_role` null; the engine leaves none open today) is in
+ * nobody's "mine" (the product's one definition, `approvals/awaiting.ts`) and has `routed`
+ * false; for a place and a role word it counts as the manager's, because `canActOn` lets
+ * exactly the owner and the manager decide it, as a manager's gap, and the engine's fallback
+ * routes there.
  */
 export interface Holding {
-  /** The leading gap's role. */
+  /** The leading gap's role (the manager's for a gap with no routed role: see `routed`). */
   role: GapRole;
-  /** The leading gap is routed to the viewer's role ("אצלכם"), not merely decidable by the viewer. */
+  /** The leading gap has a routed role (`requires_role` set). */
+  routed: boolean;
+  /**
+   * The leading gap is routed to the viewer's own role ("אצלכם"), not merely decidable by the
+   * viewer; never for a gap with no routed role.
+   */
   mine: boolean;
   /** Exactly `decideGapId !== null`. */
   canAct: boolean;
   /** When the leading gap's wait started: its pass-on, else the creation of the gap row. */
   since: Date;
-  /** The leading gap's id. */
-  gapId: string;
+  /**
+   * The leading gap's id (`role`, `since`, `reason` and `passedOn` describe it). Never the
+   * target of "להחלטה": that is `decideGapId`.
+   */
+  leadingGapId: string;
   /**
    * The first gap of the invoice the viewer may decide (own routing first, blocking before
-   * warning, the longest wait first), or null. Every "להחלטה" links here, never to `gapId`.
+   * warning, the longest wait first), or null. Every "להחלטה" links here, never to `leadingGapId`.
    */
   decideGapId: string | null;
-  /** The worst severity among the invoice's open gaps. */
+  /** The leading gap's own severity: the orders and the leading gap's level read this. */
+  severity: GapSeverity;
+  /** The worst severity among the invoice's open gaps: the state pill and the dots read this. */
   worstSeverity: GapSeverity;
   /** The invoice's open gaps: the rows the approvals desk shows for it. */
   openCount: number;
@@ -143,9 +175,12 @@ export interface Holding {
 export const DECISION_RESULTS = ['credit', 'as_billed', 'duplicate_held', 'not_duplicate', 'reviewed'] as const;
 export type DecisionResult = (typeof DECISION_RESULTS)[number];
 
+/** A waive reason code, as `approvals.reject` / `decideMany` validate and the audit row stores it. */
+export type WaiveReasonCode = (typeof WAIVE_REASON_CODES)[number];
+
 /**
- * A person's decision on one gap, roles only (no user id, no name, no e-mail). A gap the
- * system closed by itself is never one.
+ * A person's decision on one gap, still in force (an undone decision is never one), roles only
+ * (no user id, no name, no e-mail). A gap the system closed by itself is never one.
  */
 export interface DecisionRecord {
   gapId: string;
@@ -153,7 +188,10 @@ export interface DecisionRecord {
   at: Date;
   /** The role that decided; null when it was not recorded (a decision carried through a re-match). */
   role: GapRole | null;
-  /** The role the gap was routed to, when another role decided it (the owner on the manager's gap); else null. */
+  /**
+   * The role the gap was routed to when it was decided, when another role decided it (the
+   * owner on the manager's gap); else null, also for a gap that had no routed role.
+   */
   inPlaceOf: GapRole | null;
   /**
    * The ₪ the decision is about, integer agorot, on `basis`: for `credit` and `duplicate_held`
@@ -163,8 +201,8 @@ export interface DecisionRecord {
    */
   amountAgorot: number;
   basis: VatBasis;
-  /** The waive reason code (`approvals` WAIVE_REASON_CODES), or null. */
-  reasonCode: string | null;
+  /** The waive reason code (`approvals` WAIVE_REASON_CODES, validated when it was written), or null. */
+  reasonCode: WaiveReasonCode | null;
   /** The words the person typed for the reason "אחר", or null. Shown as text. */
   reasonText: string | null;
   /** The caller decided it. */
@@ -173,14 +211,16 @@ export interface DecisionRecord {
 
 /**
  * Where an invoice of the month is, for the viewer: every invoice in exactly one place.
- *  - `r-owner`, `r-manager`, `r-bookkeeper` · an open gap holds it, with that role (the
- *    viewer's own role's place is "אצלכם")
+ *  - `r-owner`, `r-manager`, `r-bookkeeper` · an open gap of the desk's row set holds it (open
+ *    or escalated, not the ₪0 twin), with the role of its `holding`, in any state but paid and
+ *    the waiting states (the viewer's own role's place is "אצלכם"; a gap with no routed role
+ *    counts as the manager's)
  *  - `wait` · being read, waiting for the count, or waiting to be linked (`in_ocr`,
  *    `awaiting_count`, `awaiting_link`), whatever gap it has
  *  - `dup` · a copy held as a duplicate with nothing left to decide
- *  - `alloc` · no open gap, waiting for nothing else, and missing an allocation number by
- *    the pay run's rule (`allocationMissing`)
- *  - `ok` · no open gap (clean, approved, or a credit to ask for)
+ *  - `alloc` · no open gap of the desk's row set, waiting for nothing else, and missing an
+ *    allocation number by the pay run's rule (`allocationMissing`)
+ *  - `ok` · no open gap of the desk's row set (clean, approved, or a credit to ask for)
  *  - `paid` · marked paid (`invoices.status = 'paid'`)
  * The order the screens show them in, and the aliases of the old `view` tab ids, are
  * `apps/web/lib/invoices/places.ts`.
@@ -193,6 +233,8 @@ export interface PlaceSummary {
   id: PlaceId;
   /** Invoices in the place. */
   count: number;
+  /** The open gaps of its invoices (Σ `holding.openCount`): the rows the desk shows for them. */
+  openCount: number;
   /** Σ their totals including VAT, integer agorot. */
   totalInclVatAgorot: number;
   /** Σ their open gaps' claimable ₪ by VAT basis, integer agorot (as in `holding`). */
@@ -201,6 +243,8 @@ export interface PlaceSummary {
   worstSeverity: GapSeverity | null;
   /** How many of its invoices are consolidated invoices (חשבוניות מרכזות). */
   consolidatedCount: number;
+  /** How many of its invoices had their missing allocation number asked of the supplier already. */
+  allocationRequestedCount: number;
   /** How many of its invoices are in each canonical state. */
   byState: Record<InvoiceState, number>;
 }
@@ -238,6 +282,11 @@ export function reasonOfRule(ruleId: string | null, type: string): GapReason {
 }
 
 export const ZERO_AGOROT: Readonly<AgorotByBasis> = Object.freeze({ excl: 0, incl: 0, vat: 0 });
+
+/** The VAT basis a gap's ₪ is on (`lib/claims` vatBasisOf): before VAT, incl. VAT (a duplicate), or VAT. */
+export function gapBasisOf(type: string): VatBasis {
+  return vatBasisOf(type);
+}
 
 // ───────────────────────────────────────────────────────────────────────────────
 // The open gaps of a set of invoices: the approvals queue's row set.
@@ -323,7 +372,8 @@ export function leadingGap(
 ): OpenGap | null {
   if (gaps.length === 0) return null;
   const order = byUrgency(since);
-  const own = gaps.filter((g) => gapRoleOf(g.routing) === viewer);
+  // Own = routed to the viewer's role as stored (a gap with no routed role is nobody's own).
+  const own = gaps.filter((g) => g.routing != null && g.routing === viewer);
   return [...(own.length > 0 ? own : gaps)].sort(order)[0] ?? null;
 }
 
@@ -337,8 +387,8 @@ export function decideGap(
   since: (g: OpenGap) => Date = (g) => g.createdAt,
 ): OpenGap | null {
   const order = byUrgency(since);
-  const mineFirst = (a: OpenGap, b: OpenGap) =>
-    Number(gapRoleOf(b.routing) === viewer) - Number(gapRoleOf(a.routing) === viewer) || order(a, b);
+  const own = (g: OpenGap) => Number(g.routing != null && g.routing === viewer);
+  const mineFirst = (a: OpenGap, b: OpenGap) => own(b) - own(a) || order(a, b);
   return [...gaps].filter((g) => canActOn(viewer, g.routing)).sort(mineFirst)[0] ?? null;
 }
 
@@ -361,14 +411,24 @@ export function placeOf(state: InvoiceState, holdingRole: GapRole | null, alloca
     case 'awaiting_count':
     case 'awaiting_link':
       return 'wait';
-    case 'flagged_open':
     case 'held_duplicate':
+      // A held copy with nothing left to decide is `dup`.
+      return holdingRole ? `r-${holdingRole}` : 'dup';
+    case 'flagged_open':
+    case 'clean':
+    case 'claim_open':
+    case 'approved':
+      // `flagged_open` always has an open gap of the desk's row set (its finding is open,
+      // warn/block and non-zero). The other states can still carry one the canonical state does
+      // not count as a leak (a MISSING_ON_INVOICE, a ₪0 UNIT_MISMATCH): it stays with its role,
+      // never in `ok`, whose words say there is no open gap.
       if (holdingRole) return `r-${holdingRole}`;
-      // A held copy with nothing left to decide. (`flagged_open` always has an open gap of
-      // the queue's row set: its finding is open, warn/block and non-zero.)
-      return state === 'held_duplicate' ? 'dup' : 'ok';
-    default:
       return allocationMissing ? 'alloc' : 'ok';
+    default: {
+      // A new canonical state must choose its place here (pull request 190 adds one).
+      const unplaced: never = state;
+      throw new Error(`placeOf: no place for state ${String(unplaced)}`);
+    }
   }
 }
 
@@ -420,19 +480,30 @@ export interface InvoiceHoldingEntry {
   lastDecision: DecisionRecord | null;
   /** A consolidated invoice (חשבונית מרכזת): it waits for its delivery notes, not an order. */
   consolidated: boolean;
+  /**
+   * The restaurant's IANA zone (`restaurants.timezone`): the calendar every wait and every
+   * "today" of this entry is counted on. Pass it to the words module.
+   */
+  timeZone: string;
 }
 
 /** At most this many ids per `invoices.holding` call (the pay run asks in chunks). */
 export const HOLDING_MAX_IDS = 200;
 
-/** One routing of the open gaps (`approvals.queueSummary.byRouting`). */
+/**
+ * One routing of the open gaps (`approvals.queueSummary.byRouting`, `invoices.list.byRouting`).
+ * Rows with no routed role are counted in the manager's routing (see `Holding`) and also
+ * apart, in `unroutedCount`, so a screen can keep the desk's own "unrouted" lane.
+ */
 export interface RoutingSummary {
   role: GapRole;
-  /** Open rows routed there (the desk's row set, under the summary's filters). */
+  /** Open rows routed there (the desk's row set, under the read's filters). */
   count: number;
+  /** Of `count`, the rows with no routed role (only ever in the manager's routing). */
+  unroutedCount: number;
   /** Their claimable ₪ by VAT basis, integer agorot (approvals/awaiting's rule). */
   openAgorot: AgorotByBasis;
-  /** Routed to the viewer's role ("אצלכם"). */
+  /** Routed to the viewer's own role ("אצלכם"); rows with no routed role are nobody's. */
   mine: boolean;
   /** The viewer may decide gaps routed there (`canActOn`). */
   canAct: boolean;
@@ -449,11 +520,12 @@ export function byRoutingOf(
   byRole: ReadonlyArray<{ role: string; count: number; ils: { excl: number; incl: number; vat: number } | null }>,
   viewer: UserRole,
 ): RoutingSummary[] {
-  const acc = new Map<GapRole, { count: number; openAgorot: AgorotByBasis }>();
+  const acc = new Map<GapRole, { count: number; unroutedCount: number; openAgorot: AgorotByBasis }>();
   for (const l of byRole) {
     const role = gapRoleOf(l.role);
-    const e = acc.get(role) ?? { count: 0, openAgorot: { excl: 0, incl: 0, vat: 0 } };
+    const e = acc.get(role) ?? { count: 0, unroutedCount: 0, openAgorot: { excl: 0, incl: 0, vat: 0 } };
     e.count += l.count;
+    if (l.role === 'unrouted') e.unroutedCount += l.count;
     e.openAgorot.excl += toAgorot(l.ils?.excl);
     e.openAgorot.incl += toAgorot(l.ils?.incl);
     e.openAgorot.vat += toAgorot(l.ils?.vat);
@@ -471,6 +543,20 @@ export function byRoutingOf(
 export interface OpenInvoicesSummary {
   count: number;
   totalInclVatAgorot: number;
+}
+
+/**
+ * `invoices.list.open`: the month's open gaps (the desk's row set of the month's invoices), for
+ * the list's opening sentence and the "כל החודש" card. An invoice with gaps at two roles counts
+ * in both routings. Read these totals, never a sum of rows' `holding`.
+ */
+export interface MonthOpenGaps {
+  /** Open gaps of the month. */
+  count: number;
+  /** Their claimable ₪ by VAT basis, integer agorot. */
+  openAgorot: AgorotByBasis;
+  /** The same gaps by the role that decides them (as `approvals.queueSummary.byRouting`). */
+  byRouting: RoutingSummary[];
 }
 
 /** Each queue row's reason and pass-on (`approvals.myQueue` rows), read once by the row ids. */

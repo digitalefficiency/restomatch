@@ -18,6 +18,8 @@ export type PlaceSummary = InvoiceListOutput['places'][number];
 export type PlaceId = PlaceSummary['id'];
 /** The nine canonical invoice states (`invoices/state.ts`). */
 export type InvoiceState = InvoiceListRow['state'];
+/** The month's open gaps, their ₪ and routings (`invoices.list.open`): the opening sentence reads these. */
+export type MonthOpenGaps = InvoiceListOutput['open'];
 
 // ── with whom, since when, why ─────────────────────────────────────────────────
 /** With whom an invoice's open gaps are (`holding`), the same object wherever it is returned. */
@@ -35,6 +37,8 @@ export type VatBasis = keyof AgorotByBasis;
 // ── what was decided ───────────────────────────────────────────────────────────
 export type DecisionRecord = NonNullable<InvoiceListRow['lastDecision']>;
 export type DecisionResult = DecisionRecord['result'];
+/** A waive reason code (`approvals` WAIVE_REASON_CODES). */
+export type WaiveReasonCode = NonNullable<DecisionRecord['reasonCode']>;
 
 // ── by when ────────────────────────────────────────────────────────────────────
 export type PayBy = NonNullable<InvoiceListRow['payBy']>;
@@ -54,6 +58,10 @@ export type InvoiceHoldingEntry = Out['invoices']['holding'][number];
 export type InvoiceHistory = Out['invoices']['history'];
 export type HistoryEvent = InvoiceHistory['events'][number];
 export type HistoryEventKind = HistoryEvent['kind'];
+/** Where an invoice came in from (`invoices.source`). */
+export type InvoiceSource = Extract<HistoryEvent, { kind: 'invoice_read' }>['source'];
+/** The role beside an act of the story (a role, 'system', or null when not recorded). */
+export type HistoryActor = HistoryEvent['by'];
 
 // ── approvals ──────────────────────────────────────────────────────────────────
 export type QueueRow = Out['approvals']['myQueue'][number];
@@ -62,4 +70,5 @@ export type RoutingSummary = QueueSummary['byRouting'][number];
 export type OpenInvoicesSummary = QueueSummary['invoices'];
 export type DecidedInput = In['approvals']['decided'];
 export type DecidedPeriod = DecidedInput['period'];
-export type DecidedRow = Out['approvals']['decided'][number];
+export type DecidedList = Out['approvals']['decided'];
+export type DecidedRow = DecidedList['rows'][number];

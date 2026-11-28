@@ -37,7 +37,7 @@ describe('role gate', () => {
       const c = callerOn(appDb, A, role);
       await expect(c.invoices.holding({ invoiceIds: [A.invoiceId] })).resolves.toBeInstanceOf(Array);
       await expect(c.invoices.history({ invoiceId: A.invoiceId })).resolves.toMatchObject({ events: expect.any(Array) });
-      await expect(c.approvals.decided({ period: 'today' })).resolves.toBeInstanceOf(Array);
+      await expect(c.approvals.decided({ period: 'today' })).resolves.toMatchObject({ rows: expect.any(Array) });
     });
   }
 });
@@ -56,7 +56,7 @@ describe('tenant scope', () => {
   });
 
   it("approvals.decided: A's list never holds one of B's gaps", async () => {
-    const rows = await callerOn(appDb, A, 'owner').approvals.decided({ period: 'week' });
+    const { rows } = await callerOn(appDb, A, 'owner').approvals.decided({ period: 'week' });
     expect(rows.map((r) => r.id)).not.toContain(B.discrepancyId);
   });
 

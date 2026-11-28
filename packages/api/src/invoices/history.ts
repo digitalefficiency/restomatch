@@ -1,5 +1,8 @@
+import type { discrepancies, invoices, UserRole } from '@restomatch/db';
+import type { AwaitingRouting } from '../approvals/awaiting';
+import type { VatBasis } from '../lib/claims';
 import { addCalendarDaysInTz, localDateKeyInTz, startOfDayInTz } from '../lib/time';
-import type { DecisionRecord, GapReason, GapRole, PassedOn } from './holding';
+import type { AgorotByBasis, DecisionRecord, GapReason, GapRole, PassedOn } from './holding';
 
 /**
  * INV-00 · an invoice's story (`invoices.history`) and a person's decisions of a period
@@ -14,14 +17,26 @@ import type { DecisionRecord, GapReason, GapRole, PassedOn } from './holding';
  * of a carried pass-on are lost; `rematched` says when that can be the case.
  */
 
-/** Where an invoice came in from (`invoices.source`), as stored. */
-export type InvoiceSource = string;
+type InvoiceRow = typeof invoices.$inferSelect;
+
+/** Where an invoice came in from (`invoices.source`): photo, e-mail, platform, manual, WhatsApp. */
+export type InvoiceSource = InvoiceRow['source'];
+
+/**
+ * Who did an act, as a role, never a person: the role the doer holds in this restaurant
+ * (`memberships`, or the role the audit row records for a decision, a pass-on and an undo);
+ * `system` for what the product did by itself (the check, the routing); null when the product
+ * does not record who did it (who sent an order).
+ */
+export type HistoryActor = UserRole | 'system' | null;
 
 interface HistoryEventBase {
   /** When; null only for a pass-on carried through a re-match (its time is not known). */
   at: Date | null;
   /** The gap the event is about, or null for an event of the whole invoice. */
   gapId: string | null;
+  /** The role beside the act (see `HistoryActor`). */
+  by: HistoryActor;
   /** The caller did it. */
   byYou: boolean;
 }
@@ -62,16 +77,21 @@ export const DECIDED_PERIODS = ['today', 'yesterday', 'week'] as const;
 export type DecidedPeriod = (typeof DECIDED_PERIODS)[number];
 
 /**
- * One decided gap for the approvals desk's "הוחלט היום": the facts the desk shows for an open
- * gap (the same keys as an `approvals.myQueue` row, so the same evidence can be drawn in grey)
- * plus the decision.
+ * One decided gap for the approvals desk's "הוחלט היום": every key of an `approvals.myQueue`
+ * row, with its types, so the desk draws the same evidence in grey from the same row model,
+ * plus the decision. A decided row: `canAct` false; `claimable` and `claimAgorot` say what the
+ * decision put in the credit request (`credit`, `duplicate_held`), else false and 0;
+ * `passedOn` null; `reason` the rule that first routed it (as `invoices.history`).
  */
+type DiscrepancyRow = typeof discrepancies.$inferSelect;
+
 export interface DecidedRow {
   id: string;
-  type: string;
-  severity: string;
-  resolutionStatus: string;
-  requiredRole: string | null;
+  type: DiscrepancyRow['type'];
+  severity: DiscrepancyRow['severity'];
+  resolutionStatus: DiscrepancyRow['resolutionStatus'];
+  /** The routing stored on the gap now (an escalated-then-decided gap reads 'owner'). */
+  requiredRole: UserRole | null;
   deltaAmount: string | null;
   expectedValue: string | null;
   actualValue: string | null;
@@ -84,7 +104,7 @@ export interface DecidedRow {
   invoiceNumber: string | null;
   invoiceDate: Date | null;
   invoiceDueDate: Date | null;
-  invoiceStatus: string | null;
+  invoiceStatus: InvoiceRow['status'] | null;
   hasScan: boolean;
   createdAt: Date;
   matchRunId: string;
@@ -103,7 +123,33 @@ export interface DecidedRow {
   poId: string | null;
   poRef: string | null;
   poDate: Date | null;
+  /** Stored with the retired word "הפרש": kept for the row model, never printed. */
+  ruleName: string | null;
+  message: string | null;
+  claimable: boolean;
+  claimAgorot: number;
+  canAct: boolean;
+  waitingOn: AwaitingRouting;
+  reason: GapReason;
+  passedOn: PassedOn | null;
+  /** As on the queue row: the role it is routed to now (the manager's for no routing), and since when. */
+  routing: GapRole;
+  since: Date;
+  /** The VAT basis of `claimAgorot` (and of the decision's amount). */
+  claimBasis: VatBasis;
   decision: DecisionRecord;
+}
+
+/**
+ * `approvals.decided`: every member's decisions of the period in this restaurant (`byYou` marks
+ * the caller's), never the system's, newest first, with the head's totals from the server.
+ */
+export interface DecidedList {
+  rows: DecidedRow[];
+  /** The decisions of the period (`rows.length` unless the read's cap cut it). */
+  count: number;
+  /** Σ the decisions' `amountAgorot` by VAT basis, integer agorot (the ₪ they were about). */
+  amountAgorot: AgorotByBasis;
 }
 
 /**

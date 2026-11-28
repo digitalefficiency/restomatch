@@ -26,6 +26,20 @@ export interface StateLook {
   icon: 'clock' | 'credit' | null;
 }
 
+/**
+ * The dot of a gap, a group or a place (SPEC §2.3): `block` red when a gap blocks payment,
+ * `warn` amber when a person must act, `done` grey once decided, null for none. `waits`: the
+ * thing waits for nothing from a person (no dot); `decided`: it was decided (grey).
+ */
+export function severityDot(
+  worst: GapSeverity | null,
+  opts: { decided?: boolean; waits?: boolean } = {},
+): 'block' | 'warn' | 'done' | null {
+  void worst;
+  void opts;
+  return null; // slice 4
+}
+
 /** The key of a state's word in the `invoices` messages (the frozen group `state`). */
 export function stateKey<S extends InvoiceState>(state: S): `state.${S}` {
   return `state.${state}`;
@@ -42,15 +56,19 @@ export function stateLook(state: InvoiceState, worstSeverity: GapSeverity | null
   return { tone: 'quiet', pill: false, icon: null }; // slice 4
 }
 
-/** dd.MM.yyyy on the restaurant's calendar (Asia/Jerusalem) in both locales (owner spec); '' for no date. */
-export function ddmmyyyy(value: Date | string | null | undefined, locale: Locale): string {
+/**
+ * dd.MM.yyyy on the restaurant's calendar (`timeZone`, the payload's `timeZone`) in both
+ * locales (owner spec); '' for no date.
+ */
+export function ddmmyyyy(value: Date | string | null | undefined, locale: Locale, timeZone: string): string {
   if (value == null || value === '') return '';
-  return formatDate(value, locale, { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '.');
+  return formatDate(value, locale, { day: '2-digit', month: '2-digit', year: 'numeric', timeZone }).replace(/\//g, '.');
 }
 
-/** dd.MM.yyyy · HH:mm on the restaurant's calendar and clock. */
-export function ddmmyyyyHHmm(value: Date | string | null | undefined, locale: Locale): string {
+/** dd.MM.yyyy · HH:mm on the restaurant's calendar and clock (`timeZone`). */
+export function ddmmyyyyHHmm(value: Date | string | null | undefined, locale: Locale, timeZone: string): string {
   void value;
   void locale;
+  void timeZone;
   return ''; // slice 4
 }
