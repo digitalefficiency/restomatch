@@ -736,12 +736,19 @@ export async function notifyPreparedDraft(
     now: args.now,
     // `notice` tells the order-day run which rows announced TODAY's draft: a row made
     // the day before (tomorrow's notice) shares the dedupe key but never replaces A5.
-    payload: { automationId: 'A16', poId: args.poId, notice: args.tomorrow ? 'tomorrow' : 'today' },
+    // Tomorrow's notice carries its usefulness limit for the dispatcher (not yet read by
+    // outboxDispatch: a "before preparedOrderDraft ON" item in the PR body).
+    payload: {
+      automationId: 'A16',
+      poId: args.poId,
+      notice: args.tomorrow ? 'tomorrow' : 'today',
+      ...(args.tomorrow && args.deadline ? { expiresAt: args.deadline.toISOString() } : {}),
+    },
     render: ({ role, locale, channel }) => {
       if (channel !== 'email' || !(AUTOPILOT_ROLES as readonly string[]).includes(role)) return null;
       const t = locale === 'en' ? ordersAutopilotEn : ordersAutopilotHe;
       const title = args.tomorrow
-        ? t.preparedTomorrowTitle(args.supplierName, args.lines, args.cutoff)
+        ? t.preparedTomorrowTitle(args.supplierName, args.lines, args.cutoff, args.orderDay)
         : t.preparedTitle(args.supplierName, args.lines, args.cutoff);
       return { subject: title, body: `${title}\n${t.preparedCta}: ${link}` };
     },

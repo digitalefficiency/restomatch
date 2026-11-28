@@ -134,7 +134,7 @@ describe('09:00 prepared drafts (AU-11 a)', () => {
     expect(d!.source_ref).toBe(`au:A16:${earlySid}:2026-10-26`);
     const msgs = (await rows()).filter((o) => o.dedupe_key.includes(earlySid));
     expect(msgs).toHaveLength(3);
-    expect(msgs[0]!.subject).toBe('טיוטה מוכנה למחר לשטראוס · 2 פריטים · השליחה עד 07:30');
+    expect(msgs[0]!.subject).toBe('טיוטה מוכנה לשטראוס ליום שני 26/10 · 2 פריטים · השליחה עד 07:30');
   });
 
   it('a supplier already ordered today → no draft, no message', async () => {
@@ -291,6 +291,7 @@ describe("yesterday's notice never hides today's A5; tomorrow's deadline is IL w
     await mk('daily', 'ירקן יומי', [0, 1, 2, 3, 4, 5, 6], '08:00');
     await mk('p5', 'מאפייה חמש', [0], '05:00');
     await mk('dst', 'ביצים שש וחצי', [0], '06:30');
+    await mk('thu', 'דגי חמישי', [4], '08:00');
   });
   /** Only this supplier is active, so no other supplier's rows reach the daily cap. */
   const only = (id: string) => sql`update suppliers set active = (id = ${id}) where restaurant_id = ${rid}`;
@@ -340,6 +341,30 @@ describe("yesterday's notice never hides today's A5; tomorrow's deadline is IL w
     for (const x of r) {
       expect(x.status).toBe('queued');
       expect(new Date(x.scheduled_at!).toISOString()).toBe('2026-10-25T04:00:00.000Z');
+    }
+  });
+
+  it('cap-moved to the order day (Wed 09:00 → Thu 06:00): the subject names Thursday 29/10, not "מחר"; payload carries expiresAt', async () => {
+    await only(made.thu!);
+    await guide(made.thu!);
+    await setOption({ preparedOrderDraft: true });
+    for (const role of ['owner', 'manager', 'chef']) {
+      for (let i = 0; i < 6; i++) {
+        await sql`insert into notifications_outbox (restaurant_id, channel, target, body, status, payload, dedupe_key)
+                  values (${rid}, 'email', ${`${TAG}-${role}@example.test`}, 'x', 'sent', ${sql.json({ userId: uids[role]! })}, ${`cap-thu-${role}-${i}-${process.pid}`})`;
+      }
+    }
+    // Wed 28.10 09:00 IL (IST) = 07:00Z; Thu 06:00 IL = 04:00Z; Thu 08:00 IL = 06:00Z.
+    await processOrderReminders(job({ restaurantId: rid, forDate: '2026-10-28T07:00:00Z' }));
+    const r = await sql<{ status: string; scheduled_at: Date | null; subject: string | null; payload: { expiresAt?: string } }[]>`
+      select status, scheduled_at, subject, payload from notifications_outbox
+      where restaurant_id = ${rid} and dedupe_key like ${`au:A16:2026-10-29:%:${made.thu}:%`}`;
+    expect(r).toHaveLength(3);
+    for (const x of r) {
+      expect(x.status).toBe('queued');
+      expect(new Date(x.scheduled_at!).toISOString()).toBe('2026-10-29T04:00:00.000Z');
+      expect(x.subject).toBe('טיוטה מוכנה לדגי חמישי ליום חמישי 29/10 · 2 פריטים · השליחה עד 08:00');
+      expect(x.payload.expiresAt).toBe('2026-10-29T06:00:00.000Z');
     }
   });
 });
