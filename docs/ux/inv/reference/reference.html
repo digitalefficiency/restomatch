@@ -3400,7 +3400,8 @@ html.ivp-lock{ overflow:hidden }
       else if (a === 'zero') { ps.t = '0'; ps.first = true; ps.dmgEdit = false; }
       else if (a === 'asordered') { ps.t = qty(LINES[ps.edit].q); ps.first = true; }
       else if (a === 'dmg') ps.dmgEdit = !ps.dmgEdit;
-      else if (a === 'key') typeInto(b.getAttribute('data-d'));
+      /* the key is one of the keypad's own, found by its place in the list */
+      else if (a === 'key') { var keyAt = KEYS.indexOf(b.getAttribute('data-d')); if (keyAt < 0) return; typeInto(KEYS[keyAt]); }
       else if (a === 'save') {
         if (ps.t === '' || ps.t === '.') return;
         leave(function () {
@@ -3640,9 +3641,15 @@ html.ivp-lock{ overflow:hidden }
     clipM(m);
   };
   var hideTip = function (m) { clearTimeout(m.tipT); clearTimeout(m.noteT); if (m.tip && !m.tip.hidden) { m.tip.hidden = true; m.tipAt = Date.now(); } m.tipFor = null; };
-  var placeTip = function (m, el, html) {
+  /* the words of a tip are set as text, so nothing read back from the page is parsed as markup */
+  var placeTip = function (m, el, title, key, more) {
     clearTimeout(m.noteT);
-    m.tip.innerHTML = html; m.tip.hidden = false; m.tip.style.top = '0px'; m.tip.style.insetInlineStart = '0px'; m.tipFor = el;
+    var head = document.createElement('b'), part;
+    head.textContent = title;
+    if (key) { part = document.createElement('kbd'); part.setAttribute('dir', 'ltr'); part.textContent = key; head.appendChild(part); }
+    m.tip.textContent = ''; m.tip.appendChild(head);
+    if (more) { part = document.createElement('small'); part.textContent = more; m.tip.appendChild(part); }
+    m.tip.hidden = false; m.tip.style.top = '0px'; m.tip.style.insetInlineStart = '0px'; m.tipFor = el;
     var p = place(m, el.getBoundingClientRect()), tw = m.tip.offsetWidth, th = m.tip.offsetHeight, W = m.app.offsetWidth, H = m.app.offsetHeight, top, start;
     if (m.el.contains(el)) { start = m.el.offsetWidth + 8; top = p.top + p.h / 2 - th / 2; }
     else { start = p.right + p.w / 2 - tw / 2; top = p.bottom + 8; }
@@ -3651,11 +3658,11 @@ html.ivp-lock{ overflow:hidden }
   };
   var showTip = function (m, el) {
     var d = (el.getAttribute('data-tip') || '').split('|'); if (!d[0]) return;
-    placeTip(m, el, '<b>' + d[0] + (d[1] ? '<kbd dir="ltr">' + d[1] + '</kbd>' : '') + '</b>' + (d[2] ? '<small>' + d[2] + '</small>' : ''));
+    placeTip(m, el, d[0], d[1], d[2]);
   };
   /* when the menu folds a group by itself it says so beside that group, for a moment; a screen reader hears the same words */
   var noteTip = function (m, el, text) {
-    placeTip(m, el, '<b>' + text + '</b>');
+    placeTip(m, el, text);
     m.noteT = setTimeout(function () { if (m.tipFor === el) hideTip(m); }, 3200);
   };
   var paintMenu = function (m, focusSel) {
@@ -3680,7 +3687,7 @@ html.ivp-lock{ overflow:hidden }
     clearTimeout(m.flyT); hideTip(m);
     var items = gid === 'fav' ? m.fav.map(navItem) : g.items;
     m.flyEl.innerHTML = '<div class="mn-fly-h"><b id="' + m.uid + '-fly-t">' + g.t + '</b>' +
-      (gid === 'fav' ? '' : '<button class="mn-ib" data-m="pin" data-g="' + gid + '" aria-label="הצמדת התפריט הפתוח עם ' + g.t + '" data-tip="הצמדת התפריט||פותח את התפריט המלא עם ' + g.t + '">' + icon('pin') + '</button>') + '</div>' +
+      (gid === 'fav' ? '' : '<button class="mn-ib" data-m="pin" data-g="' + g.id + '" aria-label="הצמדת התפריט הפתוח עם ' + g.t + '" data-tip="הצמדת התפריט||פותח את התפריט המלא עם ' + g.t + '">' + icon('pin') + '</button>') + '</div>' +
       '<ul class="mn-list">' + items.map(function (x) { return rowHtml(m, x, gid === 'fav' ? 'fav' : 'fly'); }).join('') + '</ul>';
     m.flyEl.setAttribute('aria-labelledby', m.uid + '-fly-t');
     m.flyEl.hidden = false; m.fly = gid; t.setAttribute('aria-expanded', 'true');
