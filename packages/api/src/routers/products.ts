@@ -18,6 +18,8 @@ import {
 } from '@restomatch/db';
 import { managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
+import { buildMergePreview } from '../catalog/mergePreview';
+import { loadMergeEvidence, loadMergeSide } from '../catalog/mergeLoad';
 
 /**
  * Canonical-product management. Products are otherwise created only by import /
@@ -237,5 +239,33 @@ export const productsRouter = router({
         .delete(products)
         .where(and(eq(products.id, input.productId), eq(products.restaurantId, restaurantId)));
       return { ok: true };
+    }),
+  /**
+   * W3-10 · "מיזוג מוצרים" — what merging `fromId` into `intoId` would move,
+   * read-only: aliases added, catalog rows, recipes, open order lines and
+   * contracts repointed, the conflicts a person must decide, and the money
+   * evidence (invoice lines, findings, price history — counts, no ₪) that would
+   * be re-attributed. Applying a merge moves leak history, so it is a separate,
+   * owner-signed step; nothing here writes. Owner / manager. Either product of
+   * another restaurant → NOT_FOUND.
+   */
+  mergePreview: managerProcedure
+    .input(z.object({ fromId: z.string().uuid(), intoId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      if (input.fromId === input.intoId) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'cannot merge a product into itself' });
+      }
+      const rid = ctx.session.restaurantId;
+      const [from, into] = await Promise.all([
+        loadMergeSide(ctx.db, rid, input.fromId),
+        loadMergeSide(ctx.db, rid, input.intoId),
+      ]);
+      if (!from || !into) throw new TRPCError({ code: 'NOT_FOUND', message: 'product not found' });
+      return {
+        preview: buildMergePreview(from, into),
+        from: { id: from.productId, name: from.name, unit: from.baseUnit },
+        into: { id: into.productId, name: into.name, unit: into.baseUnit },
+        evidence: await loadMergeEvidence(ctx.db, rid, input.fromId),
+      };
     }),
 });

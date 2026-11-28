@@ -1,0 +1,37 @@
+{
+  "caseId": "WA-G-ADV-13",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "decide.commit",
+      "refusal": "token.invalid",
+      "toolCalls": [
+        {
+          "name": "wa.claimToken",
+          "args": {
+            "token": "stg_lab_adv13"
+          },
+          "result": {
+            "ok": false,
+            "reason": "binding"
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "text",
+          "text": "האישור הזה לא שייך למספר הזה. לא בוצע דבר.",
+          "buttons": []
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "approvalsDecided": 0,
+    "stagedTokens": 0,
+    "tokensCommitted": 0
+  }
+}

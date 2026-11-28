@@ -129,6 +129,7 @@ describe('computeOwnerKpis', () => {
         type: 'PRICE_HIGHER',
         severity: 'warn',
         resolutionStatus: 'accepted',
+        resolvedAt: new Date(), // a person's accept (approvals.approve stamps resolved_at)
         deltaAmount: '500',
       },
       {
@@ -144,6 +145,23 @@ describe('computeOwnerKpis', () => {
     const kpis = await computeOwnerKpis(db, restaurantId);
     expect(kpis.monthSavingsCapturedIls).toBe(1700);
     expect(kpis.pendingApprovalsCount).toBe(0); // both resolved
+  });
+
+  it('G-15 Q8: a SYSTEM auto-accept (accepted, no resolved_at) is never counted as savings', async () => {
+    const restaurantId = await seedRestaurant();
+    const [mr] = await db
+      .insert(matchRuns)
+      .values({ restaurantId, overallStatus: 'major', totalDiscrepancyAmount: '0' })
+      .returning();
+    await db.insert(discrepancies).values([
+      // person's accept → savings
+      { matchRunId: mr!.id, restaurantId, type: 'PRICE_HIGHER', severity: 'warn', resolutionStatus: 'accepted', resolvedAt: new Date(), deltaAmount: '300' },
+      // routing engine auto-accepts (non-leak-acknowledge / minor-info) → not savings
+      { matchRunId: mr!.id, restaurantId, type: 'QTY_SHORT', severity: 'info', resolutionStatus: 'accepted', deltaAmount: '95.23' },
+      { matchRunId: mr!.id, restaurantId, type: 'PRICE_LOWER', severity: 'info', resolutionStatus: 'accepted', deltaAmount: '40' },
+    ]);
+    const kpis = await computeOwnerKpis(db, restaurantId);
+    expect(kpis.monthSavingsCapturedIls).toBe(300);
   });
 
   it('weekCleanMatchPct computed correctly', async () => {

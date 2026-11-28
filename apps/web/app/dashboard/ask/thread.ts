@@ -13,6 +13,10 @@ export interface AskTurn {
   answer: string | null;
   /** True when the answer was not grounded in the restaurant's data (banner above it). */
   ungrounded?: boolean;
+  /** The server's structured answer (AskResult), kept so a reload re-renders it. */
+  result?: unknown;
+  /** Why there is no answer: a failure, the burst limit, or the user pressed "עצור". */
+  error?: 'generic' | 'rateLimited' | 'stopped';
   /** ms since epoch. */
   at: number;
 }
@@ -62,7 +66,7 @@ export function appendTurn(turns: readonly AskTurn[], turn: AskTurn): AskTurn[] 
 export function settleTurn(
   turns: readonly AskTurn[],
   id: string,
-  patch: Partial<Pick<AskTurn, 'answer' | 'ungrounded'>>,
+  patch: Partial<Pick<AskTurn, 'answer' | 'ungrounded' | 'result' | 'error'>>,
 ): AskTurn[] {
   return turns.map((t) => (t.id === id ? { ...t, ...patch } : t));
 }

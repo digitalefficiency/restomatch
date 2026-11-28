@@ -117,3 +117,32 @@ test('the receiver gets no supplier ₪: no ledger page, no overview, and the le
   expect(/\/dashboard$/.test(page.url()) || nav?.status() === 403).toBe(true);
   await context.close();
 });
+
+/**
+ * Dev hydration guard (W2-04's e2e run, main 9dc0b934): the ledger page's
+ * statement form must hydrate without a mismatch. Its Field labels took ids
+ * from useId, which came out different on the server and in the browser
+ * (`f_R_cqpbn…` vs `f_R_1jb5…`); they now carry fixed ids, so label ↔ control
+ * stays tied and the SSR HTML is the hydrated HTML.
+ */
+test('the ledger page hydrates cleanly: the statement form ties its labels with fixed ids', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await context.newPage();
+  const errors = collectPageErrors(page);
+  await signIn(context, page, 'bookkeeper@kfar-hazeitim.test');
+  for (const locale of ['he', 'en'] as const) {
+    await context.addCookies([{ name: 'rm_locale', value: locale, url: test.info().project.use.baseURL! }]);
+    await page.goto('/dashboard/suppliers/ledger');
+    const form = page.locator('#statement form');
+    await expect(form.locator('select')).toBeVisible();
+    // Deterministic ids, label for = control id (no useId-derived `f_R_…` / `f«…»`).
+    await expect(form.locator('label[for="rm-statement-supplier"]')).toHaveCount(1);
+    await expect(form.locator('select#rm-statement-supplier')).toHaveCount(1);
+    await expect(form.locator('label[for="rm-statement-csv"]')).toHaveCount(1);
+    await expect(form.locator('textarea#rm-statement-csv')).toHaveCount(1);
+    // A mismatch is reported once React has hydrated the tree.
+    await page.waitForLoadState('networkidle');
+  }
+  expect(errors.filter((e) => /hydrat|did not match|#418/i.test(e))).toEqual([]);
+  await context.close();
+});

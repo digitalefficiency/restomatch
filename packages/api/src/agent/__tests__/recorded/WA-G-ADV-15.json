@@ -1,0 +1,29 @@
+{
+  "caseId": "WA-G-ADV-15",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": null,
+      "refusal": "supplier.fixedReply",
+      "toolCalls": [],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "text",
+          "text": "המספר הזה משמש את צוותי המסעדות שעובדות עם RestoMatch. לעניין הזמנה או חשבונית, פנו ישירות למסעדה.",
+          "buttons": []
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "staffSessionsOpened": 0,
+    "modelCalls": 0,
+    "supplierOutboundRows": 0,
+    "approvalsDecided": 0,
+    "stagedTokens": 0,
+    "tokensCommitted": 0
+  }
+}

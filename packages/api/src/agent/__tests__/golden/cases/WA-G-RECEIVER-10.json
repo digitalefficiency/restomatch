@@ -1,0 +1,47 @@
+{
+  "id": "WA-G-RECEIVER-10",
+  "role": "receiver",
+  "adversarial": false,
+  "flow": "R1",
+  "title": "\"מה מגיע היום?\"",
+  "neverList": [],
+  "ownerRules": [
+    "receiver-no-ils"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "מה מגיע היום?"
+    }
+  ],
+  "expect": {
+    "intent": "receiving.today",
+    "tools": [
+      {
+        "name": "receiving.todayExpectations",
+        "args": {}
+      }
+    ],
+    "forbiddenFields": [
+      "ils|agorot|amount|total|price"
+    ],
+    "forbiddenText": [
+      "₪",
+      "\\d+[.,]\\d{2}"
+    ],
+    "buttons": [],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {}
+  }
+}
