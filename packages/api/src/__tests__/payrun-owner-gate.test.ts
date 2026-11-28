@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createDb, discrepancies, eq, invoiceLines, invoices, matchRuns, restaurants, suppliers, testDbUrl, type Database } from '@restomatch/db';
+import { createDb, discrepancies, eq, invoiceLines, invoices, matchRuns, memberships, purchaseOrders, restaurants, suppliers, testDbUrl, users, type Database } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
@@ -55,16 +55,39 @@ async function markLiveDuplicate(invoiceId: string) {
     deltaAmount: '0',
   });
 }
-function markPaid(role: Session['role'], item: { invoiceId: string; expectedStatus: InvStatus }, ackFirstPayment = false) {
-  const ctx: AppContext = { db, session: { userId: A.ownerUserId, restaurantId: A.restaurantId, role } };
+/** A real manager of A (so audit rows carry a non-owner user). */
+async function managerUser() {
+  const [u] = await db.insert(users).values({ email: `mgr-${crypto.randomUUID()}@test.local`, name: 'מנהלת' }).returning({ id: users.id });
+  await db.insert(memberships).values({ userId: u!.id, restaurantId: A.restaurantId, role: 'manager' });
+  return u!.id;
+}
+function asManager(userId: string) {
+  const ctx: AppContext = { db, session: { userId, restaurantId: A.restaurantId, role: 'manager' } };
+  return appRouter.createCaller(ctx);
+}
+async function line(invoiceId: string, lineTotal: string, vatRate: string | null = null) {
+  const [l] = await db
+    .insert(invoiceLines)
+    .values({ invoiceId, rawDescription: 'שמן זית', qtyBilled: '1', unit: 'יח', unitPriceBilled: lineTotal, lineTotal, vatRate })
+    .returning({ id: invoiceLines.id });
+  return l!.id;
+}
+function markPaid(
+  role: Session['role'],
+  item: { invoiceId: string; expectedStatus: InvStatus },
+  ack: boolean | Array<'first_payment' | 'possible_duplicate'> = false,
+  userId = A.ownerUserId,
+) {
+  const kinds = ack === true ? (['first_payment'] as const) : ack === false ? [] : ack;
+  const ctx: AppContext = { db, session: { userId, restaurantId: A.restaurantId, role } };
   return appRouter
     .createCaller(ctx)
     .payRun.markPaid({
       items: [item as never],
       paidOn: '2026-11-20',
       method: 'bank_transfer',
-      // A never-paid supplier first trips AU-14's soft `first_payment` warning (it runs before this gate).
-      ...(ackFirstPayment ? { acknowledgedFlags: [{ invoiceId: item.invoiceId, kinds: ['first_payment' as const] }] } : {}),
+      // A soft AU-14 warning (first_payment, possible_duplicate) runs before this gate: acknowledge it.
+      ...(kinds.length ? { acknowledgedFlags: [{ invoiceId: item.invoiceId, kinds: [...kinds] }] } : {}),
       clientMutationId: `cmid-og-${crypto.randomUUID()}`,
     });
 }
@@ -184,6 +207,64 @@ describe('payRun.markPaid × owner pay-approval (G-15b)', () => {
     await expect(markPaid('manager', item, true)).rejects.toMatchObject({ code: 'FORBIDDEN' });
     await invoice('300.00', 'paid', sid);
     await expect(markPaid('manager', item, true)).rejects.toMatchObject({ code: 'NOT_IMPLEMENTED', message: 'payRun.markPaidAwaitsH03' });
+  });
+
+  // ── review 2 of #380: no OCR document total ──
+  it('P1: no OCR total, a manager lowers a hand line ⇒ owner only (figures changed by a non-owner)', async () => {
+    const mgr = await managerUser();
+    const item = await invoice('5900.00', 'matched');
+    const l = await line(item.invoiceId, '5000.00');
+    await asManager(mgr).receiving.updateInvoiceLine({ lineId: l, patch: { lineTotal: 100, unitPriceBilled: 100 } });
+    await db.update(invoices).set({ totalInclVat: '118.00' }).where(eq(invoices.id, item.invoiceId));
+    await expect(markPaid('manager', item, ['possible_duplicate'], mgr)).rejects.toMatchObject({ code: 'FORBIDDEN', cause: { appCode: 'payment.ownerApprovalRequired' } });
+  });
+
+  it('P2: no OCR total, a manager lowers a printed line and the header ⇒ owner only', async () => {
+    const mgr = await managerUser();
+    const item = await invoice('5900.00', 'matched');
+    const l = await line(item.invoiceId, '5000.00');
+    await asManager(mgr).receiving.updateInvoiceLine({ lineId: l, patch: { lineTotal: 100, unitPriceBilled: 100 } });
+    await asManager(mgr).receiving.updateInvoiceHeader({ invoiceId: item.invoiceId, patch: { totalExclVat: 100, vatAmount: 18, totalInclVat: 118 } });
+    await expect(markPaid('manager', item, ['possible_duplicate'], mgr)).rejects.toMatchObject({ code: 'FORBIDDEN', cause: { appCode: 'payment.ownerApprovalRequired' } });
+  });
+
+  it('…the same edits by the OWNER leave the figures trusted (₪118 ⇒ a manager may mark it)', async () => {
+    const item = await invoice('5900.00', 'matched');
+    const l = await line(item.invoiceId, '5000.00');
+    const owner = appRouter.createCaller({ db, session: { userId: A.ownerUserId, restaurantId: A.restaurantId, role: 'owner' } });
+    await owner.receiving.updateInvoiceLine({ lineId: l, patch: { lineTotal: 100, unitPriceBilled: 100 } });
+    await owner.receiving.updateInvoiceHeader({ invoiceId: item.invoiceId, patch: { totalExclVat: 100, vatAmount: 18, totalInclVat: 118 } });
+    await expect(markPaid('manager', item, ['possible_duplicate'])).rejects.toMatchObject({ code: 'NOT_IMPLEMENTED', message: 'payRun.markPaidAwaitsH03' });
+  });
+
+  it('P6: header NULL, no OCR total, Σ lines ₪100 ⇒ owner only (lines alone are never the basis)', async () => {
+    const item = await invoice(null, 'matched');
+    await line(item.invoiceId, '84.75', '0.18');
+    await expect(markPaid('manager', item)).rejects.toMatchObject({ code: 'FORBIDDEN', cause: { appCode: 'payment.ownerApprovalRequired' } });
+  });
+
+  it('P6b: header NULL, a ₪0.00 line ⇒ owner only', async () => {
+    const item = await invoice(null, 'matched');
+    await line(item.invoiceId, '0.00');
+    await expect(markPaid('manager', item)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it("Σ lines use the header's VAT chain: a VAT-exempt supplier's ₪4,300.00 stays under ₪5,000 ⇒ a manager may mark it", async () => {
+    await db.update(suppliers).set({ vatRate: '0' }).where(eq(suppliers.id, A.supplierId));
+    const item = await invoice('4300.00', 'matched');
+    await line(item.invoiceId, '4300.00');
+    await expect(markPaid('manager', item)).rejects.toMatchObject({ code: 'NOT_IMPLEMENTED', message: 'payRun.markPaidAwaitsH03' });
+  });
+
+  it("…and the PO's rate wins over the supplier's (latest match run)", async () => {
+    const item = await invoice('4300.00', 'matched');
+    await line(item.invoiceId, '4300.00');
+    const [po] = await db
+      .insert(purchaseOrders)
+      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, status: 'closed', source: 'manual', vatRate: '0' })
+      .returning({ id: purchaseOrders.id });
+    await db.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: item.invoiceId, poId: po!.id, overallStatus: 'clean', totalDiscrepancyAmount: '0' });
+    await expect(markPaid('manager', item)).rejects.toMatchObject({ code: 'NOT_IMPLEMENTED', message: 'payRun.markPaidAwaitsH03' });
   });
 
   it('flag off ⇒ NOT_IMPLEMENTED before the gate, even for a manager on ₪5,000+', async () => {
