@@ -20,10 +20,27 @@ export interface OwedInput {
  * Returns agorot per input row, in order.
  */
 export async function owedAgorot(db: Database, restaurantId: string, rows: readonly OwedInput[]): Promise<number[]> {
+  return (await claimBasis(db, restaurantId, rows)).map((b) => b.owedAgorot);
+}
+
+/**
+ * Both figures of each claim on the one basis (R5-3): `cappedAgorot` = what the claim stands for —
+ * its capped share of the invoice (a live claim), else its stored amount — and `owedAgorot` = what
+ * is still owed on it (capped share less credited; see owedAgorot). `amount_agorot` is read when
+ * present (the stored claim), else outstanding + credited.
+ */
+export async function claimBasis(
+  db: Database,
+  restaurantId: string,
+  rows: ReadonlyArray<OwedInput & { amount_agorot?: unknown }>,
+): Promise<Array<{ cappedAgorot: number; owedAgorot: number }>> {
   const invoices = [...new Set(rows.map((r) => r.finding_invoice_id).filter((v) => v != null).map(String))];
   const allocation = invoices.length ? await computeLineAllocation(db, restaurantId, invoices) : new Map();
   return rows.map((r) => {
     const led = allocation.get(String(r.discrepancy_id));
-    return led?.liveClaim ? Math.max(0, led.cappedAgorot - Number(r.credited_agorot ?? 0)) : Number(r.outstanding ?? 0);
+    const credited = Number(r.credited_agorot ?? 0);
+    if (led?.liveClaim) return { cappedAgorot: led.cappedAgorot, owedAgorot: Math.max(0, led.cappedAgorot - credited) };
+    const stored = r.amount_agorot != null ? Number(r.amount_agorot) : Number(r.outstanding ?? 0) + credited;
+    return { cappedAgorot: stored, owedAgorot: Number(r.outstanding ?? 0) };
   });
 }

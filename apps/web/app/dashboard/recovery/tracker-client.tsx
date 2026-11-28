@@ -21,6 +21,7 @@ import { ClaimPeek } from './claim-peek';
 import { ExportButtons } from './export-buttons';
 import {
   CLOSED,
+  isCappedAway,
   CONFIRMED_MOVES,
   batchMoves,
   bySupplier,
@@ -297,7 +298,7 @@ export function TrackerClient({
     }
     return (
       <div className={cn('flex items-center gap-2', wide ? 'w-full' : 'justify-end')}>
-        {step ? (
+        {step && !isCappedAway(c) ? (
           <Button
             size="sm"
             variant={status === 'claimed' ? 'primary' : 'secondary'}
@@ -334,8 +335,13 @@ export function TrackerClient({
 
   const amountCell = (c: Claim) => (
     <>
-      <span className="font-semibold tabular-nums text-ink">{ils(c.outstandingAgorot > 0 ? c.outstandingAgorot : c.amountAgorot)}</span>
-      {c.outstandingAgorot > 0 && c.outstandingAgorot !== c.amountAgorot ? (
+      {/* R5-4: an open claim the invoice cap left at ₪0 shows ₪0 "of ₪X (cap reached)", never its stored ₪. */}
+      <span className="font-semibold tabular-nums text-ink" data-testid={isCappedAway(c) ? 'claim-capped-away' : undefined}>
+        {ils(c.outstandingAgorot > 0 || isCappedAway(c) ? c.outstandingAgorot : c.amountAgorot)}
+      </span>
+      {isCappedAway(c) ? (
+        <span className="block text-xs text-muted">{t('tracker.cappedAway', { amount: ils(c.amountAgorot) })}</span>
+      ) : c.outstandingAgorot > 0 && c.outstandingAgorot !== c.amountAgorot ? (
         <span className="block text-xs text-muted">{t('tracker.ofClaimed', { amount: ils(c.amountAgorot) })}</span>
       ) : null}
       {c.creditedAgorot > 0 ? (

@@ -1,3 +1,4 @@
+import { owedAgorot } from '../recovery/owed';
 import { LEAK_EXCLUDED_TYPES, computeLeakReport } from '@restomatch/charts';
 import { and, eq, isNull, monthlyReports, restaurants, sql, type Database } from '@restomatch/db';
 import { renderEmail, ilsSpan, type RenderedEmail } from '../notifications/templates';
@@ -135,16 +136,21 @@ async function cappedIssues(db: Database, restaurantId: string, lo: string, hi: 
 
 /** What suppliers still owe on claims raised for THIS month's invoices (month-scoped, like the rest of the report). */
 async function outstandingForMonth(db: Database, restaurantId: string, lo: string, hi: string): Promise<number> {
+  // G-14 Q3 R5-2: "still owed" on the one basis — each open claim's capped share less credited
+  // (recovery/owed.ts, = the tracker's outstanding), never Σ stored (amount − credited).
   const res = await db.execute(sql`
-    SELECT COALESCE(SUM(GREATEST(0, c.amount_agorot - c.credited_agorot)), 0) AS owed
+    SELECT c.discrepancy_id, c.credited_agorot, GREATEST(0, c.amount_agorot - c.credited_agorot) AS outstanding,
+           mr.invoice_id AS finding_invoice_id
     FROM recovery_claims c
     JOIN invoices i ON i.id = c.invoice_id AND i.restaurant_id = ${restaurantId}
+    JOIN discrepancies d ON d.id = c.discrepancy_id AND d.restaurant_id = ${restaurantId}
+    LEFT JOIN match_runs mr ON mr.id = d.match_run_id AND mr.restaurant_id = ${restaurantId}
     WHERE c.restaurant_id = ${restaurantId}
       AND c.status IN ('claimed','letter_sent','acknowledged','credited','disputed')
       AND COALESCE(i.invoice_date, i.created_at) >= ${lo}::timestamptz
       AND COALESCE(i.invoice_date, i.created_at) < ${hi}::timestamptz
   `);
-  return Number(rowsOf(res)[0]?.owed ?? 0);
+  return (await owedAgorot(db, restaurantId, rowsOf(res) as never)).reduce((a, x) => a + x, 0);
 }
 
 /** Leak share at which a supplier earns a "talk to them" action (the North Star 1.5%). */

@@ -832,6 +832,9 @@ describe('G-14 Q3 round 3: one allocator — live claims first, on every screen'
     expect(v.report.status.claimedIls).toBe(6);
     expect(v.report.status.stillOpenIls).toBe(0);
     expect([v.toDecide, v.rowsAgorot, v.ask, v.lettersUndecided, v.pay.pendingIls]).toEqual([0, 0, 0, 0, 0]);
+    // R5-5: the row agrees with the count — not claimable, no decide ₪.
+    const row = (await ownerOf(s).approvals.myQueue({ limit: 100 })).find((r) => r.id === d.id)!;
+    expect([row.claimable, row.claimAgorot]).toEqual([false, 0]);
     // R4-4: the count follows the ₪ — the claimed row leaves "to decide" (the report counts it open: 0).
     expect((await ownerOf(s).approvals.queueSummary()).toDecide.count).toBe(countBefore - 1);
     expect(v.report.status.stillOpenCount).toBe(0);
@@ -877,6 +880,48 @@ describe('G-14 Q3 round 3: one allocator — live claims first, on every screen'
     expect(v.pay.creditIls).toBe(10);
     expect(claims.reduce((t, c) => t + c.outstandingAgorot, 0)).toBe(1000);
     expect(letters.reduce((t, l) => t + l.totalAgorot, 0)).toBe(1000);
+    // R5-2: the monthly report's "still owed" = Σ tracker outstanding for the month's invoices.
+    const { computeMonthlyReport } = await import('../reports/monthly');
+    const monthly = await computeMonthlyReport(db, s.restaurantId, month());
+    expect(monthly.outstandingAgorot).toBe(1000);
+    // R5-3: the desk's claimed is on the same basis — its funnel adds up with outstanding.
+    const { summarize } = await import('../recovery/service');
+    const sum = summarize(claims);
+    expect(sum.claimedAgorot).toBe(1000);
+    expect(sum.bySupplier.reduce((t, x) => t + x.claimedAgorot, 0)).toBe(1000);
+    expect(sum.claimedAgorot).toBe(sum.outstandingAgorot + sum.creditedAgorot + sum.writtenOffAgorot);
+  });
+
+  it('R5-1/R5-4: a sent claim the lowered cap leaves at ₪0 is not chased — no digest, no draft — and is not "to send"', async () => {
+    const { listClaims, summarize, isCappedAway } = await import('../recovery/service');
+    const { findOverdue, supplierReminderDraft } = await import('../recovery/reminders');
+    const s = await seed();
+    const [sup] = await db.insert(suppliers).values({ restaurantId: s.restaurantId, name: 'ספק תקרה' }).returning();
+    const { invoiceId, matchRunId } = await run(s, '20.00');
+    await db.update(invoices).set({ supplierId: sup!.id }).where(eq(invoices.id, invoiceId));
+    const at = (k: number) => new Date(Date.UTC(2026, 9, 1, 8, 0, k));
+    const a = await insertD(s, { matchRunId, createdAt: at(1), deltaAmount: '8.00', resolutionStatus: 'accepted', resolvedAt: new Date(), resolvedBy: s.managerId });
+    const b = await insertD(s, { matchRunId, createdAt: at(2), type: 'QTY_SHORT', deltaAmount: '8.00', resolutionStatus: 'accepted', resolvedAt: new Date(), resolvedBy: s.managerId });
+    const [ca] = await db.insert(recoveryClaims).values({ restaurantId: s.restaurantId, discrepancyId: a.id, supplierId: sup!.id, invoiceId, amountAgorot: 800 }).returning();
+    const [cb] = await db.insert(recoveryClaims).values({ restaurantId: s.restaurantId, discrepancyId: b.id, supplierId: sup!.id, invoiceId, amountAgorot: 800 }).returning();
+    // The total is corrected to ₪8: A holds the cap (first), B is left at ₪0.
+    await db.update(invoices).set({ totalInclVat: '8.00' }).where(eq(invoices.id, invoiceId));
+    const unsent = await listClaims(db, s.restaurantId, { limit: null });
+    const B = unsent.find((c) => c.id === cb!.id)!;
+    expect([B.outstandingAgorot, B.cappedAgorot, isCappedAway(B)]).toEqual([0, 0, true]);
+    expect(summarize(unsent).byStatus.claimed.count).toBe(1); // R5-4: B is not "to send"
+    // Both letters went out 10 days ago; then A is credited in full.
+    const old = new Date(Date.now() - 10 * 86_400_000);
+    await db.update(recoveryClaims).set({ status: 'letter_sent', letterSentAt: old, claimedAt: old }).where(eq(recoveryClaims.restaurantId, s.restaurantId));
+    const now = new Date();
+    expect((await findOverdue(db, s.restaurantId, now)).count).toBe(1); // A only, never B at ₪0
+    await db.update(recoveryClaims).set({ status: 'credited', creditedAgorot: 800, creditedAt: now }).where(eq(recoveryClaims.id, ca!.id));
+    const digest = await findOverdue(db, s.restaurantId, now);
+    expect([digest.count, digest.totalAgorot, digest.claimIds]).toEqual([0, 0, []]);
+    const draft = await supplierReminderDraft(db, s.restaurantId, sup!.id, now);
+    expect([draft.count, draft.outstandingAgorot, draft.claimIds]).toEqual([0, 0, []]);
+    const tracked = await listClaims(db, s.restaurantId, { limit: null, now });
+    expect(tracked.find((c) => c.id === cb!.id)!.overdue).toBe(false);
   });
 
   it('R4-3: the per-line allocation is one linear query — a medium tenant beside a large one stays fast', async () => {

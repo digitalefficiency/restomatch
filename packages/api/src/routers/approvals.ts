@@ -337,10 +337,13 @@ export const approvalsRouter = router({
       // The claimable ₪ per row (lib/claims rule, per-invoice cap): the group
       // header, the BatchBar Σ and `seenClaimAgorot` on approve all read it.
       const claims = await claimsByRow(ctx.db, rid, rows.filter(isClaimableRow));
+      // A reopened row that still holds a live claim is already claimed (G-14 Q3 R5-5): not
+      // "claimable" here either, exactly as queueSummary's count (awaiting.ts) — one allocation.
+      const claimable = (r: (typeof rows)[number]) => isClaimableRow(r) && !claims.claimed.has(r.id);
       return rows.map((r) => ({
         ...(r.poId ? r : { ...r, qtyOrdered: null, orderedUnit: null, poRef: null, poDate: null }),
-        claimable: isClaimableRow(r),
-        claimAgorot: isClaimableRow(r) ? Math.round((claims.get(r.id)?.amount ?? 0) * 100) : 0,
+        claimable: claimable(r),
+        claimAgorot: claimable(r) ? Math.round((claims.amounts.get(r.id)?.amount ?? 0) * 100) : 0,
         canAct: canActOn(ctx.session.role, r.requiredRole),
         /** Who decides it: its routed role, or 'unrouted' (owner / manager). */
         waitingOn: (r.requiredRole ?? 'unrouted') as AwaitingRouting,
@@ -733,7 +736,7 @@ async function loadDecisionRows(tx: Database, ctx: Ctx, ids: readonly string[]):
   if (found.length !== new Set(ids).size) throw new TRPCError({ code: 'NOT_FOUND', message: 'discrepancy not found' });
   const tctx = { ...ctx, db: tx };
   for (const r of found) await assertCanAct(tctx, r);
-  const amounts = await claimsByRow(tx, rid, found);
+  const { amounts } = await claimsByRow(tx, rid, found);
   return new Map(
     found.map((r) => {
       const a = amounts.get(r.id);
@@ -1165,22 +1168,24 @@ async function claimsByRow(
   db: import('@restomatch/db').Database,
   restaurantId: string,
   rows: ReadonlyArray<{ id: string; invoiceId: string | null }>,
-): Promise<Map<string, { amount: number; basis: VatBasis }>> {
+): Promise<{ amounts: Map<string, { amount: number; basis: VatBasis }>; claimed: Set<string> }> {
   const out = new Map<string, { amount: number; basis: VatBasis }>();
+  const claimed = new Set<string>();
   const invoiceIds = [...new Set(rows.map((r) => r.invoiceId).filter((v): v is string => !!v))];
-  if (invoiceIds.length === 0) return out;
+  if (invoiceIds.length === 0) return { amounts: out, claimed };
   // G-14 Q3: the invoices' leaks from the charts batch (the same lines, cap, pending-link
   // rule and `tolerated` flag as the tile, the letters and the pay run) — so a tolerance row
   // the engine auto-approved (owner M7: waived) never takes cap from the open rows.
   const byInvoice = await computeInvoicesLeak(db, restaurantId, invoiceIds);
   const wanted = new Set(rows.map((r) => r.id));
   for (const inv of byInvoice.values()) {
+    for (const l of inv.lines) if (l.ledger?.liveClaim && wanted.has(l.discrepancyId)) claimed.add(l.discrepancyId);
     for (const c of claimableLines(inv)) {
       // "To decide" is the undecided ₪ only — a row holding a live claim is already claimed (G-14 Q3).
       if (c.undecided && wanted.has(c.line.discrepancyId)) out.set(c.line.discrepancyId, { amount: c.amount, basis: c.basis });
     }
   }
-  return out;
+  return { amounts: out, claimed };
 }
 
 /**

@@ -44,6 +44,7 @@ export const en: Shape<typeof he> = {
     colStatus: 'Status and answer due',
     colActions: 'Next step',
     ofClaimed: 'of {amount}',
+    cappedAway: 'of {amount} (invoice cap reached)',
     creditedAmount: 'credited {amount}',
     groupOpen: '{amount} open',
     tab: {

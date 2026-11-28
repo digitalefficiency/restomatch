@@ -33,6 +33,21 @@ export const ALL_CLAIMS = 5000;
 export const AWAITING: readonly RecoveryStatus[] = ['claimed', 'letter_sent', 'acknowledged'];
 export const CLOSED: readonly RecoveryStatus[] = ['recovered', 'written_off'];
 /** Moves that need a deliberate confirm (they end the claim): never a deferred one-tap. */
+/**
+ * G-14 Q3 R5-4 · an open claim the invoice cap leaves at ₪0: its capped share (cappedAgorot, the
+ * leak ledger's allocator) is below its stored amount and nothing is left to ask. It shows "₪0 ·
+ * of ₪X (cap reached)", never its stored ₪, is not "to send" and gets no step button — and it is
+ * never auto-written off. Twin of packages/api recovery/service isCappedAway.
+ */
+export function isCappedAway(c: {
+  status: RecoveryStatus;
+  outstandingAgorot: number;
+  amountAgorot: number;
+  cappedAgorot?: number;
+}): boolean {
+  return !CLOSED.includes(c.status) && c.outstandingAgorot <= 0 && (c.cappedAgorot ?? c.amountAgorot) < c.amountAgorot;
+}
+
 export const CONFIRMED_MOVES: readonly RecoveryStatus[] = ['written_off', 'recovered'];
 
 /** The one primary step per status. `credit` = open the credit-note form (not a bare status flip). */

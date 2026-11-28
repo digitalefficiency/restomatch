@@ -88,9 +88,14 @@ export async function findOverdue(
       AND ${awaitingChaseSql(now, sql`tz.tz`, opts)}
     ORDER BY waiting DESC, c.id
   `);
-  const rows = (Array.isArray(res) ? res : ((res as { rows?: unknown[] }).rows ?? [])) as Array<Record<string, unknown>>;
+  const stored = (Array.isArray(res) ? res : ((res as { rows?: unknown[] }).rows ?? [])) as Array<Record<string, unknown>>;
+  // The SQL picks claims with a stored balance; a claim is chased only while it OWES something on
+  // the one basis (its capped share less credited, G-14 Q3 R5-1) — the TS twin isAwaitingChase's
+  // `outstandingAgorot > 0` over the same owed ₪, so the digest = the desk banner.
+  const owedAll = await owedAgorot(db, restaurantId, stored as never);
+  const rows = stored.filter((_, k) => owedAll[k]! > 0);
+  const owedOf = owedAll.filter((x) => x > 0);
   const groups = new Map<string, OverdueSupplier>();
-  const owedOf = await owedAgorot(db, restaurantId, rows as never);
   for (const [k, r] of rows.entries()) {
     const kind = chaseKindOf(String(r.status));
     const key = `${String(r.supplier_id ?? r.supplier_name)}:${kind}`;
@@ -364,7 +369,10 @@ export async function supplierReminderDraft(
       AND ${awaitingChaseSql(now, sql`tz.tz`, { chaseAcknowledged: options.chaseAcknowledged })}
     ORDER BY waiting DESC, c.id
   `);
-  const rows = (Array.isArray(res) ? res : ((res as { rows?: unknown[] }).rows ?? [])) as Array<Record<string, unknown>>;
+  const stored = (Array.isArray(res) ? res : ((res as { rows?: unknown[] }).rows ?? [])) as Array<Record<string, unknown>>;
+  // Only claims that still owe on the one basis (capped share less credited; R5-1), in order.
+  const owedAll = await owedAgorot(db, restaurantId, stored as never);
+  const rows = stored.filter((_, k) => owedAll[k]! > 0);
   return {
     supplierId: s.id,
     supplierName: s.name,
@@ -372,7 +380,7 @@ export async function supplierReminderDraft(
     whatsapp: waPhoneE164(s.whatsapp),
     email: validEmail(s.email),
     count: rows.length,
-    outstandingAgorot: (await owedAgorot(db, restaurantId, rows as never)).reduce((a, x) => a + x, 0),
+    outstandingAgorot: owedAll.reduce((a, x) => a + (x > 0 ? x : 0), 0),
     oldestDays: rows.length ? Number(rows[0]!.waiting) : 0,
     oldestSentAt: rows.length ? new Date(rows[0]!.sent_at as string | Date).toISOString() : null,
     claimIds: rows.map((r) => String(r.id)),
