@@ -1176,7 +1176,8 @@ async function claimsByRow(
   const wanted = new Set(rows.map((r) => r.id));
   for (const inv of byInvoice.values()) {
     for (const c of claimableLines(inv)) {
-      if (wanted.has(c.line.discrepancyId)) out.set(c.line.discrepancyId, { amount: c.amount, basis: c.basis });
+      // "To decide" is the undecided ₪ only — a row holding a live claim is already claimed (G-14 Q3).
+      if (c.undecided && wanted.has(c.line.discrepancyId)) out.set(c.line.discrepancyId, { amount: c.amount, basis: c.basis });
     }
   }
   return out;

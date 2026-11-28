@@ -337,7 +337,13 @@ export default async function LeakReportPage({
                   {t('report.resolvedNote', { amount: ils(resolvedIls), items: resolvedItems })}
                 </p>
               ) : null}
-              {/* G-14 Q3: the status tiles are the capped ledger states (found = the hero) — no cap note here; the by-type note stays. */}
+              {/* G-14 Q3: the status tiles are the capped ledger states, so found = the hero unless a claim
+                  holds less than its gap (or a gap is outside the ledger): then say by how much, never hide it. */}
+              {report.ledgerDriftAgorot !== 0 ? (
+                <p className="mt-1 text-xs text-muted" data-testid="report-drift-note" data-agorot={report.ledgerDriftAgorot}>
+                  {t('report.driftNote', { amount: ils(Math.abs(report.ledgerDriftAgorot) / 100) })}
+                </p>
+              ) : null}
             </section>
 
             {/* By type */}

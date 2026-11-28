@@ -106,7 +106,6 @@ export async function computeLeakReport(
   // Mid-month noon UTC is inside the same local month in every real timezone,
   // so the hero's tz-aware month bounds resolve to exactly this month.
   const anchor = new Date(Date.UTC(year, mm - 1, 15, 12, 0, 0));
-  const hero = await computeLeakHero(db, restaurantId, { now: anchor });
   // G-14 Q3: the open / claimed / waived ₪ and line counts are the money states of the hero's own
   // capped leak (open + claimed + waived = hero.leakIls to the agora; claims take the cap first).
   const view = { period: 'this_month' as const, now: anchor };
@@ -115,6 +114,8 @@ export async function computeLeakReport(
     heroLeakByInvoice(db, restaurantId, view),
   ]);
   const partition = partitionOf(ledger, heroByInvoice);
+  // One ledger pass: the hero's "recovered" is this partition's claimed ₪ (same month view).
+  const hero = await computeLeakHero(db, restaurantId, { now: anchor, claimedAgorot: claimedAgorotOf(partition) });
   const claimStates = new Set<string>(CLAIM_STATES);
   const claimedRows = ledger.filter((r) => claimStates.has(r.moneyState) && r.cappedAgorot - r.writtenOffAgorot > 0);
   const counts = {

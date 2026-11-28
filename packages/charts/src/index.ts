@@ -25,6 +25,7 @@ export {
   monthInvoicesCte,
   type LeakBreakdownInvoice,
   type LeakBreakdownLine,
+  type LineLedger,
   type LeakExpectedSource,
   type LeakHero,
   type LeakHeroOptions,

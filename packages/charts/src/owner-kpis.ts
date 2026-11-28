@@ -13,8 +13,7 @@ import {
   sql,
   type Database,
 } from '@restomatch/db';
-import { effectSql } from './decisions';
-import { LEAK_FILTER } from './leak-views';
+import { claimedAgorotOf, computeLeakPartition } from './leak-ledger';
 
 export interface OwnerKpis {
   monthPotentialLossIls: number;
@@ -84,18 +83,14 @@ export async function computeOwnerKpis(
       ),
     );
 
-  // 2. Savings captured — this month's findings decided as a claim (accepted / resolved).
-  //    G-14 Q3: the same shekel as every other ₪ figure — leak lines only (LEAK_FILTER), |Δ|
-  //    like the hero, and the decision table's 'claim' effect, so a tolerance row the engine
-  //    auto-approved (owner M7: waived) is never "captured". This subsumes G-15 Q8 (#357):
-  //    the routing engine's auto-accepts (non-leak-acknowledge / minor-info) always carry a
-  //    rule_id, so they are 'tolerated' → 'waive' (and are non-leak / info rows anyway).
-  const savings = (await db.execute(sql`
-    SELECT COALESCE(SUM(ABS(d.delta_amount)) FILTER (WHERE ${LEAK_FILTER} AND ${effectSql()} = 'claim'), 0) AS sum
-    FROM discrepancies d
-    WHERE d.restaurant_id = ${restaurantId}
-      AND d.created_at >= ${startOfMonth.toISOString()}::timestamptz
-  `)) as unknown as Array<{ sum: string | number | null }>;
+  // 2. Savings captured — G-14 Q3: THE one "claimed" basis, the hero's own figure: the leak
+  //    ledger's claim money states (to_offset … recovered) for this month (invoice date, Israel
+  //    month — the hero's period), capped per invoice, a live claim at its own amount, a
+  //    partial write-off counting only what came back. So a tolerance row the engine auto-approved
+  //    (owner M7: waived) and the routing engine's auto-accepts (G-15 Q8, #357: they carry a
+  //    rule_id → 'tolerated' → waive; and are non-leak / info rows anyway) are never "captured".
+  //    savings == computeLeakHero().recoveredIls (pinned in owner-kpis.test.ts).
+  const savingsAgorot = claimedAgorotOf(await computeLeakPartition(db, restaurantId, { period: 'this_month', now }));
 
   // 3. Pending approvals — open or escalated, any severity above info, minus
   //    the ₪0 QTY_SHORT twin of a short delivery billed in full (nothing to decide).
@@ -133,7 +128,7 @@ export async function computeOwnerKpis(
 
   return {
     monthPotentialLossIls: Number(potentialLoss[0]?.sum ?? 0),
-    monthSavingsCapturedIls: Number(savings[0]?.sum ?? 0),
+    monthSavingsCapturedIls: savingsAgorot / 100,
     pendingApprovalsCount: Number(pending[0]?.c ?? 0),
     weekCleanMatchPct,
   };

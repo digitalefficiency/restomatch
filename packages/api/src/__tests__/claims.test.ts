@@ -148,25 +148,37 @@ describe('W2-03 claims rule — a paid invoice keeps its claims', () => {
     expect(sumClaims(paid)).toBe(40);
   });
 
-  it('claimedIds skips a line that already holds a claim, and frees the cap', () => {
+  it('G-14 Q3: a persisted line reads the ledger allocation — a live claim is "claimed" at what is outstanding, never undecided', () => {
+    const led = (tier: 1 | 2 | 3, effect: 'claim' | 'waive' | 'undecided', cappedAgorot: number, claim?: { status: 'claimed' | 'credited' | 'written_off' | 'disputed'; amount: number; credited?: number }) => ({
+      tier,
+      effect,
+      cappedAgorot,
+      claimStatus: claim?.status ?? null,
+      claimAmountAgorot: claim?.amount ?? null,
+      creditedAgorot: claim?.credited ?? 0,
+      liveClaim: claim != null && !(claim.status === 'written_off' && (claim.credited ?? 0) === 0),
+    });
     const lines = [
-      line({ discrepancyId: 'a', resolutionStatus: 'accepted', deltaAmount: 30 }),
-      line({ discrepancyId: 'b', resolutionStatus: 'accepted', deltaAmount: 30 }),
+      // accepted ₪10 holding a live ₪3 claim; a disputed ₪6 claim on a reopened (open) row
+      line({ discrepancyId: 'a', resolutionStatus: 'accepted', deltaAmount: 10, ledger: led(1, 'claim', 300, { status: 'claimed', amount: 300 }) }),
+      line({ discrepancyId: 'd', resolutionStatus: 'open', deltaAmount: 6, ledger: led(1, 'undecided', 600, { status: 'disputed', amount: 600 }) }),
+      // a credited claim with ₪1 back; a written-off one with ₪2 back (nothing left to ask)
+      line({ discrepancyId: 'c', resolutionStatus: 'resolved', deltaAmount: 5, ledger: led(1, 'claim', 500, { status: 'credited', amount: 500, credited: 100 }) }),
+      line({ discrepancyId: 'w', resolutionStatus: 'accepted', deltaAmount: 4, ledger: led(1, 'claim', 400, { status: 'written_off', amount: 400, credited: 200 }) }),
+      // rejected (waived); open, with what the cap left
+      line({ discrepancyId: 'r', resolutionStatus: 'rejected', deltaAmount: 7, ledger: led(2, 'waive', 700) }),
+      line({ discrepancyId: 'o', resolutionStatus: 'open', deltaAmount: 9, ledger: led(3, 'undecided', 250) }),
+      // outside the ledger (not counting)
+      line({ discrepancyId: 'x', resolutionStatus: 'open', deltaAmount: 9, countsAsLeak: false, ledger: null }),
     ];
-    const inv = invoice({ lines, leakIls: 40 });
-    expect(claimableLines(inv).map((c) => [c.line.discrepancyId, c.amount])).toEqual([
-      ['a', 30],
-      ['b', 10],
+    // leakIls is ignored for persisted lines: the allocator already capped every line.
+    const out = claimableLines(invoice({ lines, leakIls: 1 }));
+    expect(out.map((c) => [c.line.discrepancyId, c.amount, c.undecided, c.claimed])).toEqual([
+      ['a', 3, false, true],
+      ['d', 6, false, true],
+      ['c', 4, false, true],
+      ['o', 2.5, true, false],
     ]);
-    expect(claimableLines(inv, { claimedIds: new Set(['a']) }).map((c) => [c.line.discrepancyId, c.amount])).toEqual([
-      ['b', 30],
-    ]);
-  });
-
-  it('a written-off claim does not skip (the caller leaves it out of claimedIds)', () => {
-    const lines = [line({ discrepancyId: 'a', resolutionStatus: 'accepted', deltaAmount: 30 })];
-    // The written-off claim on 'a' is not in the set ⇒ 'a' is claimable again.
-    expect(claimableLines(invoice({ lines, leakIls: 30 }), { claimedIds: new Set(['zz']) })).toHaveLength(1);
   });
 
   it('the cap is still per invoice, paid or not', () => {

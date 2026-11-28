@@ -171,6 +171,9 @@ export function payRunStatusOf(b: LeakBreakdownInvoice | null): {
 } {
   if (!b) return { status: 'pay', duplicate: false, duplicateIls: 0, claims: [], pendingIls: 0, creditIls: 0 };
   const lines = claimableLines(b);
+  // G-14 Q3: to decide vs credit by the allocator's tier, not by status — a line holding a live
+  // claim credits what is still outstanding on it, whatever its resolution status (one "claimed").
+  const undecidedIds = new Set(lines.filter((c) => c.undecided).map((c) => c.line.discrepancyId));
   const claims = lines.map(({ line, amount, basis }) => ({
     discrepancyId: line.discrepancyId,
     type: line.type,
@@ -188,8 +191,8 @@ export function payRunStatusOf(b: LeakBreakdownInvoice | null): {
   const duplicate = b.lines.some((l) => l.countsAsLeak && isDup(l) && CLAIMABLE_DUP.has(l.resolutionStatus));
   const duplicateIls = sumClaims(claims.filter(isDup));
   const rest = claims.filter((c) => !isDup(c));
-  const pendingIls = sumClaims(rest.filter((c) => OPEN.has(c.resolutionStatus)));
-  const creditIls = sumClaims(rest.filter((c) => !OPEN.has(c.resolutionStatus)));
+  const pendingIls = sumClaims(rest.filter((c) => undecidedIds.has(c.discrepancyId)));
+  const creditIls = sumClaims(rest.filter((c) => !undecidedIds.has(c.discrepancyId)));
   // An open / escalated leak finding holds the invoice, even one whose ₪ the cap already used up —
   // but, like the claimable rule, only a real one: a ₪0 line (the engine's QTY_SHORT "twin" of a
   // billed QTY_OVER) or a non-leak line never keeps an invoice on hold.

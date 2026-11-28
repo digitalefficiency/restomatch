@@ -241,7 +241,10 @@ export async function awaitingDecisionDetail(
     : new Map<string, LeakBreakdownInvoice>();
   const claimAgorot = new Map<string, { agorot: number; basis: VatBasis }>();
   for (const inv of leaks.values()) {
+    // Only the undecided ₪ (the ledger's tier 3) is "to decide": a row holding a live claim is
+    // already claimed (G-14 Q3), even when it was reopened.
     for (const c of claimableLines(inv)) {
+      if (!c.undecided) continue;
       claimAgorot.set(c.line.discrepancyId, { agorot: Math.round(c.amount * 100), basis: c.basis });
     }
   }

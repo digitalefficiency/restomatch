@@ -1,9 +1,9 @@
 import { AWAITING_QUESTION_SQL } from './awaiting-question';
-import { DECISION_KEY_SQL, effectSql } from './decisions';
+import { DECISION_KEY_SQL, effectSql, type ClaimStatus, type Effect } from './decisions';
 import { sql, type Database } from '@restomatch/db';
 import { scanAwaitingCountSql } from './awaiting-count';
 import { LEAK_FILTER, LIVE_DUPLICATE, lineFilter, originalChecked, viewInvoicesSql, type ViewSpec } from './leak-views';
-import { claimedAgorotOf, computeLeakPartition } from './leak-ledger';
+import { claimedAgorotOf, computeLeakPartition, invoiceAllocationSql } from './leak-ledger';
 
 /**
  * The owner's 10-second story: "₪X leaked this month, Y% of spend, Z caught
@@ -63,6 +63,11 @@ export interface LeakHeroOptions {
   now?: Date;
   /** 0 = this month, -1 = last month, … */
   monthOffset?: number;
+  /**
+   * The month's claimed agorot when the caller already has its partition (the leak report):
+   * skips a second ledger pass. Must be claimedAgorotOf(computeLeakPartition(this month)).
+   */
+  claimedAgorot?: number;
 }
 
 /**
@@ -166,7 +171,8 @@ export async function computeLeakHero(
   // G-14 Q3: "recovered" (accepted for a claim) = the leak ledger's claim states for this month —
   // the one basis every "claimed" figure shares (a live claim's persisted amount, claims first).
   const mid = new Date((Date.parse(iso(r.lo)) + Date.parse(iso(r.hi))) / 2);
-  const claimed = claimedAgorotOf(await computeLeakPartition(db, restaurantId, { period: 'this_month', now: mid }));
+  const claimed =
+    options.claimedAgorot ?? claimedAgorotOf(await computeLeakPartition(db, restaurantId, { period: 'this_month', now: mid }));
   return {
     monthStart: iso(r.lo),
     monthEnd: iso(r.hi),
@@ -205,6 +211,15 @@ export interface LeakBreakdownLine {
   /** When the engine found it (ISO). The order key inside a tier (created_at, id) — the leak ledger's. Optional for hand-built lines. */
   createdAt?: string;
   tolerated?: boolean;
+  /**
+   * G-14 Q3 · this line's share of its invoice's cap from THE allocator (leak-ledger
+   * invoiceAllocationSql: live claims first at their claim amount, then decided — claims before
+   * waivers —, then undecided; (created_at, id) inside a tier). Every per-line ₪ (lib/claims
+   * claimableLines: letters, approvals, pay run, Ask, dock slip) reads it, so no screen splits a
+   * cap its own way. null = a persisted line outside the ledger (not counting, or `excluded`);
+   * absent (undefined) = a hand-built line (a ריכוז proposal, a test).
+   */
+  ledger?: LineLedger | null;
   productName: string | null;
   productNameEn: string | null;
   lineDescription: string | null;
@@ -236,6 +251,20 @@ export interface LeakBreakdownLine {
   expectedSource?: LeakExpectedSource | null;
   /** When that basis was set: the PO's date for 'po', the receipt's for 'receipt' (ISO), else null. */
   expectedAsOf?: string | null;
+}
+
+/** The leak ledger's allocation of one line (see LeakBreakdownLine.ledger). Integer agorot. */
+export interface LineLedger {
+  /** 1 holds a live claim · 2 decided · 3 undecided (decisions.allocationTier). */
+  tier: 1 | 2 | 3;
+  effect: Effect;
+  /** The line's share of the invoice cap. */
+  cappedAgorot: number;
+  /** The claim on the line, when there is one (live or not). */
+  claimStatus: ClaimStatus | null;
+  claimAmountAgorot: number | null;
+  creditedAgorot: number;
+  liveClaim: boolean;
 }
 
 export type LeakExpectedSource = 'po' | 'contract' | 'p90' | 'receipt' | 'invoiceTotal' | 'vat';
@@ -357,7 +386,10 @@ async function breakdownLines(
       il.raw_description AS line_desc, il.raw_description_en AS line_desc_en,
       d.tolerance_used, il.qty_billed, COALESCE(il.unit, pl.unit) AS unit, il.unit_price_billed,
       pl.unit_price_expected, pl.unit AS po_unit, po.id AS po_id, po.created_at AS po_at,
-      gr.notes AS receipt_note, gr.received_at AS gr_at
+      gr.notes AS receipt_note, gr.received_at AS gr_at,
+      al.discrepancy_id AS al_id, al.tier AS al_tier, al.effect AS al_effect, al.capped_agorot AS al_capped,
+      al.claim_status AS al_claim_status, al.claim_amount AS al_claim_amount,
+      al.credited_agorot AS al_credited, al.live_claim AS al_live
     FROM discrepancies d
     JOIN match_runs mr ON mr.id = d.match_run_id AND mr.restaurant_id = ${restaurantId}
     LEFT JOIN products p ON p.id = d.product_id AND p.restaurant_id = ${restaurantId}
@@ -366,6 +398,7 @@ async function breakdownLines(
     LEFT JOIN purchase_orders po ON po.id = COALESCE(pl.po_id, mr.po_id) AND po.restaurant_id = ${restaurantId}
     LEFT JOIN gr_lines grl ON grl.id = d.gr_line_id
     LEFT JOIN goods_receipts gr ON gr.id = COALESCE(grl.gr_id, mr.gr_id) AND gr.restaurant_id = ${restaurantId}
+    LEFT JOIN (${invoiceAllocationSql(restaurantId, ids, counts)}) al ON al.discrepancy_id = d.id
     WHERE d.restaurant_id = ${restaurantId}
       AND mr.invoice_id IN (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})
     ORDER BY ABS(d.delta_amount) DESC, d.id
@@ -385,6 +418,7 @@ async function breakdownLines(
       countsAsLeak: Boolean(l.counts),
       tolerated: Boolean(l.tolerated),
       createdAt: l.created_at == null ? undefined : iso(l.created_at),
+      ledger: lineLedgerOf(l),
       productName: (l.product_name as string | null) ?? null,
       productNameEn: (l.product_name_en as string | null) ?? null,
       lineDescription: (l.line_desc as string | null) ?? null,
@@ -501,6 +535,20 @@ function invoiceOf(r: Row, lines: Map<string, LeakBreakdownLine[]>): LeakBreakdo
 }
 
 const numOrNull = (v: unknown): number | null => (v == null ? null : Number(v));
+
+/** The allocator's columns of one breakdown row (al_*), or null when the line is outside the ledger. */
+function lineLedgerOf(l: Row): LineLedger | null {
+  if (l.al_id == null) return null;
+  return {
+    tier: Number(l.al_tier) as 1 | 2 | 3,
+    effect: String(l.al_effect) as Effect,
+    cappedAgorot: Number(l.al_capped ?? 0),
+    claimStatus: (l.al_claim_status as ClaimStatus | null) ?? null,
+    claimAmountAgorot: l.al_claim_amount == null ? null : Number(l.al_claim_amount),
+    creditedAgorot: Number(l.al_credited ?? 0),
+    liveClaim: Boolean(l.al_live),
+  };
+}
 
 /** The W2-09c evidence fields of one breakdown row (raw facts; packages/api verifies the math). */
 function evidenceOf(l: Row) {
