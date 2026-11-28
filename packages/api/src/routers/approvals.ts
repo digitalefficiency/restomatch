@@ -44,8 +44,8 @@ import {
 import { recipientsForRestaurant } from '../notifications/recipients';
 import { enqueueNotification } from '../notifications/outbox';
 import { stripTrailingSlashes } from '../lib/urls';
-import { areaTimeZoneOf, byRoutingOf, gapBasisOf, gapFactsOf, gapRoleOf, type OpenInvoicesSummary } from '../invoices/holding';
-import { DECIDED_PERIODS, type DecidedList } from '../invoices/history';
+import { areaTimeZoneOf, byRoutingOf, gapBasisOf, gapFactsOf, gapRoleOf, openInvoicesOf, type OpenInvoicesSummary } from '../invoices/holding';
+import { DECIDED_PERIODS, loadDecided, type DecidedList } from '../invoices/history';
 import type { Database } from '@restomatch/db';
 
 const ResolutionEnum = z.enum(['accepted', 'rejected', 'escalated']);
@@ -663,10 +663,12 @@ export const approvalsRouter = router({
         ...QueueFilters,
       }),
     )
-    .query(async (): Promise<DecidedList> => {
-      // Contract (slice 0): an empty list.
-      return { rows: [], count: 0, amountAgorot: { excl: 0, incl: 0, vat: 0 } };
-    }),
+    .query(({ ctx, input }): Promise<DecidedList> =>
+      loadDecided(ctx.db, ctx.session, {
+        period: input.period,
+        filters: { types: input.types, severities: input.severities, supplierIds: input.supplierIds, invoiceIds: input.invoiceIds },
+      }),
+    ),
 });
 
 const DECIDED_BY_ACTION: Record<string, string> = {
@@ -1350,7 +1352,7 @@ export async function computeQueueSummary(
     /** INV-00: every open row by the role that decides it, ₪ in integer agorot by VAT basis. */
     byRouting: byRoutingOf(all?.byRole ?? [], role),
     /** INV-00: the invoices with an open gap under these filters, and Σ their totals incl. VAT. */
-    invoices: { count: 0, totalInclVatAgorot: 0 } as OpenInvoicesSummary,
+    invoices: (showOthers ? await openInvoicesOf(db, rid, filters) : { count: 0, totalInclVatAgorot: 0 }) as OpenInvoicesSummary,
     /** INV-00: the restaurant's IANA zone: the calendar the desk's waits and "today" are counted on. */
     timeZone: await areaTimeZoneOf(db, rid),
   };

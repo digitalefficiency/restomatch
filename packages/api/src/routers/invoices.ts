@@ -37,11 +37,17 @@ import {
 } from '../invoices/state';
 import {
   HOLDING_MAX_IDS,
+  PLACE_IDS,
+  decisionsOf,
+  gapFactsOf,
   gapRoleOf,
+  holdingsFor,
+  isPersonDecision,
   isQueueRow,
-  leadingRolesFor,
+  lastDecisionsFor,
+  monthOpenOf,
   placeOf,
-  reasonOfRule,
+  type DecidedGap,
   type DecisionRecord,
   type GapReason,
   type GapRole,
@@ -55,8 +61,18 @@ import {
   gapBasisOf,
 } from '../invoices/holding';
 import type { VatBasis } from '../lib/claims';
-import type { Allocation, PayBy, Payment } from '../invoices/payment';
-import type { InvoiceHistory } from '../invoices/history';
+import {
+  allocationAtRisk,
+  allocationOf,
+  loadPaymentFacts,
+  payByOf,
+  paymentOf,
+  type Allocation,
+  type PaymentFacts,
+  type PayBy,
+  type Payment,
+} from '../invoices/payment';
+import { loadInvoiceHistory, type InvoiceHistory } from '../invoices/history';
 
 /**
  * Invoice register, cockpit and intake (wave 2, W2-02).
@@ -234,31 +250,87 @@ function countTabs(
 }
 
 /**
- * INV-00 · the list rows' new facts. Contract (slice 0): the place from the canonical state
- * and the leading open gap's role; `holding`, `lastDecision`, `payBy`, `places` and
- * `byRouting` empty.
+ * INV-00 · the list rows' new facts, from the area's one definition: `holding`
+ * (`holdingsFor`), `lastDecision` (`lastDecisionsFor`), `allocationMissing` and
+ * `allocationRequestedAt` (the pay run's `vatAtRisk()` call), `payBy` (`computeDueDate`) and
+ * the `place` they put the row in; the places of the month, which partition it; and the
+ * month's open gaps by routing (`open`), from the desk's own ₪ read once for the month.
  */
 async function listRowsOf(
   db: Parameters<typeof invoiceStatesForMonth>[0],
-  session: { restaurantId: string; role: UserRole },
+  session: { restaurantId: string; role: UserRole; userId: string },
   rows: readonly RegisterRow[],
 ): Promise<{ rows: InvoiceListRow[]; places: PlaceSummary[]; allocationMissing: number; open: MonthOpenGaps }> {
-  const placed = rows.filter((r) => r.state !== 'paid' && r.state !== 'in_ocr' && r.state !== 'awaiting_count' && r.state !== 'awaiting_link');
-  const roles = await leadingRolesFor(db, session.restaurantId, session.role, placed.map((r) => r.id));
-  return {
-    rows: rows.map((r) => ({
+  const ids = rows.map((r) => r.id);
+  const month = ids.length ? await monthOpenOf(db, session, ids) : null;
+  const holdings = ids.length ? await holdingsFor(db, session, ids, { agorot: month!.agorot }) : new Map<string, Holding>();
+  const decisions = ids.length ? await lastDecisionsFor(db, session, ids) : new Map<string, DecisionRecord>();
+  const atRisk = ids.length ? await allocationAtRisk(db, session.restaurantId) : new Map<string, { vatAgorot: number; requestedAt: Date | null }>();
+  const facts = ids.length ? await loadPaymentFacts(db, session.restaurantId, ids) : new Map<string, PaymentFacts>();
+  const out: InvoiceListRow[] = rows.map((r) => {
+    const holding = holdings.get(r.id) ?? null;
+    const risk = atRisk.get(r.id);
+    const f = facts.get(r.id);
+    return {
       ...r,
-      holding: null,
-      lastDecision: null,
-      place: placeOf(r.state, roles.get(r.id) ?? null, false),
-      allocationMissing: false,
-      allocationRequestedAt: null,
-      payBy: null,
-    })),
-    places: [],
-    allocationMissing: 0,
-    open: { count: 0, openAgorot: { excl: 0, incl: 0, vat: 0 }, byRouting: [] },
+      holding,
+      lastDecision: decisions.get(r.id) ?? null,
+      place: placeOf(r.state, holding?.role ?? null, risk !== undefined),
+      allocationMissing: risk !== undefined,
+      allocationRequestedAt: risk?.requestedAt ?? null,
+      payBy: f ? payByOf(f.invoiceAt, f.supplierTerms, f.dueDate, f.printedDueDate) : null,
+    };
+  });
+  return {
+    rows: out,
+    places: placesOf(out),
+    allocationMissing: out.filter((r) => r.allocationMissing).length,
+    open: month?.open ?? { count: 0, openAgorot: { excl: 0, incl: 0, vat: 0 }, byRouting: [] },
   };
+}
+
+/** Pure: every place of the month with its sums (zeros included), in the order of PLACE_IDS. */
+export function placesOf(rows: readonly InvoiceListRow[]): PlaceSummary[] {
+  const sev = { block: 0, warn: 1, info: 2 } as const;
+  return PLACE_IDS.map((id) => {
+    const inPlace = rows.filter((r) => r.place === id);
+    const byState = Object.fromEntries(INVOICE_STATES.map((st) => [st, 0])) as Record<InvoiceState, number>;
+    const openAgorot = { excl: 0, incl: 0, vat: 0 };
+    let openCount = 0;
+    let worst: PlaceSummary['worstSeverity'] = null;
+    for (const r of inPlace) {
+      byState[r.state] += 1;
+      if (r.holding) {
+        openCount += r.holding.openCount;
+        openAgorot.excl += r.holding.openAgorot.excl;
+        openAgorot.incl += r.holding.openAgorot.incl;
+        openAgorot.vat += r.holding.openAgorot.vat;
+        if (worst == null || sev[r.holding.worstSeverity] < sev[worst]) worst = r.holding.worstSeverity;
+      }
+    }
+    return {
+      id,
+      count: inPlace.length,
+      openCount,
+      totalInclVatAgorot: inPlace.reduce((n, r) => n + r.totalInclVatAgorot, 0),
+      openAgorot,
+      worstSeverity: worst,
+      consolidatedCount: inPlace.filter((r) => r.consolidated).length,
+      allocationRequestedCount: inPlace.filter((r) => r.allocationRequestedAt != null).length,
+      byState,
+    };
+  });
+}
+
+/** The badge's count of `allocationMissing` (the pay run's rule), without the rows' other reads. */
+async function allocationMissingCount(
+  db: Parameters<typeof invoiceStatesForMonth>[0],
+  restaurantId: string,
+  rows: readonly RegisterRow[],
+): Promise<number> {
+  if (rows.length === 0) return 0;
+  const atRisk = await allocationAtRisk(db, restaurantId);
+  return rows.filter((r) => atRisk.has(r.id)).length;
 }
 
 const MonthInput = z.object({ monthOffset: z.number().int().min(-24).max(0).default(0) }).default({});
@@ -364,12 +436,12 @@ export const invoicesRouter = router({
   counts: can('money.view')
     .input(MonthInput)
     .query(async ({ ctx, input }) => {
-      const area = await listRowsOf(
-        ctx.db,
-        ctx.session,
-        await registerRows(ctx.db, ctx.session.restaurantId, input.monthOffset),
+      const rows = await registerRows(ctx.db, ctx.session.restaurantId, input.monthOffset);
+      return countTabs(
+        rows,
+        await intakeCount(ctx.db, ctx.session.restaurantId),
+        await allocationMissingCount(ctx.db, ctx.session.restaurantId, rows),
       );
-      return countTabs(area.rows, await intakeCount(ctx.db, ctx.session.restaurantId), area.allocationMissing);
     }),
 
   /**
@@ -416,6 +488,9 @@ export const invoicesRouter = router({
         poCustomerRef: purchaseOrders.customerRef,
         poVat: purchaseOrders.vatRate,
         poDate: sql<Date | null>`COALESCE(${purchaseOrders.expectedDeliveryAt}, ${purchaseOrders.createdAt})`,
+        poOrderDate: sql<Date | null>`COALESCE(${purchaseOrders.sentAt}, ${purchaseOrders.createdAt})`.mapWith(
+          (v: unknown) => (v == null ? null : new Date(String(v))),
+        ),
         grReceivedAt: goodsReceipts.receivedAt,
       })
       .from(matchRuns)
@@ -455,10 +530,13 @@ export const invoicesRouter = router({
             deltaAmount: discrepancies.deltaAmount,
             toleranceUsed: discrepancies.toleranceUsed,
             resolutionStatus: discrepancies.resolutionStatus,
-            // INV-00: the routing facts of each finding (no ₪, no name).
+            // INV-00: the routing and decision facts of each finding. `resolvedBy` is compared
+            // with the caller server-side (`byYou`) and never returned.
             requiresRole: discrepancies.requiresRole,
             ruleId: discrepancies.ruleId,
             createdAt: discrepancies.createdAt,
+            resolvedAt: discrepancies.resolvedAt,
+            resolvedBy: discrepancies.resolvedBy,
           })
           .from(discrepancies)
           .where(and(eq(discrepancies.matchRunId, run.id), eq(discrepancies.restaurantId, rid)))
@@ -499,6 +577,33 @@ export const invoicesRouter = router({
     // The source of an "expected" figure: the PO price (a run with a PO) or the receipt count.
     const expectedSource = (type: string) =>
       /PRICE|CONTRACT/.test(type) ? 'po_price' : /QTY|SHORT|OVER|MISSING|UNORDERED|RECEIV/.test(type) ? 'receipt' : 'invoice';
+    // INV-00 · one definition with the list and the desk: the proven reason and the pass-on of
+    // each undecided gap (`gapFactsOf`, as `approvals.myQueue`), the decision of each decided one
+    // (`decisionsOf`), and the payment block (`invoices/payment.ts`). Nothing is read without
+    // money.view: the receiver reads this procedure.
+    const queueRows = money && run ? findings.filter(isQueueRow) : [];
+    const gapFacts =
+      queueRows.length > 0
+        ? await gapFactsOf(
+            ctx.db,
+            rid,
+            queueRows.map((f) => ({ ...f, type: String(f.type), severity: String(f.severity), resolutionStatus: String(f.resolutionStatus), matchRunId: run!.id })),
+          )
+        : null;
+    const decidedRows: DecidedGap[] = money
+      ? findings
+          .filter((f) => isPersonDecision({ status: String(f.resolutionStatus), resolvedAt: f.resolvedAt }))
+          .map((f) => ({
+            id: f.id,
+            invoiceId: inv.id,
+            type: String(f.type),
+            status: String(f.resolutionStatus),
+            resolvedAt: f.resolvedAt!,
+            resolvedBy: f.resolvedBy,
+            deltaAmount: f.deltaAmount,
+          }))
+      : [];
+    const decisions = decidedRows.length > 0 ? await decisionsOf(ctx.db, ctx.session, decidedRows) : new Map<string, DecisionRecord>();
     const findingOut = (f: (typeof findings)[number]) => {
       const priceLike = /PRICE|TOTAL|VAT|CONTRACT/.test(f.type);
       return {
@@ -517,11 +622,11 @@ export const invoicesRouter = router({
         // INV-00 · an undecided gap (one of the approvals queue's rows: open or escalated, not
         // the ₪0 twin): the role it waits for, its rule and since when. A decided one: the
         // decision. All null without money.view (the receiver reads this procedure).
-        routing: (money && isQueueRow(f) ? gapRoleOf(f.requiresRole) : null) as GapRole | null,
-        reason: (money && isQueueRow(f) ? reasonOfRule(f.ruleId, f.type) : null) as GapReason | null,
-        since: (money && isQueueRow(f) ? f.createdAt : null) as Date | null,
-        passedOn: null as PassedOn | null,
-        decision: null as DecisionRecord | null,
+        routing: (gapFacts && isQueueRow(f) ? gapRoleOf(f.requiresRole) : null) as GapRole | null,
+        reason: (gapFacts && isQueueRow(f) ? gapFacts.reasonOf(f) : null) as GapReason | null,
+        since: (gapFacts && isQueueRow(f) ? (gapFacts.passedOnOf(f.id)?.at ?? f.createdAt) : null) as Date | null,
+        passedOn: (gapFacts && isQueueRow(f) ? gapFacts.passedOnOf(f.id) : null) as PassedOn | null,
+        decision: (decisions.get(f.id) ?? null) as DecisionRecord | null,
       };
     };
 
@@ -535,6 +640,12 @@ export const invoicesRouter = router({
     };
     const dup = readDuplicateOf(inv.ocrPayload);
     const vatRate = num(run?.poVat ?? null) ?? num(inv.restaurantVat);
+    const holding = money ? ((await holdingsFor(ctx.db, ctx.session, [inv.id])).get(inv.id) ?? null) : null;
+    const facts = money ? (await loadPaymentFacts(ctx.db, rid, [inv.id])).get(inv.id) : undefined;
+    // The pay run's own call (`vatAtRisk()` over the restaurant, as `payRun.list` reads it), so
+    // the list, this screen and the pay run agree on the same invoice.
+    const risk = facts ? (await allocationAtRisk(ctx.db, rid)).get(inv.id) : undefined;
+    const missingVatAgorot = risk?.vatAgorot ?? null;
     const types = new Set(findings.map((f) => f.type));
     return {
       id: inv.id,
@@ -605,22 +716,26 @@ export const invoicesRouter = router({
         : null,
       // ── INV-00 · every new field is null without money.view (the receiver reads this). ──
       /** With whom its open gaps are, since when and why (as on the list row); null when none is open. */
-      holding: null as Holding | null,
+      holding: holding as Holding | null,
       /** The last decision a person took on one of its gaps (as on the list row); null when none. */
-      lastDecision: null as DecisionRecord | null,
+      lastDecision: (money ? ((await lastDecisionsFor(ctx.db, ctx.session, [inv.id])).get(inv.id) ?? null) : null) as DecisionRecord | null,
       /** The rows the approvals desk shows for this invoice (`openCount` also counts the ₪0 twin and keeps its value). */
-      queueOpenCount: null as number | null,
+      queueOpenCount: (money ? findings.filter(isQueueRow).length : null) as number | null,
       /** Held, payable, paid or being read, in the pay run's terms, with the reasons. */
-      payment: null as Payment | null,
+      payment: (state && facts
+        ? paymentOf(state, facts, ctx.session.role, missingVatAgorot == null ? null : missingVatAgorot / 100)
+        : null) as Payment | null,
       /** The allocation number: required, the number, valid, missing (the pay run's rule), the VAT at risk. */
-      allocation: null as Allocation | null,
+      allocation: (facts
+        ? allocationOf(facts, allocationRequiredFor(inv.invoiceDate, inv.totalExclVat), missingVatAgorot, risk?.requestedAt ?? null)
+        : null) as Allocation | null,
       /** The pay run's date (`computeDueDate`), or null when unknown. */
-      payBy: null as PayBy | null,
+      payBy: (facts ? payByOf(facts.invoiceAt, facts.supplierTerms, facts.dueDate, facts.printedDueDate) : null) as PayBy | null,
       /**
        * The order's date as the approvals desk shows it (`COALESCE(purchase_orders.sent_at,
        * created_at)`, the queue row's `poDate`), so both screens print the same date.
        */
-      orderSentAt: null as Date | null,
+      orderSentAt: (money ? (run?.poOrderDate ?? null) : null) as Date | null,
       /**
        * The restaurant's IANA zone (`restaurants.timezone`): the calendar every wait and "today"
        * of this screen is counted on. Not money: every reader gets it.
@@ -704,9 +819,28 @@ export const invoicesRouter = router({
    */
   holding: can('money.view')
     .input(z.object({ invoiceIds: z.array(z.string().uuid()).max(HOLDING_MAX_IDS) }))
-    .query(async (): Promise<InvoiceHoldingEntry[]> => {
-      // Contract (slice 0): no entry yet.
-      return [];
+    .query(async ({ ctx, input }): Promise<InvoiceHoldingEntry[]> => {
+      const asked = [...new Set(input.invoiceIds)];
+      if (asked.length === 0) return [];
+      const own = await ctx.db
+        .select({ id: invoices.id, ocrPayload: invoices.ocrPayload })
+        .from(invoices)
+        .where(and(eq(invoices.restaurantId, ctx.session.restaurantId), inArray(invoices.id, asked)));
+      if (own.length === 0) return [];
+      const ids = own.map((r) => r.id);
+      const holdings = await holdingsFor(ctx.db, ctx.session, ids);
+      const decisions = await lastDecisionsFor(ctx.db, ctx.session, ids);
+      const timeZone = await areaTimeZone(ctx.db, ctx.session.restaurantId);
+      const byId = new Map(own.map((r) => [r.id, r]));
+      return asked
+        .filter((id) => byId.has(id))
+        .map((id) => ({
+          invoiceId: id,
+          holding: holdings.get(id) ?? null,
+          lastDecision: decisions.get(id) ?? null,
+          consolidated: readConsolidatedRaw(byId.get(id)!.ocrPayload) !== null,
+          timeZone,
+        }));
     }),
 
   /**
@@ -723,8 +857,9 @@ export const invoicesRouter = router({
         .where(and(eq(invoices.id, input.invoiceId), eq(invoices.restaurantId, ctx.session.restaurantId)))
         .limit(1);
       if (!own) throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
-      // Contract (slice 0): an empty story.
-      return { events: [], rematched: false };
+      const story = await loadInvoiceHistory(ctx.db, ctx.session, own.id);
+      if (!story) throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
+      return story;
     }),
 });
 

@@ -1,8 +1,25 @@
-import { and, discrepancies, eq, inArray, matchRuns, restaurants, type Database, type UserRole } from '@restomatch/db';
+import {
+  and,
+  auditLog,
+  desc,
+  discrepancies,
+  eq,
+  inArray,
+  invoices,
+  isNotNull,
+  matchRuns,
+  restaurants,
+  type Database,
+  type UserRole,
+} from '@restomatch/db';
 import { notZeroShortTwin } from '@restomatch/charts';
+import { resolveTolerances } from '@restomatch/matching';
+import { awaitingDecisionDetail } from '../approvals/awaiting';
+import { buildRules, evaluateApproval, resolveApprovalThresholds, type ApprovalThresholds } from '../approvals/engine';
 import { vatBasisOf, type VatBasis } from '../lib/claims';
 import type { WAIVE_REASON_CODES } from '../routers/approvals';
 import { canActOn } from '../lib/roles';
+import { localDateKeyInTz } from '../lib/time';
 import { discrepancyDecidableSql } from '../lifecycle/predicates';
 import type { InvoiceState } from './state';
 
@@ -292,16 +309,30 @@ export function gapBasisOf(type: string): VatBasis {
 // The open gaps of a set of invoices: the approvals queue's row set.
 // ───────────────────────────────────────────────────────────────────────────────
 
-/** One open gap as the readers of this module see it. */
-export interface OpenGap {
-  id: string;
-  invoiceId: string;
+/** The stored facts a gap's reason is proven on (see `provenReason`). */
+export interface ReasonFacts {
+  ruleId: string | null;
   type: string;
   severity: string;
+  deltaAmount: string | null;
+  expectedValue: string | null;
+  actualValue: string | null;
+  toleranceUsed: string | null;
+  /** `match_runs.total_discrepancy_amount` of the gap's run (the engine's cumulative ₪). */
+  runTotal: string | null;
+  /** `invoices.total_incl_vat`. */
+  invoiceTotal: string | null;
+  /** The run has an order. */
+  runHasPo: boolean;
+}
+
+/** One open gap as the readers of this module see it. */
+export interface OpenGap extends ReasonFacts {
+  id: string;
+  invoiceId: string;
   status: string;
   /** `requires_role` as stored (null = unrouted). */
   routing: UserRole | null;
-  ruleId: string | null;
   createdAt: Date;
 }
 
@@ -333,9 +364,17 @@ export async function loadOpenGaps(
         routing: discrepancies.requiresRole,
         ruleId: discrepancies.ruleId,
         createdAt: discrepancies.createdAt,
+        deltaAmount: discrepancies.deltaAmount,
+        expectedValue: discrepancies.expectedValue,
+        actualValue: discrepancies.actualValue,
+        toleranceUsed: discrepancies.toleranceUsed,
+        runTotal: matchRuns.totalDiscrepancyAmount,
+        runPoId: matchRuns.poId,
+        invoiceTotal: invoices.totalInclVat,
       })
       .from(discrepancies)
       .innerJoin(matchRuns, and(eq(matchRuns.id, discrepancies.matchRunId), eq(matchRuns.restaurantId, restaurantId)))
+      .leftJoin(invoices, and(eq(invoices.id, matchRuns.invoiceId), eq(invoices.restaurantId, restaurantId)))
       .where(
         and(
           eq(discrepancies.restaurantId, restaurantId),
@@ -344,9 +383,16 @@ export async function loadOpenGaps(
           inArray(matchRuns.invoiceId, chunk),
         ),
       );
-    for (const r of rows) {
+    for (const { runPoId, ...r } of rows) {
       if (!r.invoiceId) continue;
-      out.push({ ...r, invoiceId: r.invoiceId, status: String(r.status), type: String(r.type), severity: String(r.severity) });
+      out.push({
+        ...r,
+        invoiceId: r.invoiceId,
+        status: String(r.status),
+        type: String(r.type),
+        severity: String(r.severity),
+        runHasPo: runPoId != null,
+      });
     }
   }
   return out;
@@ -565,14 +611,588 @@ export interface GapFacts {
   passedOnOf(id: string): PassedOn | null;
 }
 
+// ───────────────────────────────────────────────────────────────────────────────
+// Slice 1 · who, since when, why.
+// ───────────────────────────────────────────────────────────────────────────────
+
+/** The restaurant's routing settings in force today and its zone (the resolvers settings.effective reads). */
+export interface AreaSettings {
+  thresholds: Required<ApprovalThresholds>;
+  /** `tolerances.blockPricePercent`, a fraction (0.1 = 10%). */
+  blockPricePercent: number;
+  /** The restaurant's IANA zone: whole days and "today" are counted on its calendar. */
+  timeZone: string;
+}
+
+/** The settings of `restaurantId` in force today (the same resolvers as `settings.effective`). */
+export async function loadAreaSettings(db: Database, restaurantId: string): Promise<AreaSettings> {
+  const [r] = await db
+    .select({ settings: restaurants.settings, timeZone: restaurants.timezone })
+    .from(restaurants)
+    .where(eq(restaurants.id, restaurantId))
+    .limit(1);
+  const settings = (r?.settings ?? {}) as {
+    tolerances?: Parameters<typeof resolveTolerances>[0];
+    approvalThresholds?: Parameters<typeof resolveApprovalThresholds>[0];
+  };
+  return {
+    thresholds: resolveApprovalThresholds(settings.approvalThresholds),
+    blockPricePercent: resolveTolerances(settings.tolerances).blockPricePercent,
+    timeZone: r?.timeZone?.trim() || DEFAULT_AREA_TIME_ZONE,
+  };
+}
+
+const agorotOf = (v: string | number | null | undefined) => Math.round(Number(v ?? 0) * 100);
+
 /**
- * The reason and the pass-on of each given queue row. Contract (slice 0): the stored rule's
- * kind, no number proven yet, no pass-on yet.
+ * A price gap raised by the supplier's 90th percentile (packages/matching `evaluateBaseline`):
+ * its stored `expected` is the p90, not the reference price its severity was decided on, so
+ * its stored percent proves nothing.
+ */
+function isBaselineGap(toleranceUsed: string | null): boolean {
+  return (toleranceUsed ?? '').startsWith('actual exceeds historical p90');
+}
+
+/**
+ * Pure: a gap's reason, with the numbers it may carry. A number is carried only when it is
+ * provably the one that routed the gap, with today's settings:
+ *  - `price_rise` (severity-block on a PRICE_HIGHER): today's `blockPricePercent`, when the
+ *    gap's own rise (stored actual over expected unit price, exact at the stored 4 decimals)
+ *    is at or above it. The tolerance is the matching engine's, not an approval threshold, so
+ *    running the approval rules again cannot prove it.
+ *  - `medium` (cumulative-medium): today's ₪ band, when running the engine's pure rules with
+ *    today's thresholds on the stored facts (the run's cumulative ₪, the invoice total) returns
+ *    `cumulative-medium` again AND the cumulative ₪ is inside the band (its amount clause):
+ *    a gap the percentage band routed prints no ₪.
+ * Every other kind carries no number.
+ */
+export function provenReason(f: ReasonFacts, settings: AreaSettings): GapReason {
+  const base = reasonOfRule(f.ruleId, f.type);
+  if (base.kind === 'price_rise') {
+    if (f.severity !== 'block' || isBaselineGap(f.toleranceUsed)) return base;
+    if (f.expectedValue == null || f.actualValue == null) return base;
+    const expected = Math.round(Number(f.expectedValue) * 10_000);
+    const actual = Math.round(Number(f.actualValue) * 10_000);
+    if (!Number.isFinite(expected) || !Number.isFinite(actual) || expected <= 0) return base;
+    const p = Math.round(settings.blockPricePercent * 1_000_000);
+    return (actual - expected) * 1_000_000 >= p * expected ? { ...base, blockPricePercent: settings.blockPricePercent } : base;
+  }
+  if (base.kind === 'medium') {
+    if (f.runTotal == null || f.invoiceTotal == null) return base;
+    const total = Number(f.runTotal);
+    const invoiceTotal = Number(f.invoiceTotal);
+    if (!Number.isFinite(total) || !Number.isFinite(invoiceTotal)) return base;
+    const again = evaluateApproval(
+      {
+        discrepancy: {
+          type: f.type as Parameters<typeof evaluateApproval>[0]['discrepancy']['type'],
+          severity: f.severity as Parameters<typeof evaluateApproval>[0]['discrepancy']['severity'],
+          deltaAmount: Number(f.deltaAmount ?? 0),
+        },
+        matchRun: { totalDiscrepancyAmount: total, totalInvoiceAmount: invoiceTotal, poExists: f.runHasPo },
+      },
+      buildRules(settings.thresholds),
+    );
+    if (again.ruleId !== 'cumulative-medium') return base;
+    const cumulative = agorotOf(total);
+    const min = agorotOf(settings.thresholds.cumulativeMediumAmountMin);
+    const max = agorotOf(settings.thresholds.cumulativeLargeAmount);
+    return cumulative > min && cumulative <= max ? { ...base, bandAgorot: { min, max } } : base;
+  }
+  return base;
+}
+
+/** Whole calendar days from `from` to `to` in `timeZone` (0 on the same day). */
+export function daysBetweenIn(from: Date, to: Date, timeZone: string): number {
+  const day = (d: Date) => {
+    const [y, m, dd] = localDateKeyInTz(d, timeZone).split('-').map(Number) as [number, number, number];
+    return Date.UTC(y, m - 1, dd);
+  };
+  return Math.round((day(to) - day(from)) / 86_400_000);
+}
+
+/** A pass-on with who did it (kept on the server: `byYou` in the history, never in a payload). */
+export interface PassOnFact extends PassedOn {
+  /** `audit_log.user_id` of the pass-on (the original escalator, also on a carried row). */
+  byUserId: string | null;
+}
+
+/**
+ * The pass-on of each escalated gap, from its `discrepancy.escalated` audit rows: the ONE
+ * source of a pass-on (pull request 237 adds a column that would replace it; only this
+ * function changes then). A pass-on is live only while the gap is `escalated`. The latest row
+ * that a non-owner wrote is the pass-on (an owner's own re-escalation passes nothing on); a
+ * row written at a re-match (`after.carried`) has no time and no days; an escalated gap with
+ * no row at all is treated the same way, with no role.
+ */
+export async function loadPassOns(
+  db: Database,
+  restaurantId: string,
+  gaps: ReadonlyArray<{ id: string; status: string; createdAt: Date }>,
+  timeZone: string,
+): Promise<Map<string, PassOnFact>> {
+  const escalated = gaps.filter((g) => g.status === 'escalated');
+  const out = new Map<string, PassOnFact>();
+  if (escalated.length === 0) return out;
+  const rows: Array<{ entityId: string | null; at: Date; after: unknown; userId: string | null }> = [];
+  for (let at = 0; at < escalated.length; at += 500) {
+    const chunk = escalated.slice(at, at + 500).map((g) => g.id);
+    rows.push(
+      ...(await db
+        .select({ entityId: auditLog.entityId, at: auditLog.at, after: auditLog.after, userId: auditLog.userId })
+        .from(auditLog)
+        .where(
+          and(
+            eq(auditLog.restaurantId, restaurantId),
+            eq(auditLog.entityType, 'discrepancy'),
+            eq(auditLog.action, 'discrepancy.escalated'),
+            inArray(auditLog.entityId, chunk),
+          ),
+        )
+        .orderBy(desc(auditLog.at), desc(auditLog.id))),
+    );
+  }
+  const byGap = new Map<string, typeof rows>();
+  for (const r of rows) {
+    if (!r.entityId) continue;
+    const list = byGap.get(r.entityId);
+    if (list) list.push(r);
+    else byGap.set(r.entityId, [r]);
+  }
+  for (const g of escalated) {
+    const list = byGap.get(g.id) ?? [];
+    const fromOf = (r: (typeof rows)[number]) => (r.after as { fromRole?: unknown } | null)?.fromRole;
+    // Newest first: the latest pass-on a non-owner wrote, else the latest row.
+    const row = list.find((r) => fromOf(r) !== 'owner') ?? list[0];
+    if (!row) {
+      out.set(g.id, { byRole: null, at: null, waitedDays: null, carried: true, byUserId: null });
+      continue;
+    }
+    const after = (row.after ?? {}) as { fromRole?: unknown; carried?: unknown };
+    const carried = after.carried === true;
+    const from = typeof after.fromRole === 'string' ? after.fromRole : null;
+    out.set(g.id, {
+      byRole: from && (GAP_ROLES as readonly string[]).includes(from) ? (from as GapRole) : null,
+      at: carried ? null : row.at,
+      waitedDays: carried ? null : Math.max(0, daysBetweenIn(g.createdAt, row.at, timeZone)),
+      carried,
+      byUserId: row.userId,
+    });
+  }
+  return out;
+}
+
+const publicPassOn = (p: PassOnFact | undefined): PassedOn | null =>
+  p ? { byRole: p.byRole, at: p.at, waitedDays: p.waitedDays, carried: p.carried } : null;
+
+/**
+ * `invoices.list.open` and each invoice's open ₪ for one month's invoices, from ONE read of the
+ * desk's own computation (`awaitingDecisionDetail`, scope 'all', filtered to the month's
+ * invoices): its count and ₪, its routings (`byRoutingOf`, as `approvals.queueSummary`), and
+ * the claimable ₪ of each invoice by VAT basis (the `agorot` `holdingsFor` takes).
+ */
+export async function monthOpenOf(
+  db: Database,
+  session: { restaurantId: string; role: UserRole },
+  invoiceIds: readonly string[],
+): Promise<{ open: MonthOpenGaps; agorot: Map<string, AgorotByBasis> }> {
+  const ids = [...new Set(invoiceIds)];
+  const agorot = new Map<string, AgorotByBasis>();
+  if (ids.length === 0) return { open: { count: 0, openAgorot: { ...ZERO_AGOROT }, byRouting: [] }, agorot };
+  const { summary, claims } = await awaitingDecisionDetail(
+    db,
+    { session: { restaurantId: session.restaurantId, role: session.role } },
+    { scope: 'all', filters: { invoiceIds: ids } },
+  );
+  for (const c of claims) {
+    const e = agorot.get(c.invoice.invoiceId) ?? { excl: 0, incl: 0, vat: 0 };
+    e[c.basis] += Math.round(c.amountIls * 100);
+    agorot.set(c.invoice.invoiceId, e);
+  }
+  return {
+    open: {
+      count: summary.count,
+      openAgorot: {
+        excl: Math.round((summary.ils?.excl ?? 0) * 100),
+        incl: Math.round((summary.ils?.incl ?? 0) * 100),
+        vat: Math.round((summary.ils?.vat ?? 0) * 100),
+      },
+      byRouting: byRoutingOf(summary.byRole, session.role),
+    },
+    agorot,
+  };
+}
+
+/**
+ * The claimable ₪ of each invoice's open gaps by VAT basis, integer agorot: exactly what the
+ * approvals desk counts (`awaitingDecisionDetail`, scope 'all': the letters' rule, the
+ * per-invoice cap, the pending-link and paid rules), never a sum of its own.
+ */
+export async function openAgorotByInvoice(
+  db: Database,
+  session: { restaurantId: string; role: UserRole },
+  invoiceIds: readonly string[],
+): Promise<Map<string, AgorotByBasis>> {
+  const out = new Map<string, AgorotByBasis>();
+  const ids = [...new Set(invoiceIds)];
+  for (let at = 0; at < ids.length; at += 200) {
+    const { claims } = await awaitingDecisionDetail(
+      db,
+      { session: { restaurantId: session.restaurantId, role: session.role } },
+      { scope: 'all', filters: { invoiceIds: ids.slice(at, at + 200) } },
+    );
+    for (const c of claims) {
+      const e = out.get(c.invoice.invoiceId) ?? { excl: 0, incl: 0, vat: 0 };
+      e[c.basis] += Math.round(c.amountIls * 100);
+      out.set(c.invoice.invoiceId, e);
+    }
+  }
+  return out;
+}
+
+/**
+ * `holding` of each given invoice for the viewer (see `Holding`); invoices with no open gap are
+ * absent. Reads only, under the caller's tenant: the open gaps (the queue's row set), the
+ * restaurant's settings, the pass-ons, and the desk's own ₪.
+ */
+export async function holdingsFor(
+  db: Database,
+  session: { restaurantId: string; role: UserRole },
+  invoiceIds: readonly string[],
+  opts: { agorot?: ReadonlyMap<string, AgorotByBasis> } = {},
+): Promise<Map<string, Holding>> {
+  const out = new Map<string, Holding>();
+  const gaps = await loadOpenGaps(db, session.restaurantId, invoiceIds);
+  if (gaps.length === 0) return out;
+  const settings = await loadAreaSettings(db, session.restaurantId);
+  const passOns = await loadPassOns(db, session.restaurantId, gaps, settings.timeZone);
+  const since = (g: OpenGap) => passOns.get(g.id)?.at ?? g.createdAt;
+  const grouped = byInvoice(gaps);
+  const agorot = opts.agorot ?? (await openAgorotByInvoice(db, session, [...grouped.keys()]));
+  for (const [invoiceId, list] of grouped) {
+    const lead = leadingGap(list, session.role, since)!;
+    const decide = decideGap(list, session.role, since);
+    const sev = lead.severity === 'block' || lead.severity === 'warn' ? lead.severity : 'info';
+    out.set(invoiceId, {
+      role: gapRoleOf(lead.routing),
+      routed: lead.routing != null,
+      // Routed to the viewer's own role as stored: a gap with no routed role is nobody's.
+      mine: lead.routing != null && lead.routing === session.role,
+      canAct: decide !== null,
+      since: since(lead),
+      leadingGapId: lead.id,
+      decideGapId: decide?.id ?? null,
+      severity: sev,
+      worstSeverity: worstSeverityOf(list)!,
+      openCount: list.length,
+      openAgorot: agorot.get(invoiceId) ?? { ...ZERO_AGOROT },
+      reason: provenReason(lead, settings),
+      passedOn: publicPassOn(passOns.get(lead.id)),
+    });
+  }
+  return out;
+}
+
+/**
+ * The reason and the pass-on of each given queue row (`approvals.myQueue`), the same
+ * definition as `holding`: one read of the rows' runs and invoices for the proofs, one of the
+ * escalated rows' audit trail.
  */
 export async function gapFactsOf(
-  _db: Database,
-  _restaurantId: string,
-  _rows: ReadonlyArray<{ id: string; ruleId: string | null; type: string }>,
+  db: Database,
+  restaurantId: string,
+  rows: ReadonlyArray<
+    {
+      id: string;
+      ruleId: string | null;
+      type: string;
+      severity: string;
+      resolutionStatus: string;
+      deltaAmount: string | null;
+      expectedValue: string | null;
+      actualValue: string | null;
+      toleranceUsed: string | null;
+      matchRunId: string;
+      createdAt: Date;
+    }
+  >,
 ): Promise<GapFacts> {
-  return { reasonOf: (r) => reasonOfRule(r.ruleId, r.type), passedOnOf: () => null };
+  if (rows.length === 0) return { reasonOf: (r) => reasonOfRule(r.ruleId, r.type), passedOnOf: () => null };
+  const settings = await loadAreaSettings(db, restaurantId);
+  const runIds = [...new Set(rows.filter((r) => r.ruleId === 'cumulative-medium').map((r) => r.matchRunId))];
+  const runs = new Map<string, { runTotal: string | null; invoiceTotal: string | null; runHasPo: boolean }>();
+  for (let at = 0; at < runIds.length; at += 500) {
+    const found = await db
+      .select({ id: matchRuns.id, runTotal: matchRuns.totalDiscrepancyAmount, poId: matchRuns.poId, invoiceTotal: invoices.totalInclVat })
+      .from(matchRuns)
+      .leftJoin(invoices, and(eq(invoices.id, matchRuns.invoiceId), eq(invoices.restaurantId, restaurantId)))
+      .where(and(eq(matchRuns.restaurantId, restaurantId), inArray(matchRuns.id, runIds.slice(at, at + 500))));
+    for (const r of found) runs.set(r.id, { runTotal: r.runTotal, invoiceTotal: r.invoiceTotal, runHasPo: r.poId != null });
+  }
+  const passOns = await loadPassOns(
+    db,
+    restaurantId,
+    rows.map((r) => ({ id: r.id, status: r.resolutionStatus, createdAt: r.createdAt })),
+    settings.timeZone,
+  );
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  return {
+    reasonOf: (r) => {
+      const row = byId.get(r.id);
+      if (!row) return reasonOfRule(r.ruleId, r.type);
+      const run = runs.get(row.matchRunId);
+      return provenReason(
+        { ...row, runTotal: run?.runTotal ?? null, invoiceTotal: run?.invoiceTotal ?? null, runHasPo: run?.runHasPo ?? false },
+        settings,
+      );
+    },
+    passedOnOf: (id) => publicPassOn(passOns.get(id)),
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// A person's decisions: `lastDecision`, a finding's `decision`, `approvals.decided`, history.
+// ───────────────────────────────────────────────────────────────────────────────
+
+/** The statuses a decided gap can carry (`resolved` only in seeded data). */
+export const DECIDED_STATUSES = ['accepted', 'rejected', 'resolved'] as const;
+
+/**
+ * Pure: a person decided this gap. `approvals.decide()` stamps `resolved_at` (and an undo clears
+ * it); the engine's own closes (`non-leak-acknowledge`, `minor-info`: accepted at insertion)
+ * never carry it, so a gap the system closed is never a decision.
+ */
+export function isPersonDecision(row: { status: string; resolvedAt: Date | null }): boolean {
+  return (DECIDED_STATUSES as readonly string[]).includes(row.status) && row.resolvedAt != null;
+}
+
+/** One gap a person decided (see `isPersonDecision`). */
+export interface DecidedGap {
+  id: string;
+  invoiceId: string;
+  type: string;
+  status: string;
+  resolvedAt: Date;
+  /** Compared with the caller server-side only (`byYou`); never returned. */
+  resolvedBy: string | null;
+  deltaAmount: string | null;
+}
+
+/**
+ * The invoices' gaps a person decided (any run of the invoice, without the ₪0 QTY_SHORT twin,
+ * which the desk never shows). Foreign ids match nothing.
+ */
+export async function loadDecidedGaps(
+  db: Database,
+  restaurantId: string,
+  invoiceIds: readonly string[],
+): Promise<DecidedGap[]> {
+  const ids = [...new Set(invoiceIds)];
+  const out: DecidedGap[] = [];
+  for (let at = 0; at < ids.length; at += 500) {
+    const rows = await db
+      .select({
+        id: discrepancies.id,
+        invoiceId: matchRuns.invoiceId,
+        type: discrepancies.type,
+        status: discrepancies.resolutionStatus,
+        resolvedAt: discrepancies.resolvedAt,
+        resolvedBy: discrepancies.resolvedBy,
+        deltaAmount: discrepancies.deltaAmount,
+      })
+      .from(discrepancies)
+      .innerJoin(matchRuns, and(eq(matchRuns.id, discrepancies.matchRunId), eq(matchRuns.restaurantId, restaurantId)))
+      .where(
+        and(
+          eq(discrepancies.restaurantId, restaurantId),
+          inArray(discrepancies.resolutionStatus, [...DECIDED_STATUSES]),
+          isNotNull(discrepancies.resolvedAt),
+          notZeroShortTwin(),
+          inArray(matchRuns.invoiceId, ids.slice(at, at + 500)),
+        ),
+      );
+    for (const r of rows) {
+      if (!r.invoiceId || !r.resolvedAt) continue;
+      out.push({ ...r, invoiceId: r.invoiceId, type: String(r.type), status: String(r.status), resolvedAt: r.resolvedAt });
+    }
+  }
+  return out;
+}
+
+/** The latest decision audit row of one gap (`discrepancy.approved` / `discrepancy.rejected`). */
+export interface DecisionAudit {
+  at: Date;
+  /** Compared with the caller server-side only (`byYou`); never returned. */
+  userId: string | null;
+  action: string;
+  before: Record<string, unknown>;
+  after: Record<string, unknown>;
+}
+
+/** The latest decision audit row of each given gap, under the caller's tenant. */
+export async function loadDecisionAudits(
+  db: Database,
+  restaurantId: string,
+  gapIds: readonly string[],
+): Promise<Map<string, DecisionAudit>> {
+  const out = new Map<string, DecisionAudit>();
+  const ids = [...new Set(gapIds)];
+  for (let at = 0; at < ids.length; at += 500) {
+    const rows = await db
+      .select({
+        entityId: auditLog.entityId,
+        at: auditLog.at,
+        userId: auditLog.userId,
+        action: auditLog.action,
+        before: auditLog.before,
+        after: auditLog.after,
+      })
+      .from(auditLog)
+      .where(
+        and(
+          eq(auditLog.restaurantId, restaurantId),
+          eq(auditLog.entityType, 'discrepancy'),
+          inArray(auditLog.action, ['discrepancy.approved', 'discrepancy.rejected']),
+          inArray(auditLog.entityId, ids.slice(at, at + 500)),
+        ),
+      )
+      .orderBy(desc(auditLog.at), desc(auditLog.id));
+    for (const r of rows) {
+      if (!r.entityId || out.has(r.entityId)) continue;
+      out.set(r.entityId, {
+        at: r.at,
+        userId: r.userId,
+        action: r.action,
+        before: (r.before ?? {}) as Record<string, unknown>,
+        after: (r.after ?? {}) as Record<string, unknown>,
+      });
+    }
+  }
+  return out;
+}
+
+const asGapRole = (v: unknown): GapRole | null =>
+  typeof v === 'string' && (GAP_ROLES as readonly string[]).includes(v) ? (v as GapRole) : null;
+
+/**
+ * Pure: the record of one person's decision. The audit row speaks for it only when it records
+ * the same decision (approved for an accepted gap, rejected for a rejected one); a decision
+ * carried through a re-match has no audit row of its own, so its role and reason are unknown.
+ * `inPlaceOf` compares the decider's role with the role the gap was routed to when it was
+ * decided (an unrouted gap is the manager's, as everywhere in this module).
+ */
+export function decisionRecordOf(gap: DecidedGap, audit: DecisionAudit | undefined, viewerUserId: string): DecisionRecord {
+  const accepted = gap.status !== 'rejected';
+  const duplicate = gap.type === 'DUPLICATE_INVOICE';
+  const a = audit && (audit.action === 'discrepancy.approved') === accepted ? audit : undefined;
+  // Written through z.enum(WAIVE_REASON_CODES) (approvals.reject / decideMany).
+  const reasonCode = !accepted && a && typeof a.after.reasonCode === 'string' ? (a.after.reasonCode as WaiveReasonCode) : null;
+  const role = a ? asGapRole(a.after.role) : null;
+  // The routing when it was decided; a gap with no routed role took nobody's place.
+  const routed = a ? asGapRole(a.before.requiresRole) : null;
+  const result: DecisionResult = accepted
+    ? duplicate
+      ? 'duplicate_held'
+      : 'credit'
+    : duplicate
+      ? 'not_duplicate'
+      : reasonCode === 'reviewed'
+        ? 'reviewed'
+        : 'as_billed';
+  const typed = !accepted && a && typeof a.after.reason === 'string' && (reasonCode === 'other' || reasonCode == null) ? a.after.reason.trim() : '';
+  const recorded = a && typeof a.after.amountAgorot === 'number' && Number.isFinite(a.after.amountAgorot) ? Math.round(a.after.amountAgorot) : null;
+  return {
+    gapId: gap.id,
+    result,
+    at: gap.resolvedAt,
+    role,
+    inPlaceOf: role && routed && routed !== role ? routed : null,
+    amountAgorot: Math.abs(recorded ?? Math.round(Number(gap.deltaAmount ?? 0) * 100)),
+    basis: vatBasisOf(gap.type),
+    reasonCode,
+    reasonText: typed ? typed : null,
+    byYou: (a ? a.userId : gap.resolvedBy) === viewerUserId,
+  };
+}
+
+/** Each given decided gap's record for the caller (one read of the audit trail). */
+export async function decisionsOf(
+  db: Database,
+  session: { restaurantId: string; userId: string },
+  gaps: readonly DecidedGap[],
+): Promise<Map<string, DecisionRecord>> {
+  const audits = await loadDecisionAudits(db, session.restaurantId, gaps.map((g) => g.id));
+  return new Map(gaps.map((g) => [g.id, decisionRecordOf(g, audits.get(g.id), session.userId)]));
+}
+
+/** Pure: the most recent of the decisions (the latest time, then the id), or null. */
+export function latestDecision(records: Iterable<DecisionRecord>): DecisionRecord | null {
+  let best: DecisionRecord | null = null;
+  for (const r of records) {
+    if (!best || r.at.getTime() > best.at.getTime() || (r.at.getTime() === best.at.getTime() && r.gapId > best.gapId)) best = r;
+  }
+  return best;
+}
+
+/** `lastDecision` of each given invoice for the caller: invoices with no person decision are absent. */
+export async function lastDecisionsFor(
+  db: Database,
+  session: { restaurantId: string; userId: string },
+  invoiceIds: readonly string[],
+): Promise<Map<string, DecisionRecord>> {
+  const gaps = await loadDecidedGaps(db, session.restaurantId, invoiceIds);
+  if (gaps.length === 0) return new Map();
+  const records = await decisionsOf(db, session, gaps);
+  const byInv = new Map<string, DecisionRecord[]>();
+  for (const g of gaps) {
+    const list = byInv.get(g.invoiceId) ?? [];
+    list.push(records.get(g.id)!);
+    byInv.set(g.invoiceId, list);
+  }
+  const out = new Map<string, DecisionRecord>();
+  for (const [id, list] of byInv) {
+    const last = latestDecision(list);
+    if (last) out.set(id, last);
+  }
+  return out;
+}
+
+/**
+ * `approvals.queueSummary.invoices`: the invoices that have an open gap of the desk's row set
+ * (open or escalated, not the ₪0 twin) under the summary's filters, and Σ their totals incl.
+ * VAT in integer agorot. The same where-clause as `approvals/awaiting.ts`, scope 'all'.
+ */
+export async function openInvoicesOf(
+  db: Database,
+  restaurantId: string,
+  filters: {
+    types?: ReadonlyArray<string>;
+    severities?: ReadonlyArray<string>;
+    supplierIds?: ReadonlyArray<string>;
+    invoiceIds?: ReadonlyArray<string>;
+  } = {},
+): Promise<OpenInvoicesSummary> {
+  const rows = await db
+    .selectDistinct({ invoiceId: matchRuns.invoiceId, total: invoices.totalInclVat })
+    .from(discrepancies)
+    .innerJoin(matchRuns, and(eq(matchRuns.id, discrepancies.matchRunId), eq(matchRuns.restaurantId, restaurantId)))
+    .leftJoin(invoices, and(eq(invoices.id, matchRuns.invoiceId), eq(invoices.restaurantId, restaurantId)))
+    .where(
+      and(
+        eq(discrepancies.restaurantId, restaurantId),
+        discrepancyDecidableSql(discrepancies.resolutionStatus),
+        notZeroShortTwin(),
+        filters.types?.length ? inArray(discrepancies.type, [...filters.types] as Array<(typeof discrepancies.$inferSelect)['type']>) : undefined,
+        filters.severities?.length
+          ? inArray(discrepancies.severity, [...filters.severities] as Array<(typeof discrepancies.$inferSelect)['severity']>)
+          : undefined,
+        filters.supplierIds?.length ? inArray(invoices.supplierId, [...filters.supplierIds]) : undefined,
+        filters.invoiceIds?.length ? inArray(matchRuns.invoiceId, [...filters.invoiceIds]) : undefined,
+      ),
+    );
+  const seen = new Map<string, number>();
+  for (const r of rows) {
+    if (r.invoiceId && !seen.has(r.invoiceId)) seen.set(r.invoiceId, Math.round(Number(r.total ?? 0) * 100));
+  }
+  return { count: seen.size, totalInclVatAgorot: [...seen.values()].reduce((n, a) => n + a, 0) };
 }
