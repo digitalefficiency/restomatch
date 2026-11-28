@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { eq, recoveryClaims, restaurants, sql } from '@restomatch/db';
+import { eq, invoices, recoveryClaims, restaurants, sql } from '@restomatch/db';
 import { foldBadges } from '../tasks/badges';
 import type { Task } from '../tasks/types';
 import { addDiscrepancy, as, db, fresh, seedStaffed } from './tasks-fixtures';
@@ -48,6 +48,8 @@ describe('nav.badges (W2-08 §5.3)', () => {
       .update(restaurants)
       .set({ settings: sql`jsonb_set(coalesce(${restaurants.settings}, '{}'::jsonb), '{features}', coalesce(${restaurants.settings} -> 'features', '{}'::jsonb) || '{"recovery": true}'::jsonb)` })
       .where(eq(restaurants.id, a.restaurantId));
+    // The invoice covers its claims (the tracker reads each claim's capped share — G-14 Q3 R4-2).
+    await db.update(invoices).set({ totalInclVat: '2000.00' }).where(eq(invoices.id, a.invoiceId));
     const d1 = await addDiscrepancy(a, { delta: '300.00' });
     const d2 = await addDiscrepancy(a, { delta: '500.00' });
     const d3 = await addDiscrepancy(a, { delta: '200.00' });

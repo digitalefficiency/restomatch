@@ -44,7 +44,8 @@ beforeAll(async () => {
   for (const [t, agorot] of [[A, 12_000], [B, 9_000_000]] as const) {
     const [d] = await db
       .insert(discrepancies)
-      .values({ matchRunId: t.matchRunId, restaurantId: t.restaurantId, type: 'PRICE_HIGHER', severity: 'warn', deltaAmount: '10.00', resolutionStatus: 'accepted' })
+      // The finding is what is claimed (syncClaims never claims more than |Δ|; G-14 Q3 R4-2).
+      .values({ matchRunId: t.matchRunId, restaurantId: t.restaurantId, type: 'PRICE_HIGHER', severity: 'warn', deltaAmount: (agorot / 100).toFixed(2), resolutionStatus: 'accepted' })
       .returning({ id: discrepancies.id });
     await db.insert(recoveryClaims).values({
       restaurantId: t.restaurantId,
@@ -58,7 +59,8 @@ beforeAll(async () => {
     });
     await db
       .update(invoices)
-      .set({ invoiceDate: new Date('2026-10-20T08:00:00Z'), totalExclVat: '12000.00', vatAmount: '2160.00', allocationNumber: null, status: 'matched' })
+      // totalInclVat = excl + VAT, so the invoice covers its claim (the tracker reads the claim's capped share).
+      .set({ invoiceDate: new Date('2026-10-20T08:00:00Z'), totalExclVat: '12000.00', vatAmount: '2160.00', totalInclVat: '14160.00', allocationNumber: null, status: 'matched' })
       .where(eq(invoices.id, t.invoiceId));
   }
 });
