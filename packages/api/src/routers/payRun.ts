@@ -29,6 +29,8 @@ import {
   type DueDateSource,
 } from '../lib/dueDate';
 import { featureEnabled } from '../lib/features';
+import { assertCanApproveForPayment } from '../approvals/payApproval';
+import { appError, resolveAppError } from '../errors';
 import { canActOn } from '../lib/roles';
 import { vatAtRisk } from '../vat/vatAtRisk';
 
@@ -578,6 +580,29 @@ const UNMARK_PAID_INPUT = z.object({
 });
 
 /**
+ * G-15b gate for a mark-paid batch. Fails closed: EVERY item is gated, whatever its status
+ * (review of #380: an 'approved' row could have had its total raised after approval, and no
+ * approve-for-payment audit records the amount the gate passed at — re-gating is the cheap,
+ * safe answer; there is no approve-for-payment button yet). Throws on the first owner-only one.
+ */
+export async function assertOwnerPayApprovals(
+  db: Database,
+  who: { restaurantId: string; role: UserRole },
+  statusById: ReadonlyMap<string, string>,
+): Promise<void> {
+  for (const invoiceId of statusById.keys()) {
+    try {
+      await assertCanApproveForPayment(db, who, invoiceId);
+    } catch (e) {
+      // The code alone: no amount, threshold or reason travels to a role that may not act.
+      if (resolveAppError(e as TRPCError)?.appCode === 'payment.ownerApprovalRequired')
+        throw appError('FORBIDDEN', 'payment.ownerApprovalRequired', 'payment.ownerApprovalRequired');
+      throw e;
+    }
+  }
+}
+
+/**
  * Every item must be one of the caller's invoices. A foreign or unknown id is
  * NOT_FOUND for the whole batch (all-or-nothing) — never a hint that it exists.
  */
@@ -806,7 +831,7 @@ export const payRunRouter = router({
    * Marking paid NEVER deletes a claim (lib/claims keeps a paid invoice's claims).
    */
   markPaid: financeProcedure.input(MARK_PAID_INPUT).mutation(async ({ ctx, input }) => {
-    await assertOwnInvoices(
+    const current = await assertOwnInvoices(
       ctx.db,
       ctx.session.restaurantId,
       input.items.map((i) => i.invoiceId),
@@ -824,6 +849,12 @@ export const payRunRouter = router({
       input.acknowledgedFlags,
     );
     void acknowledged;
+    // G-15b owner rule (11.11), AFTER the AU-14 warnings (orchestrator decision 28.11): an invoice
+    // ≥ the pay-approval amount incl. VAT (the highest of header / OCR / Σ lines; unknown = owner),
+    // or from a new supplier (no earlier PAID, non-duplicate invoice), is owner-only → FORBIDDEN
+    // `payment.ownerApprovalRequired`. Every item, every status (fail closed). At the γ write this
+    // moves into the same tx, right before the transition, and the decision goes on the audit row.
+    await assertOwnerPayApprovals(ctx.db, { restaurantId: ctx.session.restaurantId, role: ctx.session.role }, current);
     // TODO(H-03 + G-05, γ rebase): the guarded write. Until then the flag stays OFF.
     throw new TRPCError({ code: 'NOT_IMPLEMENTED', message: 'payRun.markPaidAwaitsH03' });
   }),
