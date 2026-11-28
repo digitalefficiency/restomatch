@@ -191,6 +191,23 @@ describe('H-11 slice c · receiver and chef get no ₪ (A own ids; B ids rejecte
   it('receiving.pendingInvoices: the chef gets no invoice image link (₪ printed on it); the receiver keeps it (owner Q2(א))', async () => {
     const IMAGE = 'invoices/h11c-q2-pending.jpg';
     await db.update(invoices).set({ rawImageUrl: IMAGE }).where(eq(invoices.invoiceNumber, 'INV-A-PENDING'));
+    // A pending invoice of B's with an image: the status filter lets it through,
+    // so only the restaurant filter keeps it away from A's chef.
+    const [bPending] = await db
+      .insert(invoices)
+      .values({
+        restaurantId: B.restaurantId,
+        supplierId: B.supplierId,
+        invoiceNumber: 'INV-B-PENDING',
+        totalExclVat: '80.00',
+        vatAmount: '14.40',
+        totalInclVat: '94.40',
+        status: 'ocr_pending',
+        source: 'photo',
+        rawImageUrl: 'invoices/h11c-q2-b-pending.jpg',
+      } as never)
+      .returning({ id: invoices.id });
+    expect((await callerFor(B, 'owner').receiving.pendingInvoices()).map((r) => r.id)).toContain(bPending!.id);
     const imageOf = (rows: Array<{ invoiceNumber: string | null; rawImageUrl: string | null }>) =>
       rows.find((r) => r.invoiceNumber === 'INV-A-PENDING')?.rawImageUrl;
     const owner = await callerFor(A, 'owner').receiving.pendingInvoices();
@@ -202,7 +219,8 @@ describe('H-11 slice c · receiver and chef get no ₪ (A own ids; B ids rejecte
     expect(chef.length).toBeGreaterThan(0);
     expect(chef).toEqual(owner.map((r) => ({ ...r, rawImageUrl: null })));
     expect(chef.every((r) => r.rawImageUrl === null)).toBe(true);
-    // B's invoices never reach A's chef.
-    expect(chef.some((r) => r.id === B.invoiceId)).toBe(false);
+    // B's pending invoice never reaches A's chef (or A's owner).
+    expect(chef.some((r) => r.id === bPending!.id || r.invoiceNumber === 'INV-B-PENDING')).toBe(false);
+    expect(owner.some((r) => r.id === bPending!.id)).toBe(false);
   });
 });
