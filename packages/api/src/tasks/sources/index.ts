@@ -147,27 +147,30 @@ export function vatTasks(v: VatLike | null): Task[] {
 
 export interface PayRunLike {
   enabled: boolean;
-  totals: { payIls: number };
-  suppliers: { invoices: { status: string }[] }[];
+  totals: { payableIls: number; payableCount: number };
 }
 
+/**
+ * "ריצת התשלומים של החודש": what the pay-run page lets you pay THIS invoice month — the same
+ * month window the row links to (`?m=0`), and the same payable set as payRun.list (pay + claim,
+ * net of every hold, the VAT-at-risk one included).
+ */
 export function payRunTasks(p: PayRunLike | null): Task[] {
-  if (!p?.enabled || p.totals.payIls <= 0) return [];
-  const toPay = p.suppliers.reduce((sum, s) => sum + s.invoices.filter((i) => i.status === 'pay').length, 0);
+  if (!p?.enabled || p.totals.payableIls <= 0) return [];
   return [
     {
       type: 'payment_due',
       entityId: 'payRun:month',
       title: 'paymentDue',
-      ilsAgorot: toAgorot(p.totals.payIls),
-      count: toPay,
+      ilsAgorot: toAgorot(p.totals.payableIls),
+      count: p.totals.payableCount,
       blocking: 0,
       tier: 'T2',
       tone: 'neutral',
       due: null,
       ageDays: null,
       verb: 'pay',
-      deepLink: '/dashboard/approvals/pay-run',
+      deepLink: '/dashboard/approvals/pay-run?m=0',
       scope: 'mine',
     },
   ];

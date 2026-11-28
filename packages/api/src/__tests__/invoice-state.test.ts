@@ -16,6 +16,7 @@ import {
 } from '@restomatch/db';
 import { appRouter } from '../index';
 import { countStates, INVOICE_STATES, invoiceStateOf, invoiceStatesForMonth, invoiceStatesOf, type InvoiceState } from '../invoices';
+import { vatAtRisk } from '../vat/vatAtRisk';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
 
 /**
@@ -128,7 +129,11 @@ describe('invoice state (fixtures, RLS app role)', () => {
 const LAB = process.env.LAB_DATABASE_URL;
 const NOW = new Date('2026-10-25T12:00:00+03:00');
 
-/** The pay-run bucket each state maps to (unpaid, not in OCR). */
+/**
+ * The pay-run bucket each state maps to (unpaid, not in OCR). Exception (invoices/state.ts): VAT
+ * at risk holds a pay / claim invoice — `payRunBucket` below; its wall-clock-free fixture is
+ * payrun-month-vat-hold.test.ts.
+ */
 const PAY_RUN_BUCKET: Partial<Record<InvoiceState, string>> = {
   clean: 'pay',
   approved: 'pay',
@@ -138,6 +143,10 @@ const PAY_RUN_BUCKET: Partial<Record<InvoiceState, string>> = {
   flagged_open: 'hold',
   awaiting_link: 'link',
 };
+function payRunBucket(state: InvoiceState | undefined, heldForVat: boolean): string | undefined {
+  const b = state ? PAY_RUN_BUCKET[state] : undefined;
+  return heldForVat && (b === 'pay' || b === 'claim') ? 'hold' : b;
+}
 
 describe.skipIf(!LAB)('lab demo parity (W2-09a CTE + match_runs + findings; no ₪ change)', () => {
   it('the lab month: counts equal the hero, Σ leak = the hero, and every unpaid invoice sits in its pay-run bucket', async () => {
@@ -180,12 +189,13 @@ describe.skipIf(!LAB)('lab demo parity (W2-09a CTE + match_runs + findings; no �
     const caller = appRouter.createCaller({ db, session: { userId: owners[0]!.user_id, restaurantId: rid, role: 'owner' } });
     const run = await caller.payRun.month({ monthOffset: offset });
     const byId = new Map(rows.map((r) => [r.invoiceId, r]));
+    const atRisk = new Set((await vatAtRisk(db, rid, 'all')).rows.filter((r) => r.vatAtRisk > 0).map((r) => r.invoiceId));
     const seen = new Set<string>();
     for (const s of run.suppliers) {
       for (const inv of s.invoices) {
         const bucket = inv.pendingLink && !inv.duplicate ? 'link' : inv.status;
         const st = byId.get(inv.invoiceId)?.state;
-        expect(st && PAY_RUN_BUCKET[st], `${inv.invoiceId} ${bucket} vs ${st}`).toBe(bucket);
+        expect(payRunBucket(st, atRisk.has(inv.invoiceId)), `${inv.invoiceId} ${bucket} vs ${st}`).toBe(bucket);
         seen.add(inv.invoiceId);
       }
     }

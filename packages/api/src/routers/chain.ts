@@ -579,6 +579,8 @@ export interface BranchPayRun {
   enabled: boolean;
   invoices: number;
   payIls: number;
+  /** What the pay-run page lets you pay (payRun.month totals.payableIls = pay + claim, net of holds). */
+  payableIls: number;
   holdIls: number;
   claimIls: number;
   creditIls: number;
@@ -616,11 +618,12 @@ export function byBranchTotals(rows: ByBranchRow[], kind: ByBranchKind): ByBranc
   }
   const on = oks.filter((r) => r.payRun?.enabled);
   if (on.length === 0) return { approvals: null, payRun: null, partial };
-  const t = { invoices: 0, pay: 0, hold: 0, claim: 0, credit: 0, link: 0 };
+  const t = { invoices: 0, pay: 0, payable: 0, hold: 0, claim: 0, credit: 0, link: 0 };
   for (const r of on) {
     const p = r.payRun!;
     t.invoices += p.invoices;
     t.pay += toAg(p.payIls);
+    t.payable += toAg(p.payableIls);
     t.hold += toAg(p.holdIls);
     t.claim += toAg(p.claimIls);
     t.credit += toAg(p.creditIls);
@@ -631,6 +634,7 @@ export function byBranchTotals(rows: ByBranchRow[], kind: ByBranchKind): ByBranc
     payRun: {
       invoices: t.invoices,
       payIls: t.pay / 100,
+      payableIls: t.payable / 100,
       holdIls: t.hold / 100,
       claimIls: t.claim / 100,
       creditIls: t.credit / 100,
@@ -774,6 +778,7 @@ export const chainRouter = router({
                 enabled: p.enabled,
                 invoices: p.totals.invoices,
                 payIls: p.totals.payIls,
+                payableIls: p.totals.payableIls,
                 holdIls: p.totals.holdIls,
                 claimIls: p.totals.claimIls,
                 creditIls: p.totals.creditIls,

@@ -26,20 +26,32 @@ export const payRunMonth = procedureTool<{ previous?: boolean }>({
       totals: o.totals,
       suppliers: arr(o.suppliers)
         .slice(0, 8)
-        .map((s) => ({ supplier: s.supplierName, payIls: s.payIls, holdIls: s.holdIls, claimIls: s.claimIls, invoiceCount: arr(s.invoices).length })),
+        .map((s) => ({
+          supplier: s.supplierName,
+          // What the pay-run page lets you pay: pay + claim (a credit still asked for doesn't stop it).
+          payableIls: Math.round(((Number(s.payIls) || 0) + (Number(s.claimIls) || 0)) * 100) / 100,
+          holdIls: s.holdIls,
+          creditIls: s.creditIls,
+          invoiceCount: arr(s.invoices).length,
+        })),
     };
   },
-  links: () => ['/dashboard/approvals/pay-run'],
-  facts: (d) => {
+  // The page these figures are: the pay run filtered to the same invoice month.
+  links: (i) => [i.previous ? '/dashboard/approvals/pay-run?m=-1' : '/dashboard/approvals/pay-run?m=0'],
+  facts: (d, i) => {
     const p = obj(d);
     if (!p.enabled) return ['ריצת התשלומים אינה פעילה במסעדה הזו.'];
     const t = obj(p.totals);
-    return [
-      `${count(t.invoices)} חשבוניות החודש`,
-      `לתשלום: ${money(t.payIls)}`,
-      `בהמתנה: ${money(t.holdIls)}`,
-      `לבקשת זיכוי: ${money(t.claimIls)}`,
+    const month = i?.previous ? 'בחודש שעבר' : 'החודש';
+    const lines = [
+      `${count(t.invoices)} חשבוניות ${month}`,
+      // Same words and figures as the pay-run page (payRun.list totals for this month).
+      `ניתן לשלם: ${money(t.payableIls)}`,
+      `בהמתנה: ${money(t.holdIls)} (בלי חשבוניות שממתינות לקישור להזמנה)`,
+      `זיכוי לבקש: ${money(t.creditIls)}`,
     ];
+    if ((Number(t.linkCount) || 0) > 0) lines.push(`ממתינות לקישור להזמנה: ${count(t.linkCount)} · ${money(t.linkIls)}`);
+    return lines;
   },
 });
 

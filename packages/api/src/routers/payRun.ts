@@ -141,6 +141,13 @@ export interface PayRunResult {
   totals: {
     invoices: number;
     payIls: number;
+    /**
+     * What the pay-run page (payRun.list, same month) lets you pay: Σ totals incl. VAT of the
+     * invoices with no hold — 'pay' AND 'claim' (a credit still asked for doesn't stop the
+     * payment; list keeps those rows selectable). The home row shows THIS, never payIls alone.
+     */
+    payableIls: number;
+    payableCount: number;
     holdIls: number;
     claimIls: number;
     creditIls: number;
@@ -158,7 +165,7 @@ const CLAIMABLE_DUP = new Set<string>(DUPLICATE_HOLDING);
 
 const ag = (v: number) => Math.round(v * 100);
 const ils = (a: number) => a / 100;
-const EMPTY_TOTALS = { invoices: 0, payIls: 0, holdIls: 0, claimIls: 0, creditIls: 0, pendingIls: 0, linkIls: 0, linkCount: 0 };
+const EMPTY_TOTALS = { invoices: 0, payIls: 0, payableIls: 0, payableCount: 0, holdIls: 0, claimIls: 0, creditIls: 0, pendingIls: 0, linkIls: 0, linkCount: 0 };
 
 type Row = Record<string, unknown>;
 const rowsOf = (res: unknown): Row[] => (Array.isArray(res) ? (res as Row[]) : ((res as { rows?: Row[] }).rows ?? []));
@@ -886,10 +893,24 @@ export async function computePayRunMonth(
     unpaidInvoicesSql(rid, { start: hero.monthStart, end: hero.monthEnd }),
   );
 
+  // "חסר מספר הקצאה": the same vatAtRisk() hold payRun.list applies (holdReasonsOf
+  // `missing_allocation`), so the home row / chain strip never count as payable what the
+  // pay-run page refuses to pay (MF-24950, train-C #321 gap).
+  const vat = await vatAtRisk(db, rid, 'all');
+  const vatByInvoice = new Map(vat.rows.map((r) => [r.invoiceId, r.vatAtRisk]));
+
   const groups = new Map<string, PayRunSupplier & { a: Record<string, number> }>();
   for (const row of rowsOf(res)) {
     const id = String(row.id);
-    const inv = invoiceOfRow(row, byInvoice.get(id) ?? null);
+    let inv = invoiceOfRow(row, byInvoice.get(id) ?? null);
+    if (
+      !inv.pendingLink &&
+      !inv.duplicate &&
+      (inv.status === 'pay' || inv.status === 'claim') &&
+      (vatByInvoice.get(id) ?? 0) > 0
+    ) {
+      inv = { ...inv, status: 'hold' };
+    }
     const key = row.supplier_id == null ? '' : String(row.supplier_id);
     let g = groups.get(key);
     if (!g) {
@@ -949,6 +970,11 @@ export async function computePayRunMonth(
     totals: {
       invoices: t.invoices,
       payIls: ils(t.pay),
+      payableIls: ils(t.pay + t.claim),
+      payableCount: suppliers.reduce(
+        (n, sp) => n + sp.invoices.filter((i) => !(i.pendingLink && !i.duplicate) && (i.status === 'pay' || i.status === 'claim')).length,
+        0,
+      ),
       holdIls: ils(t.hold),
       claimIls: ils(t.claim),
       creditIls: ils(t.credit),
