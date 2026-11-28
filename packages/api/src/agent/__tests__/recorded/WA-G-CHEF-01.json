@@ -1,0 +1,98 @@
+{
+  "caseId": "WA-G-CHEF-01",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "order.repeat",
+      "toolCalls": [
+        {
+          "name": "suppliers.resolve",
+          "args": {
+            "query": "ירקות השרון"
+          },
+          "result": {
+            "matches": [
+              {
+                "supplierId": "sup-veg",
+                "name": "ירקות השרון"
+              }
+            ]
+          }
+        },
+        {
+          "name": "orders.list",
+          "args": {
+            "supplierId": "sup-veg",
+            "last": 1
+          },
+          "result": {
+            "orders": [
+              {
+                "orderId": "po-1031",
+                "date": "2026-10-20"
+              }
+            ]
+          }
+        },
+        {
+          "name": "orders.previewRepeat",
+          "args": {
+            "fromOrderId": "po-1031"
+          },
+          "result": {
+            "fromOrderId": "po-1031",
+            "fromDate": "2026-10-20",
+            "lines": [
+              {
+                "product": "עגבניות שרי",
+                "qty": 40,
+                "unit": "ק״ג"
+              },
+              {
+                "product": "מלפפונים",
+                "qty": 25,
+                "unit": "ק״ג"
+              },
+              {
+                "product": "פטרוזיליה",
+                "qty": 12,
+                "unit": "צרור"
+              }
+            ],
+            "moreLines": 6,
+            "estimatedTotalIls": 2140,
+            "deliveryDate": "2026-10-27",
+            "cutoff": "14:00"
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "טיוטה כמו ביום ג׳ 20.10 מירקות השרון (עוד לא נשלחה):\n• עגבניות שרי 40 ק״ג\n• מלפפונים 25 ק״ג\n• פטרוזיליה 12 צרור\nועוד 6 פריטים · סה״כ משוער 2,140 ₪\nאספקה: ג׳ 27.10. חלון ההזמנה נסגר היום ב-14:00.",
+          "buttons": [
+            {
+              "id": "b:11",
+              "title": "צור טיוטה"
+            },
+            {
+              "id": "b:12",
+              "title": "שנה כמויות"
+            },
+            {
+              "id": "b:13",
+              "title": "ביטול"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "draftsCreated": 0,
+    "ordersPlacedViaWhatsapp": 0
+  }
+}

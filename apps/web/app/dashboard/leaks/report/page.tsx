@@ -25,6 +25,7 @@ import { LeakStateNote, leakStateOf } from '../leak-state';
 import { noDataCtaFor } from '../states';
 import { components as componentsNs } from '@/lib/i18n/messages/components';
 import { resolvedNoteState, settle } from './money-read';
+import { SHOW_CAUGHT_BEFORE_PAYMENT } from '@/lib/caughtGate';
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 
@@ -309,7 +310,7 @@ export default async function LeakReportPage({
                 <span className="text-xl font-bold tabular-nums text-ink" data-testid="report-found" data-amount={found}>
                   {ils(found)}
                 </span>
-                {hero.caughtBeforePaymentIls > 0 ? (
+                {SHOW_CAUGHT_BEFORE_PAYMENT && hero.caughtBeforePaymentIls > 0 ? (
                   <span className="rounded-full bg-gold/12 px-2.5 py-0.5 text-xs font-semibold text-gold ring-1 ring-gold/25">
                     {t('report.caughtChip', { amount: ils(hero.caughtBeforePaymentIls) })}
                   </span>

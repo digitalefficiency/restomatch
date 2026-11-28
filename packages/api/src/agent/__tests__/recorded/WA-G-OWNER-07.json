@@ -1,0 +1,38 @@
+{
+  "caseId": "WA-G-OWNER-07",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "decide.undo",
+      "toolCalls": [
+        {
+          "name": "approvals.reopen",
+          "args": {
+            "discrepancyId": "d-veg-20931-1"
+          },
+          "result": {
+            "status": "open"
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "בוטל: הפער בחשבונית 20931 חזר לרשימת ההחלטות.",
+          "buttons": [
+            {
+              "id": "b:1",
+              "title": "פרטים"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "approvalsReopened": 1
+  }
+}

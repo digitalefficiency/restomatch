@@ -25,6 +25,7 @@ import {
 import { ViewToolbar, parseView, rangeLabel } from '@/lib/components/views';
 import { SwitchBranchButton } from './switch-button';
 import { chainSparkline, wholeShekelRows } from './display';
+import { SHOW_CAUGHT_BEFORE_PAYMENT } from '@/lib/caughtGate';
 
 type Overview = Awaited<ReturnType<Awaited<ReturnType<typeof createServerCaller>>['chain']['overview']>>;
 type Alerts = Awaited<ReturnType<Awaited<ReturnType<typeof createServerCaller>>['chain']['alerts']>>;
@@ -227,18 +228,27 @@ export default async function ChainPage({
               : t('dashboard.kpis.leakOf', { spend: ils(spendShown.total) })
           }
         />
+        {/* Owner G-14 Q2: no "caught before payment" until H-03 — the card shows "claimed" alone. */}
         <KpiCard
-          label={t('dashboard.kpis.caught')}
-          value={<span data-testid="chain-caught">{ils(caughtShown.total)}</span>}
+          label={t(SHOW_CAUGHT_BEFORE_PAYMENT ? 'dashboard.kpis.caught' : 'dashboard.kpis.claimed')}
+          value={
+            SHOW_CAUGHT_BEFORE_PAYMENT ? (
+              <span data-testid="chain-caught">{ils(caughtShown.total)}</span>
+            ) : (
+              <span className="font-mono tabular-nums" data-testid="chain-claimed">{ils(claimedShown.total)}</span>
+            )
+          }
           tone="gold"
           icon={<ShieldCheck className="h-5 w-5" />}
           subtitle={
-            <>
-              {t('dashboard.kpis.caughtHint')}
-              <span className="block">
-                {t('dashboard.kpis.claimed')}: <span className="font-mono tabular-nums" data-testid="chain-claimed">{ils(claimedShown.total)}</span>
-              </span>
-            </>
+            SHOW_CAUGHT_BEFORE_PAYMENT ? (
+              <>
+                {t('dashboard.kpis.caughtHint')}
+                <span className="block">
+                  {t('dashboard.kpis.claimed')}: <span className="font-mono tabular-nums" data-testid="chain-claimed">{ils(claimedShown.total)}</span>
+                </span>
+              </>
+            ) : undefined
           }
         />
         <KpiCard

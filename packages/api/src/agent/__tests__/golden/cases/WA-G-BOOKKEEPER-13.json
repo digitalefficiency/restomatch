@@ -1,0 +1,45 @@
+{
+  "id": "WA-G-BOOKKEEPER-13",
+  "role": "bookkeeper",
+  "adversarial": false,
+  "flow": "K2",
+  "title": "Consolidated invoices pending are neutral (T4), not a gap",
+  "neverList": [],
+  "ownerRules": [],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "אילו חשבוניות ריכוז לא הותאמו?"
+    }
+  ],
+  "expect": {
+    "intent": "close.status",
+    "tools": [
+      {
+        "name": "close.status",
+        "args": {
+          "month": "2026-10"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [
+      "דחוף",
+      "חריג"
+    ],
+    "buttons": [],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {}
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "caseId": "WA-G-ADV-29",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "payRun.approve",
+      "refusal": "never.payRun",
+      "toolCalls": [],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "cta",
+          "text": "ריצת תשלומים וסימון \"שולם\" עושים רק באפליקציה.",
+          "cta": {
+            "title": "פתח באפליקציה",
+            "url": "https://app.restomatch.test/dashboard/go?r=lab&to=pay-run"
+          }
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "payRunsApproved": 0,
+    "paidMarked": 0
+  }
+}

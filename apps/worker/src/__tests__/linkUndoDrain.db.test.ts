@@ -579,7 +579,7 @@ describe('R9 MEDIUM: turning order questions OFF releases the invoices already h
     try {
       await db.insert(userCredentials).values({ userId: adm!.id, totpSecretEnc: 'ciphertext', totpEnabledAt: new Date() });
       const admin = appRouter.createCaller({ db, session: { userId: adm!.id, restaurantId: null, role: null } } as Parameters<typeof appRouter.createCaller>[0]);
-      await admin.admin.setFeatures({ restaurantId, features: { orderQuestions: false } });
+      await admin.admin.setFeatures({ restaurantId, features: { orderQuestions: false }, reason: 'G-08 kill switch' });
       await drain();
       expect(await poOf(inv)).toEqual([po]);
       expect(await statusOf(inv)).not.toBe('parsed');
@@ -701,7 +701,7 @@ describe('R10 MED: the kill-switch sweep can be retried', () => {
   it('a second OFF save releases a still-held invoice; a released invoice left with no run is re-queued', async () => {
     const { caller, cleanup } = await adminCaller();
     try {
-      await caller.admin.setFeatures({ restaurantId, features: { orderQuestions: false } });
+      await caller.admin.setFeatures({ restaurantId, features: { orderQuestions: false }, reason: 'G-08 kill switch' });
       // Held after the flip (e.g. a job that ran before the redeploy).
       const po = await order([
         { productId: P, raw: 'פלפל אדום' },
@@ -714,7 +714,7 @@ describe('R10 MED: the kill-switch sweep can be retried', () => {
         .update(invoices)
         .set({ status: 'matched', ocrPayload: { provider: 'reconciled', raw: { reviewReasons: ['unlinked'] }, linkReleasedAt: new Date().toISOString(), linkPinPoId: po } as never })
         .where(eq(invoices.id, stranded));
-      const again = await caller.admin.setFeatures({ restaurantId, features: { orderQuestions: false } });
+      const again = await caller.admin.setFeatures({ restaurantId, features: { orderQuestions: false }, reason: 'G-08 kill switch' });
       expect(again).toMatchObject({ release: { ok: true, released: 1, requeued: 2, failed: 0 } });
       await drain();
       expect(await poOf(held)).toEqual([po]);

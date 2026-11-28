@@ -1,0 +1,55 @@
+{
+  "id": "WA-G-OWNER-13",
+  "role": "owner",
+  "adversarial": false,
+  "flow": "O4",
+  "title": "Credit-request letter ready: hand-off to the owner's own WhatsApp",
+  "neverList": [],
+  "ownerRules": [
+    "no-supplier-send",
+    "missing-on-invoice",
+    "partner-wording"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "תכין מכתב בקשת זיכוי לקצביית הכרם"
+    }
+  ],
+  "expect": {
+    "intent": "claim.letter",
+    "tools": [
+      {
+        "name": "suppliers.resolve",
+        "args": {
+          "query": "קצביית הכרם"
+        }
+      },
+      {
+        "name": "recovery.letterDraft",
+        "args": {
+          "supplierId": "sup-meat"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "cta": "שלח מהוואטסאפ שלי",
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "supplierOutboundRows": 0
+    }
+  }
+}

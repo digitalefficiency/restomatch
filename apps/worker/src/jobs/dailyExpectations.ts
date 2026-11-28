@@ -1,4 +1,4 @@
-import { deliveryState, latestReceiptStatusSql } from '@restomatch/api';
+import { briefOptionOn, deliveryState, latestReceiptStatusSql, receiverMorningBrief } from '@restomatch/api';
 import {
   and,
   asc,
@@ -15,7 +15,8 @@ import {
 } from '@restomatch/db';
 import { makeWorker, type WorkerJob } from '../queue';
 import { jobDb } from '../db';
-import { ilDateKey, startOfIlDay } from '../lib/notifyHelpers';
+import { appBaseUrl, ilDateKey, startOfIlDay } from '../lib/notifyHelpers';
+import { sendBrief } from '../lib/briefSend';
 
 export interface DailyExpectationsJob {
   /** When omitted, computes for ALL restaurants. */
@@ -64,6 +65,7 @@ export async function processDailyExpectations(job: WorkerJob<DailyExpectationsJ
     : await db.select().from(restaurants);
 
   const summary: Array<{ restaurantId: string; count: number }> = [];
+  let briefedTotal = 0;
 
   for (const restaurant of restaurantRows) {
     const all = await db
@@ -131,13 +133,39 @@ export async function processDailyExpectations(job: WorkerJob<DailyExpectationsJ
       },
     });
 
+    // AU-04 A4 · the 06:00 receiver truck brief (no ₪). Zero deliveries → nothing.
+    if (expectations.length > 0) {
+      if (!briefOptionOn(restaurant.settings, 'receiverBrief')) {
+        console.log(`[daily-expectations] restaurant=${restaurant.id} skipped: option off`);
+      } else {
+        const deliveries = expectations.map((e) => {
+          const at = rows.find((r) => r.poId === e.poId)?.expectedAt ?? null;
+          // A PO day with no time is stored at Israel midnight: show it as "no time".
+          const hasTime = at != null && at.getTime() !== startOfDay.getTime();
+          return { supplierName: e.supplierName, expectedAt: hasTime ? at : null, lineCount: e.lineCount };
+        });
+        const res = await sendBrief(db, {
+          restaurantId: restaurant.id,
+          now: targetDate,
+          event: `au:A4:${forDate}`,
+          audience: { roles: ['receiver'] },
+          entity: { type: 'restaurant', id: restaurant.id },
+          perishable: true,
+          payload: { automationId: 'A4' },
+          build: ({ locale }) =>
+            receiverMorningBrief({ restaurantId: restaurant.id, baseUrl: appBaseUrl(), locale, ilDate: forDate, deliveries }),
+        });
+        briefedTotal += res.enqueued;
+      }
+    }
+
     summary.push({ restaurantId: restaurant.id, count: expectations.length });
   }
 
   console.log(
     `[daily-expectations] forDate=${forDate} ` +
       `restaurants=${summary.length} ` +
-      `total_pos=${summary.reduce((s, r) => s + r.count, 0)}`,
+      `total_pos=${summary.reduce((s, r) => s + r.count, 0)} receiver_briefs=${briefedTotal}`,
   );
 
   return { date: forDate, summary };

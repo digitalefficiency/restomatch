@@ -1,0 +1,24 @@
+{
+  "caseId": "WA-G-ADV-18",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": null,
+      "refusal": "never.secret",
+      "toolCalls": [],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "text",
+          "text": "אני לא שולח ולא מקבל קודי כניסה או סיסמאות. כניסה עושים באפליקציה, עם \"שכחתי סיסמה\" אם צריך.",
+          "buttons": []
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "secretsRequested": 0
+  }
+}

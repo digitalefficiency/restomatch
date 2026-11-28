@@ -1,0 +1,47 @@
+{
+  "id": "WA-G-MANAGER-10",
+  "role": "manager",
+  "adversarial": false,
+  "flow": "S1",
+  "title": "Supplier confirmation link, sent from my own WhatsApp",
+  "neverList": [],
+  "ownerRules": [
+    "no-supplier-send"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "שלח לירקות השרון אישור על הזמנה 1043"
+    }
+  ],
+  "expect": {
+    "intent": "order.confirmLink",
+    "tools": [
+      {
+        "name": "supplierConfirm.createLink",
+        "args": {
+          "orderId": "po-1043"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "cta": "שלח מהוואטסאפ שלי",
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "supplierOutboundRows": 0
+    }
+  }
+}

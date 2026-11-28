@@ -1,0 +1,34 @@
+{
+  "caseId": "WA-G-MANAGER-09",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "document.reject",
+      "toolCalls": [
+        {
+          "name": "ingest.rejectDocument",
+          "args": {
+            "documentId": "doc-77"
+          },
+          "result": {
+            "status": "rejected"
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "text",
+          "text": "נדחה. המסמך לא ייקלט.",
+          "buttons": []
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "documentsRejected": 1,
+    "rowsDeleted": 0
+  }
+}
