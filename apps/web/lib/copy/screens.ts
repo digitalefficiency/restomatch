@@ -69,7 +69,7 @@ export const SCREENS: CopyScreen[] = [
   { id: 'manager-home-phone', route: '/dashboard', role: 'manager', vp: 'phone', type: 'dashboard', baseline: { first: 15, page: 15, blocks: 0 }, note: "r7: + the question line 'N מוצרים מחכים לשאלה: זה אותו מוצר?' + 'ענו על השאלות' (9)", adopter: 'W2-08' },
   // Detail — 1440×900
   { id: 'leak-proof', route: '/dashboard/leaks/proof', role: 'owner', vp: 'desktop', type: 'detail', baseline: { first: 69, page: 171, blocks: 4 }, note: "per-invoice proof list is [data-record]; r7: + the awaiting-question line (10 + 'לשאלות'); first with records collapsed: + 'סה״כ N החשבוניות…' (3)", adopter: 'W2-09' },
-  { id: 'settings', route: '/dashboard/settings', role: 'owner', vp: 'desktop', type: 'detail', baseline: { first: 94, page: 465, blocks: 3 }, note: 'grew with train C (W2-14 rules, roles, account cards); r4: headers and rule lists count; r5: the random referral code is [data-record]', adopter: 'W2-14' },
+  { id: 'settings', route: '/dashboard/settings', role: 'owner', vp: 'desktop', type: 'detail', baseline: { first: 94, page: 480, blocks: 3 }, note: 'grew with train C (W2-14 rules, roles, account cards); r4: headers and rule lists count; r5: the random referral code is [data-record]; G-15b +15: the owner pay-approval knob (one rule line + field label + chip, trimmed from +31, no hint)', adopter: 'W2-14' },
   { id: 'exports', route: '/dashboard/exports', role: 'owner', vp: 'desktop', type: 'detail', baseline: { first: 104, page: 147, blocks: 2 }, note: "export history is data; r7: + 'N בלי תאריך לא ייכללו' (4)", adopter: 'W2-14' },
 ];
 
