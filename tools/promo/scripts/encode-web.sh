@@ -13,12 +13,16 @@ q() { ffmpeg -v error -y "$@"; }
 for l in he en; do
   src=out/restomatch-promo-$l.mp4
   [ -f "$src" ] || continue
-  q -i "$src" -vf scale=1280:720:flags=lanczos -c:v libx264 -profile:v high -preset slow -crf 23 \
+  # -g 60: a keyframe every 2 s, so a phone can seek the film without decoding ~8 s of frames
+  q -i "$src" -vf scale=1280:720:flags=lanczos -c:v libx264 -profile:v high -preset slow -crf 23 -g 60 -keyint_min 30 \
     -pix_fmt yuv420p -color_range tv -movflags +faststart -an "$M/promo-$l-720.mp4"
   q -ss 18.7 -i "$src" -frames:v 1 -vf scale=1280:720 -q:v 4 "$M/promo-poster-$l.jpg"
   for t in 5.5 18.7 49; do q -ss "$t" -i "$M/promo-$l-720.mp4" -frames:v 1 "$G/$l-720-${t}s.jpg"; done
   echo "✓ promo $l: $(stat -c %s "$M/promo-$l-720.mp4") B"
 done
+
+# The hero loops are pinned bytes (heroMedia.ts): re-encoded only on request (LOOPS=1).
+[ "${LOOPS:-0}" = 1 ] || { echo "(hero loops skipped — LOOPS=1 to re-encode)"; exit 0; }
 
 loop() { # master suffix
   local src=$1 sfx=$2
@@ -33,6 +37,3 @@ loop() { # master suffix
 loop out/hero-loop-master.mp4 ""
 loop out/hero-loop-en-master.mp4 "-en"
 
-if [ -f out/restomatch-promo-he-vertical.mp4 ]; then
-  q -ss 9 -i out/restomatch-promo-he-vertical.mp4 -frames:v 1 -vf scale=540:-1 "$G/he-vertical-9s.jpg"
-fi

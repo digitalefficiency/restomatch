@@ -6,7 +6,7 @@ import { briefHtml } from './render';
 import type { BriefContext, BriefMessage } from './types';
 
 /**
- * A7 · honest match alerts: a RE-match notifies only when it finds something NEW.
+ * A1 · honest match alerts: a RE-match notifies only when it finds something NEW.
  *
  * "New" is NOT `persisted.rolesNeedingNotification` — that set holds every finding
  * with no prior DECISION, so an open, undecided finding carried over from the last
@@ -60,7 +60,7 @@ export function matchAlertBrief(input: MatchAlertInput): BriefMessage | null {
   const n = input.newKeys.length;
   const deepLink = goLink(input.baseUrl, input.restaurantId, `/dashboard/invoices/${encodeURIComponent(input.invoiceId)}`);
   const line = c.line(n, input.invoiceRef, input.supplierName);
-  const ilsLine = input.leakAgorot != null && input.leakAgorot > 0 ? c.ils(briefIls(input.leakAgorot, locale)) : null;
+  const ilsLine = input.leakAgorot != null && input.leakAgorot > 0 ? c.ils(briefIls(input.leakAgorot, locale, { agorot: true })) : null;
   const subject = c.subject(n, input.supplierName);
   const text = `${line}${ilsLine ? `\n${ilsLine}` : ''}\n\n${c.cta}: ${deepLink}`;
   const html = briefHtml({
@@ -70,5 +70,5 @@ export function matchAlertBrief(input: MatchAlertInput): BriefMessage | null {
     lines: [{ text: line }, ...(ilsLine ? [{ text: ilsLine }] : [])],
     cta: { label: c.cta, url: deepLink },
   });
-  return { subject, text, html, deepLink, dedupeSuffix: `${input.invoiceId}:${identitySetHash(input.newKeys)}`, automationId: 'A7', invoiceId: input.invoiceId };
+  return { subject, text, html, deepLink, dedupeSuffix: `${input.invoiceId}:${identitySetHash(input.newKeys)}`, automationId: 'A1', invoiceId: input.invoiceId };
 }

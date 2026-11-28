@@ -1,0 +1,37 @@
+{
+  "caseId": "WA-G-BOOKKEEPER-08",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "decide.claim",
+      "toolCalls": [
+        {
+          "name": "wa.stageAction",
+          "args": {
+            "discrepancyId": "d-dry-330-1",
+            "action": "approve"
+          },
+          "result": {
+            "staged": false,
+            "reason": "requiredRole",
+            "requiredRole": "manager"
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "text",
+          "text": "הפער של יבשים בן-עמי מחכה למנהל. אין צורך בפעולה ממך.",
+          "buttons": []
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "stagedTokens": 0,
+    "approvalsDecided": 0
+  }
+}

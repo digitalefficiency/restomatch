@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
+import type { SQL } from 'drizzle-orm';
 import { and, auditLog, eq, notificationsOutbox, restaurants, sql, type Database } from '@restomatch/db';
 import { recordAudit, type AuditAction } from '../audit';
 import { appError } from '../errors';
@@ -48,8 +49,13 @@ export function israelWeekStart(now: Date): Date {
   return startOfLocalDateInTz(sunday.toISOString().slice(0, 10), TZ);
 }
 
-function matchSql(m: Exclude<OutboxMatch, { kind: 'none' }>) {
+function matchSql(m: Exclude<OutboxMatch, { kind: 'none' }>): SQL {
   switch (m.kind) {
+    case 'anyOf':
+      return sql`(${sql.join(
+        m.matchers.map((x) => matchSql(x)),
+        sql` or `,
+      )})`;
     case 'prefix':
       // starts_with: no LIKE wildcards to escape in a literal prefix.
       return sql`starts_with(${notificationsOutbox.dedupeKey}, ${m.prefix})`;

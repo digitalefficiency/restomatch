@@ -1,0 +1,53 @@
+{
+  "id": "WA-G-OWNER-14",
+  "role": "owner",
+  "adversarial": false,
+  "flow": "O4",
+  "title": "\"כן, נשלח\" moves the claim to letter_sent and starts the 7-day clock",
+  "neverList": [],
+  "ownerRules": [
+    "claim-overdue-7d",
+    "no-supplier-send"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "tap": {
+        "kind": "button_reply",
+        "id": "sent:claim-meat-1",
+        "title": "כן, נשלח"
+      }
+    }
+  ],
+  "expect": {
+    "intent": "claim.markSent",
+    "tools": [
+      {
+        "name": "recovery.transition",
+        "args": {
+          "claimId": "claim-meat-1",
+          "to": "letter_sent"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "claimsTransitioned": 1,
+      "supplierOutboundRows": 0
+    }
+  }
+}

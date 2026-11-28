@@ -1,0 +1,51 @@
+{
+  "id": "WA-G-MANAGER-03",
+  "role": "manager",
+  "adversarial": false,
+  "flow": "M1",
+  "title": "Owner-routed item: information + web CTA, no token",
+  "neverList": [],
+  "ownerRules": [
+    "wd2-500"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "תאשר את הפער של מחלבות הגליל"
+    }
+  ],
+  "expect": {
+    "intent": "decide.claim",
+    "tools": [
+      {
+        "name": "wa.stageAction",
+        "args": {
+          "discrepancyId": "d-dairy-118-1",
+          "action": "approve"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [
+      "אשר 260 ₪"
+    ],
+    "cta": "לאישור באפליקציה",
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "stagedTokens": 0,
+      "approvalsDecided": 0
+    }
+  }
+}

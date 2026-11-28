@@ -12,6 +12,7 @@ import {
   ConfirmDialog,
   DateField,
   EmptyState,
+  Explain,
   Input,
   LinkButton,
   Money,
@@ -139,6 +140,8 @@ function CountForm({ draft, viewer, onDone }: { draft: Draft; viewer: CountViewe
   // Local edits win over the server copy until the server has them.
   const [edits, setEdits] = useState<Record<string, Edit>>({});
   const [inputs, setInputs] = useState<Record<string, string>>({});
+  /** IA-02 §4: the one line whose price source is behind a "למה?" fold (the last focused qty). */
+  const [focusedId, setFocusedId] = useState<string | null>(null);
   const [invalid, setInvalid] = useState<Record<string, boolean>>({});
   const [ambiguous, setAmbiguous] = useState<Record<string, [string, string]>>({});
   const [confirmed, setConfirmed] = useState<Record<string, string>>({});
@@ -596,6 +599,7 @@ function CountForm({ draft, viewer, onDone }: { draft: Draft; viewer: CountViewe
                               placeholder="—"
                               aria-invalid={bad ? true : undefined}
                               aria-describedby={open ? `guard-${l.productId}` : undefined}
+                              onFocus={() => setFocusedId(l.productId)}
                               onChange={(e) => onQty(l.productId, e.target.value)}
                               onKeyDown={(e) => {
                                 if (e.key === 'Enter') {
@@ -611,10 +615,8 @@ function CountForm({ draft, viewer, onDone }: { draft: Draft; viewer: CountViewe
                           </div>
                         )}
                       </div>
-                      {money && l.priceSource && l.unitCost ? (
-                        <p className="mt-1 text-sm text-muted" data-testid="price-source">
-                          <PriceSourceText unitCost={l.unitCost} unit={l.unit} source={l.priceSource} />
-                        </p>
+                      {money && l.priceSource && focusedId === l.productId ? (
+                        <PriceWhy name={locale === 'en' && l.nameEn ? l.nameEn : l.name} source={l.priceSource} className="mt-1" />
                       ) : null}
                       {money && l.qty != null && (l.status === 'noPrice' || l.status === 'unitMismatch') ? (
                         <Badge tone="neutral" className="mt-1">
@@ -940,24 +942,26 @@ function DoneSummary({ done }: { done: Done }) {
 }
 
 /** "₪149.00 per kg · invoice ‹4711›, 20 Oct 2026, HaKerem Butchery" — the paid price the owner recognises, never truncated. */
-export function PriceSourceText({
-  unitCost,
-  unit,
+/**
+ * IA-02 §4 · the price source behind one "למה?" fold: invoice, date and
+ * supplier, no ₪ (W2-16: fold bodies hold no money; the unit cost has its own
+ * column / the line value). Render it on ONE line at a time.
+ */
+export function PriceWhy({
+  name,
   source,
+  className,
 }: {
-  unitCost: string;
-  unit: string;
+  name: string;
   source: { invoiceNumber: string | null; invoiceDate: string | null; supplierName: string | null; observedAt: string };
+  className?: string;
 }) {
   const t = useT(inventoryNs);
   const locale = useLocale();
   const date = source.invoiceDate ? dayText(source.invoiceDate, locale) : dayText(source.observedAt.slice(0, 10), locale);
-  const price = moneyText(Number(unitCost), 'line', locale);
-  return source.invoiceNumber ? (
-    <>
-      {t('count.priceFrom', { price, unit, invoice: '⁨' + source.invoiceNumber + '⁩', date, supplier: source.supplierName ?? '—' })}
-    </>
-  ) : (
-    <>{t('count.priceFromNoInvoice', { price, unit, supplier: source.supplierName ?? '—', date })}</>
-  );
+  const supplier = source.supplierName ?? '—';
+  const body = source.invoiceNumber
+    ? t('priceWhy.explain.invoice', { invoice: '\u2068' + source.invoiceNumber + '\u2069', date, supplier })
+    : t('priceWhy.explain.noInvoice', { date, supplier });
+  return <Explain body={body} about={t('priceWhy.aria.about', { name })} testId="price-source" className={className} />;
 }

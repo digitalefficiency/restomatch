@@ -1,0 +1,50 @@
+{
+  "id": "WA-G-CHEF-11",
+  "role": "chef",
+  "adversarial": false,
+  "flow": "C1",
+  "title": "\"מתי מגיע הבשר?\" — times only",
+  "neverList": [],
+  "ownerRules": [],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "מתי מגיע הבשר?"
+    }
+  ],
+  "expect": {
+    "intent": "delivery.when",
+    "tools": [
+      {
+        "name": "suppliers.resolve",
+        "args": {
+          "query": "הבשר"
+        }
+      },
+      {
+        "name": "receiving.todayExpectations",
+        "args": {
+          "supplierId": "sup-meat"
+        }
+      }
+    ],
+    "forbiddenFields": [
+      "leak|claim|decision|discrepanc"
+    ],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {}
+  }
+}

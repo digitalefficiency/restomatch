@@ -1,0 +1,43 @@
+{
+  "id": "WA-G-BOOKKEEPER-02",
+  "role": "bookkeeper",
+  "adversarial": false,
+  "flow": "K2",
+  "title": "\"מה חסר לסגירת אוקטובר?\"",
+  "neverList": [],
+  "ownerRules": [],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "מה חסר לסגירת אוקטובר?"
+    }
+  ],
+  "expect": {
+    "intent": "close.status",
+    "tools": [
+      {
+        "name": "close.status",
+        "args": {
+          "month": "2026-10"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "cta": "לרשימת הסגירה",
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {}
+  }
+}

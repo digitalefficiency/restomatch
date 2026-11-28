@@ -12,6 +12,7 @@
  */
 import {
   awaitingDecisionDetail,
+  briefOptionOn,
   enqueueNotification,
   endOfDayReportEmail,
   formatIlsAgorot,
@@ -154,6 +155,12 @@ export async function processEndOfDayReport(job: WorkerJob<EndOfDayReportJob>) {
   let skipped = 0;
 
   for (const restaurant of restaurantRows) {
+    // AU-04 A7: the owner's off switch (AU-01 option, default on).
+    if (!briefOptionOn(restaurant.settings, 'eveningDigest')) {
+      console.log(`[end-of-day-report] restaurant=${restaurant.id} skipped: option off`);
+      skipped += 1;
+      continue;
+    }
     // Open credits = THE "awaiting decision" figure (G-12a): the same rows and
     // ₪ (the letters' claims rule, before VAT) as the queue tiles, home and the
     // nav badge — never a raw Σ|Δ|. Restaurant-wide (scope 'all', owner view).
