@@ -203,10 +203,14 @@ export {
 } from './catalog/parse';
 export {
   commitCatalogRows,
+  recordImportSummary,
+  storedBasis,
+  IMPORT_CHUNK_AUDIT_ACTION,
   type CommitArgs,
   type CommitResult,
   type AmbiguousRow,
 } from './catalog/commit';
+export { finalizeFailedImport, LIVE_IMPORT_CUTOFF_MINUTES } from './catalog/importLifecycle';
 // G-08 kill switch: release invoices held for order questions (admin + worker script).
 export { releaseOrderQuestionHolds } from './routers/mapping';
 // G-08: the shared "open question" rules (mapping router, match job, OCR job).
@@ -281,6 +285,8 @@ export {
   DEFAULT_WINDOW_DAYS,
 } from './priceAlerts/detect';
 export { priceAlertEmail } from './priceAlerts/email';
+// W3-10: the worker's import tests check what AU-13 will announce for a chunked import.
+export { pendingListDiffs } from './priceAlerts/priceListDiff';
 export * as leakCheck from './leakCheck';
 export * as claimPortal from './claimPortal';
 export {

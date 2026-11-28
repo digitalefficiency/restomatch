@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { badgeAria, cappedCount, readSeen, taskSig, toRouteBadges, unseenCount, writeSeen } from '../model';
 
-const words = { items: (c: string) => `${c} פריטים`, atRisk: (a: string) => `${a} בסיכון`, owed: (a: string) => `${a} זיכויים פתוחים`, blocking: 'חוסם תשלום' };
+const words = { items: (c: string) => `${c} פריטים`, atRisk: (a: string) => `${a} בסיכון`, owed: (a: string) => `${a} זיכויים פתוחים`, unchecked: (a: string) => `${a} עוד לא נבדקו`, blocking: 'חוסם תשלום' };
 const t = (entityId: string, count = 1, ilsAgorot: number | null = 100, scope: 'mine' | 'others' = 'mine') => ({ entityId, count, ilsAgorot, scope });
 
 describe('bell seen-state (W2-08 §5.4)', () => {

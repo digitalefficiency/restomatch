@@ -25,6 +25,7 @@ export function decodeCsvBytes(bytes: Uint8Array): string {
 }
 
 export type CatalogErrorKey =
+  | 'IMPORT_RUNNING'
   | 'TOO_LARGE'
   | 'TOO_MANY_ROWS'
   | 'LEGACY_XLS'
@@ -35,6 +36,8 @@ export type CatalogErrorKey =
   | 'FLAGGED_PRICES';
 
 const KNOWN: CatalogErrorKey[] = [
+  // W3-10 round 4: one import per supplier at a time.
+  'IMPORT_RUNNING',
   'TOO_LARGE',
   'TOO_MANY_ROWS',
   'LEGACY_XLS',

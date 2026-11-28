@@ -326,6 +326,8 @@ export async function recoverStalled(
     RETURNING status, queue, payload, restaurant_id::text`;
   const ocrDead = rows.filter((r) => r.status === 'failed' && r.queue === 'ocr-invoice');
   if (ocrDead.length) await markStalledOcrInvoicesFailed(sql, ocrDead);
+  const importDead = rows.filter((r) => r.status === 'failed' && r.queue === 'import-catalog');
+  if (importDead.length) await markStalledCatalogImportsFailed(sql, importDead);
   return {
     requeued: rows.filter((r) => r.status === 'queued').length,
     failed: rows.filter((r) => r.status === 'failed').length,
@@ -364,6 +366,123 @@ async function markStalledOcrInvoicesFailed(
     } catch (err) {
       console.warn(`[queue] could not mark the invoice of a stalled OCR job failed: ${err instanceof Error ? err.message : err}`);
     }
+  }
+}
+
+/**
+ * W3-10 round 3 · an import-catalog job dead-lettered by stall recovery (its
+ * runner was killed twice mid-chunk) never reached the job's own failure path,
+ * so its import would stay 'pending' — neither resumable nor revertable, and
+ * blocking the supplier's "undo the latest import". Mark it failed (only while
+ * still pending / mapped, only the job's own tenant) and queue a small
+ * `finalize` job (no file) that writes the import's partial summary, so the
+ * chunks that went live are announced and can be undone. Logged, never thrown.
+ */
+async function markStalledCatalogImportsFailed(
+  sql: Sql,
+  jobs: Array<{ payload: unknown; restaurant_id: string | null }>,
+): Promise<void> {
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  for (const j of jobs) {
+    const p = (j.payload ?? {}) as { importId?: unknown; supplierId?: unknown; mapping?: unknown; file?: { filename?: unknown } };
+    if (typeof p.importId !== 'string' || !UUID.test(p.importId) || !j.restaurant_id) continue;
+    try {
+      const marked = await sql`
+        UPDATE catalog_imports
+           SET status = 'failed', error = 'stalled: the import run was cut off twice'
+         WHERE id = ${p.importId}::uuid AND restaurant_id = ${j.restaurant_id}::uuid AND status IN ('pending', 'mapped')
+        RETURNING id`;
+      if (marked.length === 0) continue;
+      await insertJob(
+        sql,
+        'import-catalog',
+        {
+          restaurantId: j.restaurant_id,
+          supplierId: p.supplierId,
+          importId: p.importId,
+          file: { filename: typeof p.file?.filename === 'string' ? p.file.filename : '' },
+          mapping: p.mapping ?? {},
+          finalize: true,
+        },
+        { restaurantId: j.restaurant_id, maxAttempts: 3, dedupeKey: `import-catalog:finalize:${p.importId}` },
+      );
+    } catch (err) {
+      console.warn(`[queue] could not mark the import of a stalled import-catalog job failed: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+}
+
+/** W3-10 round 4: an import with no job and no activity for this long is orphaned (api LIVE_IMPORT_CUTOFF_MINUTES). */
+export const CATALOG_IMPORT_ORPHAN_MINUTES = 30;
+
+/**
+ * W3-10 round 4 · queue maintenance for price-list imports (it sees job_queue,
+ * which the tenant connection cannot):
+ *  - an import still pending / mapped with no queued or active import-catalog
+ *    job and no activity (created, or a chunk recorded) for
+ *    CATALOG_IMPORT_ORPHAN_MINUTES is orphaned: it ends failed;
+ *  - an import that ended failed with chunks but no summary (its finalize could
+ *    not run) is finalized;
+ * both by queueing one `finalize` job per import (dedupe key), which writes the
+ * partial summary. Returns how many were queued. Logged, never thrown.
+ */
+export async function failOrphanedCatalogImports(sql: Sql, cutoffMinutes = CATALOG_IMPORT_ORPHAN_MINUTES): Promise<number> {
+  try {
+    const rows = await sql<Array<{ id: string; restaurant_id: string; supplier_id: string; filename: string; column_mapping: unknown }>>`
+      WITH cand AS (
+        SELECT i.id, i.restaurant_id, i.supplier_id, i.filename, i.column_mapping, i.status
+          FROM catalog_imports i
+         WHERE NOT EXISTS (SELECT 1 FROM job_queue j
+                            WHERE j.queue = 'import-catalog' AND j.status IN ('queued', 'active')
+                              AND j.payload ->> 'importId' = i.id::text)
+           AND (
+             (i.status IN ('pending', 'mapped')
+              AND greatest(i.created_at, coalesce((SELECT max(a.at) FROM audit_log a
+                    WHERE a.entity_type = 'catalog_import' AND a.entity_id = i.id AND a.restaurant_id = i.restaurant_id
+                      AND a.action = 'catalog.import_chunk_committed'), i.created_at))
+                  < now() - ${cutoffMinutes} * interval '1 minute')
+             OR
+             (i.status = 'failed' AND i.created_at > now() - interval '7 days'
+              -- once: never again after its finalize job ran (done or failed)
+              AND NOT EXISTS (SELECT 1 FROM job_queue f WHERE f.queue = 'import-catalog'
+                                AND f.dedupe_key = 'import-catalog:finalize:' || i.id::text)
+              AND EXISTS (SELECT 1 FROM audit_log a WHERE a.entity_type = 'catalog_import' AND a.entity_id = i.id AND a.restaurant_id = i.restaurant_id
+                            AND a.action = 'catalog.import_chunk_committed')
+              AND NOT EXISTS (SELECT 1 FROM audit_log a WHERE a.entity_type = 'catalog_import' AND a.entity_id = i.id AND a.restaurant_id = i.restaurant_id
+                                AND a.action IN ('catalog.import_committed', 'catalog.import_reverted')))
+           )
+         ORDER BY i.created_at, i.id
+         LIMIT 100
+         -- never wait behind a tenant transaction holding the import row
+         FOR UPDATE OF i SKIP LOCKED
+      ), marked AS (
+        UPDATE catalog_imports c
+           SET status = 'failed', error = coalesce(c.error, 'orphaned: no job and no progress')
+          FROM cand
+         WHERE c.id = cand.id AND c.status IN ('pending', 'mapped')
+      )
+      SELECT id::text, restaurant_id::text, supplier_id::text, filename, column_mapping FROM cand`;
+    let queued = 0;
+    for (const r of rows) {
+      const job = await insertJob(
+        sql,
+        'import-catalog',
+        {
+          restaurantId: r.restaurant_id,
+          supplierId: r.supplier_id,
+          importId: r.id,
+          file: { filename: r.filename },
+          mapping: r.column_mapping ?? {},
+          finalize: true,
+        },
+        { restaurantId: r.restaurant_id, maxAttempts: 3, dedupeKey: `import-catalog:finalize:${r.id}` },
+      );
+      if (job) queued += 1;
+    }
+    return queued;
+  } catch (err) {
+    console.warn(`[queue] orphaned catalog import sweep failed: ${err instanceof Error ? err.message : err}`);
+    return 0;
   }
 }
 

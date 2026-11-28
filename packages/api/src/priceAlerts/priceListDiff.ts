@@ -83,9 +83,18 @@ export async function pendingListDiffs(db: Database, restaurantId: string, now: 
         .where(and(eq(auditLog.restaurantId, restaurantId), eq(auditLog.action, LIST_DIFF_AUDIT)))
     ).map((r) => (r.after as { importId?: string } | null)?.importId ?? ''),
   );
+  // W3-10 (granted line): a reverted import is never announced.
+  const reverted = new Set(
+    (
+      await db
+        .select({ entityId: auditLog.entityId })
+        .from(auditLog)
+        .where(and(eq(auditLog.restaurantId, restaurantId), eq(auditLog.action, 'catalog.import_reverted')))
+    ).map((r) => r.entityId ?? ''),
+  );
   const todo = imports
     .map((i) => ({ ...i, importId: i.entityId ?? i.id, rec: (i.after ?? {}) as { supplierId?: string; priceChanges?: PriceChange[] } }))
-    .filter((i) => !announced.has(i.importId) && i.rec.supplierId && Array.isArray(i.rec.priceChanges));
+    .filter((i) => !announced.has(i.importId) && !reverted.has(i.importId) && i.rec.supplierId && Array.isArray(i.rec.priceChanges));
   if (todo.length === 0) return [];
   const names = new Map(
     (
