@@ -8,9 +8,13 @@ import { e2eSql, loginViaMagicLink } from './helpers';
  * W2-04 · the approvals desk, on the seeded demo owner.
  *
  * Fixture (owner-routed, warn, due in 20 days, so W1-07's block rows sort first):
- *   W204-1 · two gaps · ₪100.00 + ₪50.00 = ₪150.00 → the group primary is offered;
+ *   W204-1 · two gaps · ₪100.00 + ₪50.00 = ₪150.00 → "approve the whole invoice" is offered;
  *   W204-2 · two gaps · ₪150.00 + ₪60.00 = ₪210.00 → over the ₪200 per-invoice cap;
  *   W204-3 · one manager-routed gap (the escalation test).
+ *
+ * DS3-04: rows grouped by tier replace the invoice cards on purpose (SPEC §10.2); a gap is reached by its row
+ * (`data-id`) or by `?sel=`, and its evidence (`approval-evidence`, keyed by `data-id`) holds the group action and the
+ * history.
  */
 test.use({ storageState: OWNER_STATE });
 
@@ -118,8 +122,9 @@ async function statuses(ids: string[]): Promise<string[]> {
   }
 }
 
-const group = (page: Page, n: string) => page.getByTestId('approval-group').filter({ hasText: n });
-const cardsOf = (page: Page, n: string) => page.getByTestId('approval-card').filter({ hasText: n });
+// Rows replace cards on purpose (DS3-04, SPEC §10.2): a fixture gap is its row, found by id.
+const row = (p: Page, id: string) => p.locator(`[data-testid="approval-row"][data-id="${id}"]`);
+const ev = (p: Page) => p.getByTestId('approval-evidence');
 
 async function axeSerious(page: Page): Promise<string[]> {
   await page.addScriptTag({ content: AXE_SOURCE });
@@ -141,18 +146,18 @@ test.describe('desktop 1440 he', () => {
   test.use({ viewport: { width: 1440, height: 900 } });
   test.beforeEach(async ({ page }) => setLocale(page, 'he'));
 
-  test('cards group by invoice; the group primary only within the ₪200 cap', async ({ page }) => {
-    await page.goto('/dashboard/approvals');
-    const a = group(page, 'W204-1');
-    await expect(a).toContainText('150.00');
-    await expect(a).toContainText('₪');
-    await expect(a).toContainText('2 פערים');
-    await expect(a.getByTestId('group-approve')).toBeVisible();
-    const b = group(page, 'W204-2');
-    await expect(b.getByTestId('group-approve')).toHaveCount(0);
-    await expect(b.getByTestId('group-why')).toBeVisible();
-    // ₪ sits left of its first digit in he.
-    const box = await a.getByTestId('group-at-risk').evaluate((el) => {
+  test('approve the whole invoice from a gap\'s evidence, only within the ₪200 cap', async ({ page }) => {
+    // Tiers replace invoice groups (DS3-04): "approve the whole invoice" lives in the evidence of a gap whose invoice
+    // qualifies (W2-04's rows are PRICE_HIGHER: no VAT gap).
+    await page.goto(`/dashboard/approvals?sel=${fx.a[0]}`);
+    await expect(ev(page)).toHaveAttribute('data-id', fx.a[0]);
+    await expect(ev(page).getByTestId('desk-group-more')).toContainText('עוד פער אחד בחשבונית');
+    const groupApprove = ev(page).getByTestId('group-approve');
+    await expect(groupApprove).toBeVisible();
+    await expect(groupApprove).toContainText('150.00');
+    await expect(groupApprove).toContainText('₪');
+    // ₪ sits left of its first digit in he (the button's <Money> is one text node).
+    const box = await groupApprove.locator('bdi').first().evaluate((el) => {
       const range = document.createRange();
       const text = el.firstChild as Text;
       const i = text.data.indexOf('₪');
@@ -165,8 +170,15 @@ test.describe('desktop 1440 he', () => {
       return { sh: sh.left, digit: range.getBoundingClientRect().left };
     });
     expect(box.sh).toBeLessThan(box.digit);
+    // Over the ₪200 cap: no group action, one line says why.
+    await page.goto(`/dashboard/approvals?sel=${fx.b[0]}`);
+    await expect(ev(page)).toHaveAttribute('data-id', fx.b[0]);
+    await expect(ev(page).getByTestId('group-approve')).toHaveCount(0);
+    await expect(ev(page).getByTestId('group-why')).toBeVisible();
 
-    await a.getByTestId('group-approve').click();
+    await page.goto(`/dashboard/approvals?sel=${fx.a[0]}`);
+    await expect(ev(page)).toHaveAttribute('data-id', fx.a[0]);
+    await ev(page).getByTestId('group-approve').click();
     await expect.poll(() => statuses(fx.a)).toEqual(['accepted', 'accepted']);
     const sql = e2eSql();
     try {
@@ -182,8 +194,8 @@ test.describe('desktop 1440 he', () => {
 
   test('2-pane evidence without navigation; ?sel= survives a reload; J/K + X; BatchBar Σ and the cap', async ({ page }) => {
     await page.goto('/dashboard/approvals');
-    const first = cardsOf(page, 'W204-1').first();
-    await first.getByTestId('card-evidence').click();
+    // The row's summary cell (DS3-04: rows replace cards).
+    await row(page, fx.a[0]).getByTestId('card-evidence').click();
     await expect(page).toHaveURL(/[?&]sel=/);
     expect(new URL(page.url()).pathname).toBe('/dashboard/approvals');
     const pane = page.getByTestId('approvals-evidence-pane');
@@ -211,15 +223,17 @@ test.describe('desktop 1440 he', () => {
   });
 
   test('history disclosure shows the trail', async ({ page }) => {
-    await page.goto('/dashboard/approvals');
-    const h = cardsOf(page, 'W204-2').first().getByTestId('approval-history');
+    // The history lives in the evidence of the selected gap (DS3-04).
+    await page.goto(`/dashboard/approvals?sel=${fx.b[0]}`);
+    const h = page.getByTestId('approvals-evidence-pane').getByTestId('approval-history');
     await h.locator('summary').click();
     await expect(h).toContainText(/אין עדיין החלטות|·/);
   });
 
   test('axe he: 0 critical / serious', async ({ page }) => {
     await page.goto('/dashboard/approvals');
-    await expect(group(page, 'W204-1')).toBeVisible();
+    // The fixture's row (DS3-04: rows replace invoice groups).
+    await expect(row(page, fx.a[0])).toBeVisible();
     expect(await axeSerious(page)).toEqual([]);
   });
 });
@@ -228,9 +242,9 @@ test.describe('owner: a card escalated to me while open updates in place (warden
   test.use({ viewport: { width: 1440, height: 900 } });
   test('CONFLICT "escalated" → "הועבר אליך", actions kept, the next tap decides', async ({ page }) => {
     await setLocale(page, 'he');
-    await page.goto('/dashboard/approvals');
-    const card = cardsOf(page, 'W204-3').first();
-    await expect(card).toBeVisible();
+    // The gap is selected (DS3-04: its decision bar is under its evidence).
+    await page.goto(`/dashboard/approvals?sel=${fx.c}`);
+    await expect(ev(page)).toHaveAttribute('data-id', fx.c);
     // A manager escalates it to the owner underneath the open page.
     const sql = e2eSql();
     try {
@@ -238,17 +252,21 @@ test.describe('owner: a card escalated to me while open updates in place (warden
     } finally {
       await sql.end();
     }
-    await card.getByTestId('decide-approve').click();
-    await expect(card).toContainText('הועבר אליך');
-    await expect(card.getByTestId('decide-approve')).toBeEnabled();
-    await card.getByTestId('decide-approve').click();
+    await page.getByTestId('decide-approve').click();
+    // The CONFLICT returns the selection to the gap, its note in the evidence pane (DS3-04).
+    await expect(page.getByTestId('approvals-evidence-pane')).toContainText('הועבר אליך');
+    await expect(ev(page)).toHaveAttribute('data-id', fx.c);
+    await expect(page.getByTestId('decide-approve')).toBeEnabled();
+    await page.getByTestId('decide-approve').click();
     await expect.poll(() => statuses([fx.c])).toEqual(['accepted']);
   });
 });
 
-test.describe('desktop 1536: three panes', () => {
+// DS3-04: the third pane is dropped (SPEC §10.2): from 1280 px the desk has two panes, the decision bar under the
+// documents.
+test.describe('desktop 1536', () => {
   test.use({ viewport: { width: 1536, height: 900 } });
-  test('list | document | decision', async ({ page }) => {
+  test('documents and decision beside the queue', async ({ page }) => {
     await setLocale(page, 'he');
     await page.goto(`/dashboard/approvals?sel=${fx.a[0]}`);
     const doc = page.locator('[data-pane="document"]');
@@ -259,26 +277,29 @@ test.describe('desktop 1536: three panes', () => {
       doc.boundingBox(),
       dec.boundingBox(),
     ]);
-    // RTL: list at the start (right), then the document, then the decision.
+    // RTL: the list at the start (right), the document beside it; the decision bar sits under the documents.
     expect(list!.x).toBeGreaterThan(d!.x);
-    expect(d!.x).toBeGreaterThan(k!.x);
+    expect(k!.y).toBeGreaterThan(d!.y);
   });
 });
 
 test.describe('phone 390', () => {
   test.use({ viewport: PHONE, hasTouch: true });
-  test('evidence opens in a Peek with no navigation', async ({ page }) => {
+  test('one gap at a time, no Peek', async ({ page }) => {
     await setLocale(page, 'he');
     await page.goto('/dashboard/approvals');
-    await cardsOf(page, 'W204-1').first().getByTestId('card-evidence').click();
-    await expect(page.getByRole('dialog').getByTestId('approval-evidence')).toBeVisible();
+    // Narrow layout (DS3-04): the evidence of one gap is on the page itself, no Peek dialog, no rows.
+    await expect(ev(page)).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByTestId('approval-row').first()).toBeHidden();
     expect(new URL(page.url()).pathname).toBe('/dashboard/approvals');
   });
 
-  test('the [invoiceId] landing: one card, the 50/50 48 px pair in the bottom third', async ({ page }) => {
+  test('the [invoiceId] landing: one gap, the stacked pair in the bottom third', async ({ page }) => {
     await setLocale(page, 'he');
     await page.goto(`/dashboard/approvals/${fx.inv.a}`);
-    await expect(page.getByTestId('approval-card')).toHaveCount(1);
+    // Single mode (DS3-04): one gap's evidence.
+    await expect(page.getByTestId('approval-evidence')).toHaveCount(1);
     const pair = page.getByTestId('decide-pair');
     const ap = await pair.getByTestId('decide-approve').boundingBox();
     const rj = await pair.getByTestId('decide-reject').boundingBox();
@@ -287,8 +308,8 @@ test.describe('phone 390', () => {
     expect(ap!.y).toBeGreaterThan((PHONE.height * 2) / 3 - ap!.height);
     await pair.getByTestId('decide-approve').click();
     await expect.poll(async () => (await statuses(fx.a)).filter((s) => s === 'accepted').length).toBe(1);
-    // The next card slides up in its place.
-    await expect(page.getByTestId('approval-card')).toHaveCount(1);
+    // The next gap slides up in its place.
+    await expect(page.getByTestId('approval-evidence')).toHaveCount(1);
   });
 });
 
@@ -318,7 +339,8 @@ for (const timezoneId of ['Asia/Jerusalem', 'America/New_York']) {
             `/dashboard/approvals/${fx.inv.a}`,
           ]) {
             await page.goto(route);
-            await expect(page.getByTestId('approval-card').first()).toBeVisible();
+            // DS3-04 renamed the gap's body: `approval-evidence` (one gap at a time below 1280 px, rows beside it above).
+            await expect(page.getByTestId('approval-evidence').first()).toBeVisible();
           }
         }
         expect(errors).toEqual([]);
@@ -331,10 +353,10 @@ test.describe('manager: escalation sheet → an outbox row per owner', () => {
   test.use({ storageState: { cookies: [], origins: [] }, viewport: { width: 1440, height: 900 } });
   test('note chips, then a queued e-mail with ₪ and the go-link; the escalator keeps the row', async ({ page }) => {
     await setLocale(page, 'he');
-    await loginViaMagicLink(page, 'manager@kfar-hazeitim.test', '/dashboard/approvals');
-    const card = cardsOf(page, 'W204-3').first();
-    await card.getByTestId('card-more').click();
-    await page.getByRole('menuitem', { name: 'העבירו לבעלים' }).click();
+    await loginViaMagicLink(page, 'manager@kfar-hazeitim.test', `/dashboard/approvals?sel=${fx.c}`);
+    await expect(ev(page)).toHaveAttribute('data-id', fx.c);
+    // The ⋯ menu is gone (DS3-04): escalation is the decision bar's quiet action.
+    await page.getByTestId('decide-escalate').click();
     await page.getByRole('button', { name: 'מחיר חריג' }).click();
     await page.getByTestId('escalate-send').click();
     await expect.poll(() => statuses([fx.c])).toEqual(['escalated']);
