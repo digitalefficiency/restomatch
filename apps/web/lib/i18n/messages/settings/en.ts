@@ -24,7 +24,7 @@ export const en: Shape<typeof he> = {
     default: 'Default',
     custom: 'Custom',
     approvalsTitle: 'What goes to approval',
-    largeInvoiceWithoutPo: 'An invoice without an order above {a} goes to the owner',
+    largeInvoiceWithoutPo: 'An invoice without an order of {a} or more goes to the owner',
     payApprovalOverAmount: 'From {a}, or a new supplier\'s first invoice: only owner approves payment',
     unorderedItemSignificant: 'An unordered item with a gap above {a} goes to the owner',
     cumulativeLarge: 'Gaps on an invoice above {a} or above {b} of its total go to the owner',

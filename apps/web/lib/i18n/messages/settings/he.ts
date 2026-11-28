@@ -25,7 +25,7 @@ export const he = {
     default: 'ברירת מחדל',
     custom: 'הותאם',
     approvalsTitle: 'מה עובר לאישור',
-    largeInvoiceWithoutPo: 'חשבונית בלי הזמנה מעל {a} עוברת לאישור הבעלים',
+    largeInvoiceWithoutPo: 'חשבונית בלי הזמנה של {a} ומעלה עוברת לאישור הבעלים',
     payApprovalOverAmount: 'חשבונית של {a} ומעלה, או ראשונה מספק חדש: רק הבעלים מאשר לתשלום',
     unorderedItemSignificant: 'פריט שלא הוזמן עם פער מעל {a} עובר לאישור הבעלים',
     cumulativeLarge: 'פערים בחשבונית מעל {a} או מעל {b} מהסכום עוברים לאישור הבעלים',

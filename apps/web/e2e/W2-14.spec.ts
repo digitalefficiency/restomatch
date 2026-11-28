@@ -96,7 +96,7 @@ test('settings: one h1, the approval rules in force with ₪ and a default/custo
   await expect(page.locator('h1')).toHaveText('הגדרות');
   const rules = page.getByTestId('rules-in-force');
   await expect(rules).toBeVisible();
-  const noPo = rules.locator('li', { hasText: 'חשבונית בלי הזמנה מעל' });
+  const noPo = rules.locator('li', { hasText: 'חשבונית בלי הזמנה של' });
   await expect(noPo).toContainText('₪');
   await expect(noPo.getByText(/ברירת מחדל|הותאם/)).toBeVisible();
   expect(await shekelIsLeftOfDigits(noPo)).toBe(true);
@@ -130,7 +130,7 @@ test('settings: one h1, the approval rules in force with ₪ and a default/custo
   await prepare(page, 'en', 1440);
   await page.goto('/dashboard/settings');
   await expect(page.locator('h1')).toHaveText('Settings');
-  await expect(page.getByTestId('rules-in-force')).toContainText('An invoice without an order above');
+  await expect(page.getByTestId('rules-in-force')).toContainText('An invoice without an order of');
   await shot(page, 'settings-en-1440');
   expect(await seriousAxe(page)).toEqual([]);
   expect(errors).toEqual([]);

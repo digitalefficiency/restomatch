@@ -115,6 +115,18 @@ describe('non-leak rows are acknowledged with no ₪, before the cumulative rule
     ).not.toBe('auto_approve');
   });
 
+  it('Q5: a no-PO invoice of exactly ₪5,000 hits large-invoice-without-po (≥, owner 11.11); ₪4,999.99 does not', () => {
+    const noPo = (total: number) =>
+      evaluateApproval({
+        discrepancy: { type: 'UNORDERED_ARRIVAL', severity: 'block', deltaAmount: total },
+        matchRun: { totalDiscrepancyAmount: total, totalInvoiceAmount: total, poExists: false },
+      });
+    expect(noPo(5000)).toMatchObject({ ruleId: 'large-invoice-without-po', action: 'block', requiredRole: 'owner' });
+    expect(noPo(5000).ruleName).toContain('ומעלה');
+    // Under the line the engine's block severity still sends it to the owner: same outcome.
+    expect(noPo(4999.99)).toMatchObject({ ruleId: 'severity-block', action: 'block', requiredRole: 'owner' });
+  });
+
   it('leak rows still reach the cumulative rules', () => {
     expect(evaluateApproval(ctx('QTY_SHORT', 'warn')).ruleId).toBe('cumulative-large');
   });
