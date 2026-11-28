@@ -399,6 +399,17 @@ describe('caught before payment = detection or decision precedes paid_at [G-14]'
     const [sup] = (await db.execute(sql`SELECT supplier_id FROM invoices WHERE id = ${a.invoiceId}`)) as unknown as Array<{
       supplier_id: string;
     }>;
+    // Schema-tolerant: G-03 / H-03 (0071) already create payment_deductions (with a NO ACTION FK
+    // to invoices); H-04 will add payments / payment_invoices. Create only the missing tables;
+    // afterwards delete just this test's rows from a table a migration owns (FK order), and drop
+    // only the tables this test created.
+    const tableExists = async (name: string) =>
+      ((await db.execute(sql`SELECT to_regclass(${`public.${name}`}) IS NOT NULL AS ok`)) as unknown as Array<{ ok: boolean }>)[0]!
+        .ok;
+    const PAYMENT_TABLES = ['payment_deductions', 'payment_invoices', 'payments'] as const; // FK order (children first)
+    const existed = Object.fromEntries(
+      await Promise.all(PAYMENT_TABLES.map(async (t) => [t, await tableExists(t)] as const)),
+    ) as Record<(typeof PAYMENT_TABLES)[number], boolean>;
     await db.execute(sql`CREATE TABLE IF NOT EXISTS payments (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(), restaurant_id uuid NOT NULL, supplier_id uuid NOT NULL,
       paid_on date NOT NULL, amount_agorot bigint NOT NULL)`);
@@ -435,9 +446,10 @@ describe('caught before payment = detection or decision precedes paid_at [G-14]'
       expect(by[c.invoiceId]).toMatchObject({ invoicePaid: false, paidAt: null });
       expect(by[e.invoiceId]).toMatchObject({ invoicePaid: true, paidAt: '2026-10-13T21:00:00.000Z' });
     } finally {
-      await db.execute(sql`DROP TABLE IF EXISTS payment_deductions`);
-      await db.execute(sql`DROP TABLE IF EXISTS payment_invoices`);
-      await db.execute(sql`DROP TABLE IF EXISTS payments`);
+      for (const t of PAYMENT_TABLES) {
+        if (existed[t]) await db.execute(sql`DELETE FROM ${sql.identifier(t)} WHERE restaurant_id = ${rid}`);
+        else await db.execute(sql`DROP TABLE IF EXISTS ${sql.identifier(t)}`);
+      }
     }
   });
 
@@ -458,11 +470,28 @@ describe('caught before payment = detection or decision precedes paid_at [G-14]'
   it('reads invoices.paid_at and discrepancies.basis once H-03 / G-03 add them (same SQL)', async () => {
     const { rid, invoice } = await setup();
     const { invoiceId, ids } = await invoice({ inclVat: '1000.00', d: [{ type: 'PRICE_HIGHER', delta: '10.00' }] });
-    await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS paid_at timestamptz`);
-    await db.execute(sql`ALTER TABLE discrepancies ADD COLUMN IF NOT EXISTS basis jsonb`);
+    // Schema-tolerant: H-03 (0072) may already have added paid_at (+ paid_amount, with the
+    // invoices_paid_pair_check "both NULL or both set"), G-03 may have added basis. Add only
+    // what is missing, set paid_amount with paid_at when it exists, and drop only what this
+    // test added — never a migration's column.
+    const existing = async (table: string, column: string) =>
+      ((await db.execute(sql`SELECT 1 FROM information_schema.columns
+          WHERE table_schema = current_schema() AND table_name = ${table} AND column_name = ${column}`)) as unknown as unknown[])
+        .length > 0;
+    const addedPaidAt = !(await existing('invoices', 'paid_at'));
+    const addedBasis = !(await existing('discrepancies', 'basis'));
+    if (addedPaidAt) await db.execute(sql`ALTER TABLE invoices ADD COLUMN paid_at timestamptz`);
+    if (addedBasis) await db.execute(sql`ALTER TABLE discrepancies ADD COLUMN basis jsonb`);
+    const hasPaidAmount = await existing('invoices', 'paid_amount');
     try {
       // paid_at wins over the status fallback, even for an invoice not marked paid.
-      await db.execute(sql`UPDATE invoices SET paid_at = '2026-10-09T08:00:00Z' WHERE id = ${invoiceId}`);
+      if (hasPaidAmount) {
+        await db.execute(
+          sql`UPDATE invoices SET paid_at = '2026-10-09T08:00:00Z', paid_amount = total_incl_vat WHERE id = ${invoiceId}`,
+        );
+      } else {
+        await db.execute(sql`UPDATE invoices SET paid_at = '2026-10-09T08:00:00Z' WHERE id = ${invoiceId}`);
+      }
       await db.execute(
         sql`UPDATE discrepancies SET basis = ${JSON.stringify({ source: 'po', qtyUsed: 2, unitPriceUsed: 5 })}::jsonb WHERE id = ${ids[0]!}`,
       );
@@ -470,8 +499,8 @@ describe('caught before payment = detection or decision precedes paid_at [G-14]'
       expect(row).toMatchObject({ invoicePaid: true, paidAt: '2026-10-09T08:00:00.000Z', caughtBeforePayment: false, paidSource: 'paid_at' });
       expect(row!.basis).toEqual({ source: 'po', qtyUsed: 2, unitPriceUsed: 5 });
     } finally {
-      await db.execute(sql`ALTER TABLE invoices DROP COLUMN IF EXISTS paid_at`);
-      await db.execute(sql`ALTER TABLE discrepancies DROP COLUMN IF EXISTS basis`);
+      if (addedPaidAt) await db.execute(sql`ALTER TABLE invoices DROP COLUMN IF EXISTS paid_at`);
+      if (addedBasis) await db.execute(sql`ALTER TABLE discrepancies DROP COLUMN IF EXISTS basis`);
     }
   });
 
