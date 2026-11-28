@@ -150,6 +150,9 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await resetDb(db);
+  // The api suite runs every file in one process: end this file's pool now, so it does not sit idle
+  // towards Postgres's connection limit until postgres.js's 20 s timeout (CI: "too many clients").
+  await db.$client.end();
 });
 
 /** What the web desk and the frozen mobile manager screen already read off every row. */
