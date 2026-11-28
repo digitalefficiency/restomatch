@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createDb, eq, invoices, restaurants, testDbUrl, type Database } from '@restomatch/db';
+import { createDb, discrepancies, eq, invoices, matchRuns, restaurants, suppliers, testDbUrl, type Database } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
@@ -16,18 +16,43 @@ let A: Tenant;
 const prevFlag = process.env.PAY_RUN_MARK_PAID;
 
 type InvStatus = (typeof invoices.$inferInsert)['status'];
-async function invoice(totalInclVat: string, status: InvStatus) {
+async function invoice(totalInclVat: string, status: InvStatus, supplierId = A.supplierId) {
   const [row] = await db
     .insert(invoices)
-    .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, totalInclVat, status, source: 'manual' })
+    .values({ restaurantId: A.restaurantId, supplierId, totalInclVat, status, source: 'manual' })
     .returning({ id: invoices.id, status: invoices.status });
   return { invoiceId: row!.id, expectedStatus: row!.status };
 }
-function markPaid(role: Session['role'], item: { invoiceId: string; expectedStatus: InvStatus }) {
+async function newSupplier(name: string) {
+  const [s] = await db.insert(suppliers).values({ restaurantId: A.restaurantId, name }).returning({ id: suppliers.id });
+  return s!.id;
+}
+async function markLiveDuplicate(invoiceId: string) {
+  const [mr] = await db
+    .insert(matchRuns)
+    .values({ restaurantId: A.restaurantId, invoiceId, overallStatus: 'blocked', totalDiscrepancyAmount: '0' })
+    .returning();
+  await db.insert(discrepancies).values({
+    matchRunId: mr!.id,
+    restaurantId: A.restaurantId,
+    type: 'DUPLICATE_INVOICE',
+    severity: 'block',
+    resolutionStatus: 'open',
+    deltaAmount: '0',
+  });
+}
+function markPaid(role: Session['role'], item: { invoiceId: string; expectedStatus: InvStatus }, ackFirstPayment = false) {
   const ctx: AppContext = { db, session: { userId: A.ownerUserId, restaurantId: A.restaurantId, role } };
   return appRouter
     .createCaller(ctx)
-    .payRun.markPaid({ items: [item as never], paidOn: '2026-11-20', method: 'bank_transfer', clientMutationId: `cmid-og-${crypto.randomUUID()}` });
+    .payRun.markPaid({
+      items: [item as never],
+      paidOn: '2026-11-20',
+      method: 'bank_transfer',
+      // A never-paid supplier first trips AU-14's soft `first_payment` warning (it runs before this gate).
+      ...(ackFirstPayment ? { acknowledgedFlags: [{ invoiceId: item.invoiceId, kinds: ['first_payment' as const] }] } : {}),
+      clientMutationId: `cmid-og-${crypto.randomUUID()}`,
+    });
 }
 
 beforeAll(async () => {
@@ -81,6 +106,31 @@ describe('payRun.markPaid × owner pay-approval (G-15b)', () => {
   it('an already-approved invoice skips the gate (it never passes approve_for_payment again)', async () => {
     const item = await invoice('9000.00', 'approved');
     await expect(markPaid('manager', item)).rejects.toMatchObject({ code: 'NOT_IMPLEMENTED', message: 'payRun.markPaidAwaitsH03' });
+  });
+
+  it('the refusal carries the code only — no amount, threshold or reason', async () => {
+    const item = await invoice('5000.00', 'matched');
+    const e = await markPaid('manager', item).catch((x: unknown) => x);
+    expect(e).toMatchObject({ code: 'FORBIDDEN', message: 'payment.ownerApprovalRequired' });
+    expect((e as { cause: { appParams?: unknown } }).cause.appParams).toBeUndefined();
+  });
+
+  it('new supplier (owner 11.11): earlier UNPAID invoices are no history ⇒ owner only, even under ₪5,000', async () => {
+    const sid = await newSupplier('ספק חדש');
+    await invoice('300.00', 'approved', sid);
+    await invoice('200.00', 'matched', sid);
+    const item = await invoice('120.00', 'matched', sid);
+    await expect(markPaid('manager', item, true)).rejects.toMatchObject({ code: 'FORBIDDEN', cause: { appCode: 'payment.ownerApprovalRequired' } });
+  });
+
+  it('new supplier: a PAID duplicate copy is no history; one real paid invoice is', async () => {
+    const sid = await newSupplier('ספק עם עותק');
+    const copy = await invoice('300.00', 'paid', sid);
+    await markLiveDuplicate(copy.invoiceId);
+    const item = await invoice('120.00', 'matched', sid);
+    await expect(markPaid('manager', item, true)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await invoice('300.00', 'paid', sid);
+    await expect(markPaid('manager', item, true)).rejects.toMatchObject({ code: 'NOT_IMPLEMENTED', message: 'payRun.markPaidAwaitsH03' });
   });
 
   it('flag off ⇒ NOT_IMPLEMENTED before the gate, even for a manager on ₪5,000+', async () => {

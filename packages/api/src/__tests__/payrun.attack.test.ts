@@ -648,8 +648,10 @@ describe('payRun.preflight / payRun.remittanceText / markPaid guard (AU-14)', ()
       await expect(
         asA('bookkeeper').payRun.markPaid({ items, paidOn: '2026-10-25', method: 'bank_transfer', clientMutationId: 'cmid-au14-0001' }),
       ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', message: 'preflight_unacknowledged' });
+      // G-15b (orchestrator 28.11, owner sign-off): A's supplier was never paid ⇒ new supplier ⇒
+      // owner-only. The owner, acknowledged, reaches the write (NOT_IMPLEMENTED until H-03).
       await expect(
-        asA('bookkeeper').payRun.markPaid({
+        asA('owner').payRun.markPaid({
           items,
           paidOn: '2026-10-25',
           method: 'bank_transfer',
@@ -657,6 +659,22 @@ describe('payRun.preflight / payRun.remittanceText / markPaid guard (AU-14)', ()
           clientMutationId: 'cmid-au14-0002',
         }),
       ).rejects.toMatchObject({ code: 'NOT_IMPLEMENTED' });
+      // …and the bookkeeper, acknowledged, is FORBIDDEN by the owner rule — code only, nothing written.
+      const auditsBefore = await ownerDb.execute(sql`SELECT count(*)::int AS n FROM audit_log WHERE restaurant_id = ${A.restaurantId}`);
+      const invBefore = await ownerDb.select().from(invoices).where(eq(invoices.id, A.invoiceId));
+      const refused = await asA('bookkeeper')
+        .payRun.markPaid({
+          items,
+          paidOn: '2026-10-25',
+          method: 'bank_transfer',
+          acknowledgedFlags: [{ invoiceId: A.invoiceId, kinds: ['first_payment'] }],
+          clientMutationId: 'cmid-au14-0004',
+        })
+        .catch((e: unknown) => e);
+      expect(refused).toMatchObject({ code: 'FORBIDDEN', cause: { appCode: 'payment.ownerApprovalRequired' } });
+      expect((refused as { cause: { appParams?: unknown } }).cause.appParams).toBeUndefined();
+      expect(await ownerDb.execute(sql`SELECT count(*)::int AS n FROM audit_log WHERE restaurant_id = ${A.restaurantId}`)).toEqual(auditsBefore);
+      expect(await ownerDb.select().from(invoices).where(eq(invoices.id, A.invoiceId))).toEqual(invBefore);
       // A foreign id is still NOT_FOUND first (W2-03's ownership check runs before the guard).
       await expect(
         asA().payRun.markPaid({

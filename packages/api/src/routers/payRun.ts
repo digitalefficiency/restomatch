@@ -30,6 +30,7 @@ import {
 } from '../lib/dueDate';
 import { featureEnabled } from '../lib/features';
 import { assertCanApproveForPayment } from '../approvals/payApproval';
+import { appError, resolveAppError } from '../errors';
 import { invoiceMachine } from '../lifecycle/machines';
 import { canActOn } from '../lib/roles';
 import { vatAtRisk } from '../vat/vatAtRisk';
@@ -592,7 +593,15 @@ export async function assertOwnerPayApprovals(
   statusById: ReadonlyMap<string, string>,
 ): Promise<void> {
   for (const [invoiceId, status] of statusById) {
-    if (NEEDS_PAY_APPROVAL.includes(status)) await assertCanApproveForPayment(db, who, invoiceId);
+    if (!NEEDS_PAY_APPROVAL.includes(status)) continue;
+    try {
+      await assertCanApproveForPayment(db, who, invoiceId);
+    } catch (e) {
+      // The code alone: no amount, threshold or reason travels to a role that may not act.
+      if (resolveAppError(e as TRPCError)?.appCode === 'payment.ownerApprovalRequired')
+        throw appError('FORBIDDEN', 'payment.ownerApprovalRequired', 'payment.ownerApprovalRequired');
+      throw e;
+    }
   }
 }
 
@@ -832,11 +841,6 @@ export const payRunRouter = router({
     );
     if (!markPaidEnabled())
       throw new TRPCError({ code: 'NOT_IMPLEMENTED', message: 'payRun.markPaidOff' });
-    // G-15b owner rule (11.11): an invoice that still has to pass approve_for_payment on its way
-    // to paid (≥ the pay-approval amount incl. VAT, or a new supplier) is owner-only →
-    // FORBIDDEN `payment.ownerApprovalRequired`. Already-approved invoices skip it. At the γ write
-    // this moves into the same tx, right before the transition, and the decision goes on the audit row.
-    await assertOwnerPayApprovals(ctx.db, { restaurantId: ctx.session.restaurantId, role: ctx.session.role }, current);
     // AU-14 pre-flight guard, before anything is written, for the whole batch: a bank-detail
     // change the owner has not confirmed or a confirmed copy → PRECONDITION_FAILED (always on,
     // AD12); a soft flag not acknowledged → PRECONDITION_FAILED. The acknowledged kinds go into
@@ -848,6 +852,12 @@ export const payRunRouter = router({
       input.acknowledgedFlags,
     );
     void acknowledged;
+    // G-15b owner rule (11.11), AFTER the AU-14 warnings (orchestrator decision 28.11): an invoice
+    // that still has to pass approve_for_payment on its way to paid (≥ the pay-approval amount incl.
+    // VAT, or a new supplier = no earlier PAID, non-duplicate invoice) is owner-only → FORBIDDEN
+    // `payment.ownerApprovalRequired`. Already-approved invoices skip it. At the γ write this moves
+    // into the same tx, right before the transition, and the decision goes on the audit row.
+    await assertOwnerPayApprovals(ctx.db, { restaurantId: ctx.session.restaurantId, role: ctx.session.role }, current);
     // TODO(H-03 + G-05, γ rebase): the guarded write. Until then the flag stays OFF.
     throw new TRPCError({ code: 'NOT_IMPLEMENTED', message: 'payRun.markPaidAwaitsH03' });
   }),
