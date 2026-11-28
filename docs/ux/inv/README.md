@@ -6,7 +6,7 @@ work packages, one coding session and one draft pull request each. Nothing here 
 
 ## What this is
 
-The owner wrote that the invoices area is the most important part of the product for him, and that the main
+The owner wrote that the invoices area is the most important part of the product for them, and that the main
 work there is the display and the approvals by role. A design proposal followed: four live mock-ups (the
 invoices list, the screen of one invoice, the approvals desk by role, the pay run), a switch above each that
 shows it as the owner, the manager and the bookkeeper see it, and a list of seven decisions with a
@@ -279,7 +279,7 @@ The owner's rules that the proposal was reviewed against, stated once:
    as `WORKPLAN.md`, `INV-01`, says; files under `apps/web/e2e/__screenshots__/INV-0N/`) · Tests (gate, result
    and the commit it ran on) · Owner decisions touched · Requests to other packages · Promote to shared · Not
    done. The body says in words: "no file of the immutability list changed". Then a short report to the owner
-   in plain, gender-neutral Hebrew: what was built, the link, what is still open, what needs his decision.
+   in plain, gender-neutral Hebrew: what was built, the link, what is still open, what needs the owner's decision.
 
 ### Upstream and bases
 

@@ -657,7 +657,7 @@ On a phone the chain "המסמכים שנבדקו" stands above it: הזמנה �
 ## 5. Screen 3 · approvals by role (`INV-04`)
 
 **Purpose.** The desk the owner already approved (a queue on one side, the evidence and the decision on the
-other), with what he asked for added: who decides what. Every open gap is a real row for every finance role,
+other), with what the owner asked for added: who decides what. Every open gap is a real row for every finance role,
 grouped by who decides. Owner, manager and bookkeeper. Built on the finished DS3-04 desk.
 
 ### 5.1 Layout
@@ -902,7 +902,7 @@ actions. `packages/api/src/routers/payRun.ts` is not edited by any package.
 
 ## 8. Where the owner has not spoken: the default a package builds
 
-Each default is built until he says otherwise, and each is named in the pull request under "Owner decisions
+Each default is built until the owner says otherwise, and each is named in the pull request under "Owner decisions
 touched".
 
 1. **An invoice with open gaps at two roles.** For the viewer it is "אצלכם" when one of its gaps is routed to
@@ -913,19 +913,19 @@ touched".
    (sections 3.4 and 3.6). On the pay run the same split decides its group (section 6.3).
 3. **An invoice that waits to be linked and also has a routed gap.** Its place follows the state ("ממתינות
    לשיוך") and its row still names who holds the gap.
-4. **The reason for a rule he has not read as a phrase** (a duplicate, a large invoice with no order, an item
+4. **The reason for a rule the owner has not read as a phrase** (a duplicate, a large invoice with no order, an item
    that was not ordered, a blocking gap of another kind, the larger cumulative rule, the percentage band, the
    fallback): with whom and how long, with no "כי …". `INV-00` lists proposed phrases in its pull request.
 5. **Numbers in the phrase after the thresholds changed:** printed only when they are provably the ones that
    routed the gap.
 6. **"N ימים" after an invoice is checked again:** the count restarts. Shown as it is.
-7. **"שולמו":** the card appears only when the month has a paid invoice; its third line needs his words for a
+7. **"שולמו":** the card appears only when the month has a paid invoice; its third line needs the owner's words for a
    real restaurant.
 8. **The payment block where the pay run is off:** shown; it states the invoice's own state.
 9. **What the mock-up does not draw on the list:** everything stays except the allocation number as a column,
    which gives way to the place.
 10. **What the mock-up does not draw on the pay run:** kept; the rows of the five reasons it omits keep today's
-    sentences in a last group, whose name needs his word.
+    sentences in a last group, whose name needs the owner's word.
 11. **The invoice screen:** one card per gap when an invoice has several; the item alone in "חפשו במסמך" for a
     line with no SKU; passing a gap on through the desk's sheet with its note, not in one press as drawn.
     **With several gaps the single places speak for one gap, the screen's current gap:** the invoice's
@@ -938,7 +938,7 @@ touched".
     (`reference/src/inv-core.js`, `x.gap`) and shows none of this.
 12. **The undo's word and the message's words:** "ביטול" and "{result}, {supplier}" in the mock-up; "בטלו"
     and "{verb} · {amount} {basis}" in the product today (`main`: `messages/approvals/he.ts:182`; DS3-04:
-    `:368`, `:284`). One wording for both screens; until he picks, the product's stays and the pull request
+    `:368`, `:284`). One wording for both screens; until the owner picks, the product's stays and the pull request
     says so.
 13. **The desk's title** ("אישורים" in the mock-up, "תור אישורים" today, `messages/approvals/he.ts:8`): the
     product's stays. **Beside a row's amount:** the days it waits. **The bulk selection:** stays, only on rows
@@ -951,17 +951,17 @@ touched".
 17. **An invoice being read or waiting for the count** (`in_ocr`, `awaiting_count`) is in the place `wait`, as
     the mock-up has it (`reference/src/inv-core.js:218`). The card keeps the name "ממתינות לשיוך"; its third
     line "חשבוניות מרכזות" is printed only when every invoice in it is consolidated, otherwise none. The
-    card's name when it holds other kinds needs his word: `INV-02` lists it under "Owner decisions touched".
+    card's name when it holds other kinds needs the owner's word: `INV-02` lists it under "Owner decisions touched".
 18. **A gap the bookkeeper passed on** (the product allows it, section 2.7): with whom and how long, with no
     "כי …". The approved pass-on phrase names the manager; `INV-00` proposes the bookkeeper's.
 19. **The button to the next gap when it is the bookkeeper's:** "לפער הבא, אצל הנהלת החשבונות" is five words
     and a button holds four. `INV-05` proposes a shorter label and does not ship the five-word one.
 20. **Two panes or one column, by the window's width.** The invoice screen is one column when the window is
-    narrower than 1024 px, so it is two panes at 1024 and at 1280 with the side menu open (section 4.1). If he
+    narrower than 1024 px, so it is two panes at 1024 and at 1280 with the side menu open (section 4.1). If the owner
     means the width of the content instead, section 4.1 and `INV-01`'s acceptance 1 change.
 21. **The pay run's five due sections go as headings.** Held invoices are grouped by who holds them, payable
-    ones are one table by due date, and each row keeps its due date and its notices (section 6.1). If he
+    ones are one table by due date, and each row keeps its due date and its notices (section 6.1). If the owner
     wants the sections kept, section 6.1 and `INV-03`'s slices 6 and 9 change.
-22. **The percent in the price phrase.** He read "עליית מחיר של 10% ומעלה חוסמת תשלום" with 10. The packages
+22. **The percent in the price phrase.** The owner read "עליית מחיר של 10% ומעלה חוסמת תשלום" with 10. The packages
     print the restaurant's own `tolerances.blockPricePercent` in its place, and only when the gap's own
     percent is at or above it (section 2.2).
