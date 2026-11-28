@@ -1,0 +1,280 @@
+/* ================= round 15: the invoice page is the supplier's document and its reading, side by side =================
+   At a desk: the frame is as tall as the window; what was found and the decision scroll at the start edge, the
+   paper fills the end edge, and the divider between them is the person's. On a phone: one column, with a window
+   onto the paper that opens it on the whole screen. */
+#inv-page:not(.is-narrow) .rm-main{ display:flex; flex-direction:column; min-height:0; height:var(--ivp-h, clamp(600px, calc(100vh - 150px), 860px)) }
+#inv-page:not(.is-narrow) .ivp{ flex:1; min-height:0; display:flex; flex-direction:column; padding:10px 28px 18px }
+.rm .ivp-head{ display:flex; align-items:flex-end; flex-wrap:wrap; gap:10px 28px; margin-top:2px }
+.rm .ivp-id{ display:flex; align-items:center; gap:12px; min-width:0; margin-inline-end:auto }
+.rm .ivp-facts{ display:flex; margin:0 }
+.rm .ivp-facts div{ display:grid; gap:0; padding:0 18px; border-inline-start:1px solid var(--rule) }
+.rm .ivp-facts div:first-child{ padding-inline-start:0; border:0 }
+.rm .ivp-facts div:last-child{ padding-inline-end:0 }
+.rm .ivp-facts dt{ font-size:12px; line-height:16px; color:var(--fg3); white-space:nowrap }
+.rm .ivp-facts dd{ display:flex; align-items:baseline; gap:6px; margin:0; font-size:16px; line-height:28px; font-weight:500; white-space:nowrap }
+.rm .ivp-facts dd small{ font-size:12px; font-weight:400; color:var(--fg3) }
+.rm .ivp-facts .is-main dd{ font-size:20px; font-weight:600 }
+.rm .ivp-grid{ flex:1; min-height:0; display:grid; grid-template-columns:minmax(0,1fr) 20px minmax(0,var(--doc,50%)); gap:0; align-items:stretch; margin-top:14px }
+.rm .ivp-grid.is-nodoc{ grid-template-columns:minmax(0,880px) }
+.rm .ivp-main{ min-width:0; min-height:0; overflow:auto; overscroll-behavior:contain; padding:1px 1px 8px }
+.rm .ivp-main > .ivp-box{ margin-top:0 }
+.rm .ivp-main .ivp-sec{ margin-top:22px }
+.rm .ivp-side{ display:flex; flex-direction:column; gap:6px; min-width:0; min-height:0 }
+.rm .ivp-vslot{ flex:1; min-height:0; display:flex }
+.rm .ivp-vslot .dv{ flex:1 }
+.rm .ivp-split{ position:relative; cursor:col-resize; touch-action:none; border-radius:4px }
+.rm .ivp-split::after{ content:''; position:absolute; inset-block:10px; inset-inline-start:9px; width:2px; border-radius:2px; background:var(--rule); transition:background var(--t-state) var(--e-std) }
+.rm .ivp-split:hover::after, .rm .ivp-split.is-on::after, .rm .ivp-split:focus-visible::after{ background:var(--line-strong) }
+.rm .ivp-split:focus-visible{ outline:2px solid var(--focus); outline-offset:-2px }
+/* the gap, said with the three documents' own numbers */
+.rm .bx-ev{ display:flex; align-items:stretch; flex-wrap:wrap; gap:12px 20px; margin-top:6px; padding:12px 14px; border-radius:8px; background:var(--sunken) }
+.rm .bx-cmp{ display:flex; margin:0 }
+.rm .bx-cmp div{ display:grid; align-content:start; gap:2px; padding:0 16px; border-inline-start:1px solid var(--line) }
+.rm .bx-cmp div:first-child{ padding-inline-start:0; border:0 }
+.rm .bx-cmp dt{ font-size:12px; line-height:16px; color:var(--fg3); white-space:nowrap }
+.rm .bx-cmp dd{ margin:0; font-size:18px; line-height:26px; font-weight:400; color:var(--fg2); white-space:nowrap }
+.rm .bx-cmp .is-off dd{ font-weight:600; color:var(--fg) }
+.rm .ivp-box.is-block .bx-cmp .is-off dd{ box-shadow:inset 0 -2px 0 var(--leak-bd) }
+.rm .ivp-box.is-warn .bx-cmp .is-off dd{ box-shadow:inset 0 -2px 0 var(--warn-bd) }
+.rm .bx-amt{ display:grid; grid-template-columns:auto auto; align-content:start; justify-content:end; align-items:baseline; gap:0 6px; margin-inline-start:auto; text-align:end }
+.rm .bx-amt > span{ grid-column:1 / -1; font-size:12px; line-height:16px; color:var(--fg3) }
+.rm .bx-amt b{ font-size:24px; line-height:28px; font-weight:600 }
+.rm .bx-amt small{ font-size:12px; color:var(--fg3) }
+.rm .bx-amt em{ grid-column:1 / -1; font-style:normal; font-size:12px; line-height:16px; color:var(--fg2) }
+.rm .bx-basis{ font-size:12px; line-height:16px; color:var(--fg3) }
+.rm .ivp-box.is-seek{ animation:ivp-seek-box 900ms var(--e-out) 1 }
+@keyframes ivp-seek-box{ 0%{ box-shadow:0 0 0 2px var(--fg), 0 0 0 10px rgb(18 28 23 / .14) } 100%{ box-shadow:0 0 0 2px var(--fg), 0 0 0 0 rgb(18 28 23 / 0) } }
+#inv-page:not(.is-narrow) .ivp-tb{ font-size:13px }
+#inv-page:not(.is-narrow) .ivp-tb th{ padding:0 6px 8px; white-space:normal; vertical-align:bottom }
+#inv-page:not(.is-narrow) .ivp-tb td{ padding:9px 6px }
+#inv-page:not(.is-narrow) .ivp-tb td:first-child{ white-space:normal }
+/* a line of the table answers the paper, and the paper answers the line */
+.rm .ivp-ln{ display:inline; margin:0; padding:0; border:0; border-radius:4px; background:none; font:inherit; color:inherit; text-align:inherit; cursor:pointer }
+.rm .ivp-ln:hover{ text-decoration:underline; text-underline-offset:3px; text-decoration-color:var(--line-strong) }
+.rm .ivp-ln:focus-visible{ outline:2px solid var(--focus); outline-offset:2px }
+.rm .ivp-tb tr.is-seek td{ animation:ivp-seek 1100ms var(--e-out) 1 }
+@keyframes ivp-seek{ 0%, 30%{ background:var(--info-sub) } }
+.rm .ivp-chk{ display:grid; gap:2px; margin:10px 0 0; padding:0; list-style:none; font-size:13px; line-height:20px; color:var(--fg2) }
+.rm .ivp-chk li{ display:flex; align-items:center; gap:6px }
+.rm .ivp-chk svg.i{ flex:none; width:14px; height:14px; color:var(--fg3) }
+.rm .ivp-find{ display:flex; align-items:center; gap:8px; min-height:36px; font-size:13px; line-height:18px; color:var(--fg2) }
+.rm .ivp-find svg.i{ flex:none; width:16px; height:16px; color:var(--fg3) }
+.rm .ivp-find > span{ flex:1; min-width:0 }
+.rm .ivp-find b{ font-weight:600; color:var(--fg) }
+.rm .ivp-nodoc{ display:flex; align-items:center; gap:8px; margin:0 0 12px; padding:10px 12px; border-radius:8px; background:var(--sunken); font-size:13px; line-height:18px; color:var(--fg2) }
+.rm .ivp-nodoc svg.i{ flex:none; width:16px; height:16px }
+.rm .sd-hot{ position:absolute; z-index:1; border-radius:3px; cursor:pointer }
+.rm .sd-hot:hover, .rm .sd-hot.is-hint{ box-shadow:0 0 0 1.5px var(--info); background:rgb(34 86 187 / .07) }
+.rm .sd-hot.is-flash{ animation:sd-flash 900ms var(--e-out) 1 }
+.rm .sd-tag{ inset-inline-start:0; inset-inline-end:auto; inset-block-start:auto; inset-block-end:calc(100% + 3px); transform:none }
+@media (prefers-reduced-motion:reduce){ .rm .ivp-box.is-seek, .rm .ivp-tb tr.is-seek td, .rm .sd-hot.is-flash{ animation:none } }
+/* ---- a phone: one column, and a window onto the paper ---- */
+.rm-app.iv.is-narrow .ivp-head{ align-items:flex-start }
+.rm-app.iv.is-narrow .ivp-facts{ display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px 0; width:100% }
+.rm-app.iv.is-narrow .ivp-facts div{ padding:0 12px 0 0; border:0 }
+.rm-app.iv.is-narrow .ivp-facts div:nth-child(odd){ padding:0 }
+.rm-app.iv.is-narrow .ivp-facts dd{ flex-wrap:wrap; gap:0 6px; line-height:24px; white-space:normal }
+.rm-app.iv.is-narrow .ivp-main{ overflow:visible; padding:0 }
+.rm-app.iv.is-narrow .ivp-grid{ display:block; margin-top:12px }
+.rm .ivp-docn{ margin-top:14px }
+.rm .ivp-win{ position:relative; display:block; width:100%; height:156px; margin:0; padding:0; border:0; border-radius:12px; overflow:hidden; background:#e6eae8; cursor:pointer; font:inherit; color:inherit; text-align:start }
+.rm .ivp-win::after{ content:''; position:absolute; inset:0; border-radius:12px; box-shadow:inset 0 0 0 1px var(--line); pointer-events:none }
+.rm .ivp-win-sh{ position:absolute; top:0; left:0; width:760px; height:1075px; transform-origin:0 0; pointer-events:none }
+.rm .ivp-win .sd-tag{ display:none }
+.rm .ivp-win-x{ position:absolute; z-index:3; inset-block-end:8px; inset-inline-start:8px; display:inline-flex; align-items:center; gap:6px; min-height:32px; padding:0 12px; border-radius:999px; background:var(--surface); box-shadow:var(--sh2); font-size:13px; line-height:18px; font-weight:500 }
+.rm .ivp-win-x svg.i{ width:14px; height:14px }
+.rm .ivp-win:focus-visible{ outline:3px solid var(--focus); outline-offset:2px }
+.rm .ivp-win-c{ margin-top:6px; font-size:12px; line-height:16px; color:var(--fg3) }
+.rm-app.iv.is-narrow .bx-cmp div{ padding:0 12px }
+.rm-app.iv.is-narrow .bx-cmp dd{ font-size:16px; line-height:24px }
+.rm-app.iv.is-narrow .bx-amt{ margin-inline-start:0; justify-content:start; text-align:start; flex:1 1 100%; padding-top:10px; border-top:1px solid var(--line) }
+/* ---- the paper on the whole screen, the decision under it ---- */
+html.ivp-lock{ overflow:hidden }
+.rm.ivp-full{ position:fixed; inset:0; z-index:1000; display:flex; flex-direction:column; background:var(--canvas); color:var(--fg) }
+.rm.ivp-full[hidden]{ display:none }
+.ivp-full .sp{ flex:1 }
+.ivp-full .fl-h{ display:flex; align-items:center; gap:8px; min-height:56px; padding:4px 20px; border-bottom:1px solid var(--rule); background:var(--surface) }
+.ivp-full .fl-t{ font-size:16px; line-height:22px; font-weight:600 }
+.ivp-full .rm-ico{ min-width:44px; min-height:44px }
+.ivp-full .fl-v{ flex:1; min-height:0; display:flex; padding:14px 20px }
+.ivp-full .fl-v .dv{ flex:1 }
+.ivp-full .fl-f{ display:flex; align-items:center; flex-wrap:wrap; gap:10px 20px; padding:12px 20px calc(12px + env(safe-area-inset-bottom)); border-top:1px solid var(--rule); background:var(--surface) }
+.ivp-full .fl-g{ flex:1 1 300px; min-width:0; margin:0; font-size:14px; line-height:20px }
+.ivp-full .fl-g > span{ color:var(--fg2) }
+.ivp-full .fl-g .fl-a{ margin-inline-start:10px; font-weight:600; color:var(--fg); white-space:nowrap }
+.ivp-full .fl-g small{ font-size:12px; font-weight:400; color:var(--fg3) }
+.ivp-full .fl-w{ margin:0; font-size:14px; line-height:20px; color:var(--fg2) }
+.ivp-full .fl-act{ display:flex; flex-wrap:wrap; gap:8px }
+.ivp-full.is-narrow .fl-h{ padding:4px 8px 4px 12px }
+.ivp-full.is-narrow .fl-v{ padding:0 }
+.ivp-full.is-narrow .fl-v .dv{ border-radius:0; border-inline:0 }
+.ivp-full.is-narrow .dv-kind{ display:none }
+.ivp-full.is-narrow .fl-f{ padding-inline:12px }
+.ivp-full.is-narrow .fl-act{ flex:1 1 100% }
+.ivp-full.is-narrow .fl-act .btn{ flex:1 1 0; min-height:44px; padding-inline:8px; white-space:nowrap }
+.stage-bar .doc-st{ display:inline-flex; align-items:center; gap:12px }
+
+/* ---- round 15b: the decision stays in reach ---- */
+.rm .ivp-dock{ position:sticky; bottom:0; z-index:4; display:flex; gap:8px; margin:16px -12px -20px; padding:10px 12px calc(12px + env(safe-area-inset-bottom)); background:var(--surface); border-top:1px solid var(--rule); box-shadow:0 -8px 18px -12px rgb(18 28 23 / .3) }
+.rm .ivp-dock .btn{ flex:1 1 0; min-width:0; min-height:48px; padding-inline:8px; white-space:nowrap }
+.rm .ivp-pin{ position:sticky; top:0; z-index:3; height:0 }
+.rm .ivp-pin > div{ display:none; align-items:center; gap:10px; min-height:44px; padding:4px 6px 4px 14px; border-radius:0 0 10px 10px; background:var(--surface); box-shadow:0 0 0 1px var(--rule), 0 10px 18px -12px rgb(18 28 23 / .32); font-size:13px; line-height:18px; color:var(--fg2) }
+.rm .ivp-pin.is-stuck > div{ display:flex }
+.rm .ivp-pin > div > span{ flex:1; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis }
+.rm .ivp-pin b{ font-weight:600; color:var(--fg) }
+.rm .ivp-pin small{ font-size:12px; color:var(--fg3) }
+
+/* ---- round 15c: the lines stand in the order of the three documents ---- */
+#inv-page:not(.is-narrow) .ivp-tb{ table-layout:fixed }
+#inv-page:not(.is-narrow) .ivp-tb .c-item{ width:23% }
+#inv-page:not(.is-narrow) .ivp-tb .c-q{ width:10% }
+#inv-page:not(.is-narrow) .ivp-tb .c-p{ width:13% }
+#inv-page:not(.is-narrow) .ivp-tb .c-r{ width:16% }
+#inv-page:not(.is-narrow) .ivp-tb .c-gap{ width:15% }
+#inv-page:not(.is-narrow) .ivp-tb .gs{ border-inline-start:1px solid var(--rule) }
+.rm .ivp-tb .ivp-grp td{ padding:0; border-bottom:0 }
+.rm .ivp-tb .ivp-grp th{ padding:0 2px 6px; border-bottom:0; font-size:12px; line-height:16px; font-weight:600; color:var(--fg2); text-align:center; white-space:nowrap }
+.rm .ivp-tb .ivp-grp th small{ display:block; font-size:12px; font-weight:400; color:var(--fg3) }
+.rm .ivp-tb .ivp-grp + tr th{ padding-top:6px; border-top:1px solid var(--rule) }
+.rm .ivp-tb .qn{ min-width:0 }
+
+/* ---- round 15d: what the judges agreed on ---- */
+.rm .ivp-grid{ grid-template-columns:minmax(0,1fr) 20px minmax(0,var(--doc,58%)) }
+/* the card that waits for the person who looks wears the same ink as the mark on the paper */
+.rm .ivp-box.is-mine{ box-shadow:inset 0 0 0 2px var(--fg), var(--sh1) }
+.rm .bx-cmp{ align-items:stretch; flex-wrap:wrap; gap:8px 0 }
+.rm .bx-cmp > div{ align-content:center }
+.rm .bx-pair{ display:grid !important; grid-template-columns:auto auto; gap:0 !important; padding:6px 0 !important; margin-inline:12px 0; border:0 !important; border-radius:8px; box-shadow:inset 0 0 0 1.5px var(--fg); background:var(--surface) }
+.rm .bx-cmp > .bx-pair:first-child{ margin-inline-start:0 }
+.rm .bx-pair > div{ display:grid; gap:2px; padding:0 14px }
+.rm .bx-pair > div + div{ border-inline-start:1px solid var(--line) }
+.rm .bx-pair .bx-diff{ grid-column:1 / -1; margin:6px 14px 0; padding-top:5px; border-top:1px solid var(--line); font-size:12px; line-height:16px; font-weight:500; color:var(--fg) }
+.rm .ivp-box .bx-cmp .is-off dd{ box-shadow:none }
+.rm .ivp-box.is-done .bx-pair{ box-shadow:inset 0 0 0 1px var(--line); background:none }
+.rm .ivp-pay{ margin-top:18px; padding:14px 16px; border-radius:12px; background:var(--surface); box-shadow:inset 0 0 0 1px var(--rule) }
+.rm .ivp-main .ivp-pay .ivp-sec{ margin:0 0 4px }
+.rm .ivp-pay .pay-l{ margin:0; font-size:13px; line-height:20px; color:var(--fg2) }
+.rm .ivp-pay .ivp-sum{ margin-top:10px; padding-top:10px }
+.rm .ivp-pay .ivp-sum dd{ white-space:nowrap }
+#inv-page:not(.is-narrow) .ivp-tb .c-item{ width:24% }
+#inv-page:not(.is-narrow) .ivp-tb .c-q{ width:10% }
+#inv-page:not(.is-narrow) .ivp-tb .c-r{ width:15% }
+#inv-page:not(.is-narrow) .ivp-tb .c-p{ width:13% }
+#inv-page:not(.is-narrow) .ivp-tb .c-gap{ width:15% }
+.rm .ivp-dock{ flex-wrap:wrap }
+.rm .ivp-dock .dk-c{ flex:1 1 100%; margin:0; font-size:13px; line-height:18px; color:var(--fg2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+.rm .ivp-dock .dk-c b{ font-weight:600; color:var(--fg) }
+.rm .ivp-tile{ display:flex; align-items:center; gap:12px; width:100%; min-height:64px; margin:0; padding:10px 12px; border:0; border-radius:12px; background:var(--surface); box-shadow:inset 0 0 0 1px var(--line); font:inherit; color:inherit; text-align:start; cursor:pointer }
+.rm .ivp-tile svg.i{ flex:none; width:22px; height:22px; color:var(--fg2) }
+.rm .ivp-tile .tl-t{ flex:1; min-width:0; display:grid; gap:0 }
+.rm .ivp-tile .tl-t b{ font-size:14px; line-height:20px; font-weight:600 }
+.rm .ivp-tile .tl-t small{ font-size:12px; line-height:16px; color:var(--fg3) }
+.rm .ivp-tile .tl-go{ flex:none; font-size:13px; font-weight:500; color:var(--brand) }
+.rm .ivp-tile:focus-visible{ outline:3px solid var(--focus); outline-offset:2px }
+.rm-app.iv.is-narrow .bx-pair{ margin-inline:0 }
+.rm-app.iv.is-narrow .bx-cmp > div:not(.bx-pair){ padding:0 12px }
+.rm-app.iv.is-narrow .bx-cmp > div:first-child:not(.bx-pair){ padding-inline-start:0 }
+/* ---- round 15e: the evidence in two rows: the three documents' numbers, then the amount ---- */
+.rm .bx-ev{ display:grid; gap:10px }
+.rm .bx-cmp .bx-pair > div{ padding:0 14px; border:0 }
+.rm .bx-cmp .bx-pair > div:first-child{ padding-inline-start:14px }
+.rm .bx-cmp .bx-pair > div + div{ border-inline-start:1px solid var(--line) }
+.rm .bx-cmp > div:not(.bx-pair){ padding-block:6px }
+.rm .bx-amt{ display:flex; align-items:baseline; flex-wrap:wrap; gap:0 8px; margin:0; padding-top:10px; border-top:1px solid var(--line); text-align:start; justify-content:flex-start }
+.rm .bx-amt > span{ font-size:14px; line-height:28px; font-weight:500; color:var(--fg2) }
+.rm .bx-amt em{ margin-inline-start:auto; font-size:13px; line-height:28px }
+.rm-app.iv.is-narrow .bx-amt{ padding-top:10px }
+.rm-app.iv.is-narrow .bx-amt em{ flex:1 1 100%; margin:0; line-height:18px }
+.rm .ivp-box.is-block .bx-cmp .is-off dd, .rm .ivp-box.is-warn .bx-cmp .is-off dd{ box-shadow:none }
+/* the card's head: the kind stays whole, the item wraps, the state keeps its corner */
+#inv-page .bx-h{ align-items:flex-start; flex-wrap:nowrap }
+#inv-page .bx-h b{ flex:none; white-space:nowrap }
+#inv-page .bx-h .bx-item{ flex:0 1 auto; min-width:0 }
+#inv-page .bx-h .st{ flex:none; margin-top:1px }
+#inv-page.is-narrow .bx-h{ flex-wrap:wrap }
+#inv-page.is-narrow .bx-h b{ white-space:normal }
+/* the head of the lines: the title and the switch on one row, the basis note under them */
+#inv-page .ivp-main > .ivp-sec{ flex-wrap:wrap; gap:4px 10px }
+#inv-page .ivp-sec h2{ white-space:nowrap }
+#inv-page .ivp-sec .kit-seg button{ white-space:nowrap }
+#inv-page:not(.is-narrow) .ivp-sec .ivp-basis{ order:3; flex:1 1 100% }
+#inv-page:not(.is-narrow) .ivp-tb .c-item{ width:21% }
+#inv-page:not(.is-narrow) .ivp-tb .c-o{ width:15% }
+#inv-page:not(.is-narrow) .ivp-tb .c-r{ width:15% }
+#inv-page:not(.is-narrow) .ivp-tb .c-q{ width:10% }
+#inv-page:not(.is-narrow) .ivp-tb .c-p{ width:13% }
+#inv-page:not(.is-narrow) .ivp-tb .c-gap{ width:13% }
+.rm .ivp-tb .ivp-grp th{ padding-inline:0; overflow:hidden }
+
+/* ================= round 16: the independent review of the document screen ================= */
+/* the document is one picture; the product's marks live in a layer beside it, so they stay controls */
+.sd-in{ flex:1; min-height:0; display:flex; flex-direction:column }
+.sd-ov{ position:absolute; inset:0; z-index:3; pointer-events:none }
+.sd-ov > *{ pointer-events:auto }
+.sd.is-photo .sd-ov{ inset:26px 30px 30px 24px; transform:rotate(-1.1deg) }
+/* the product's tag stays upright when the document is turned */
+.rm .sd-tag{ transform:rotate(calc(-1 * var(--rot, 0deg))) }
+/* inside the proposal page the panes hand the wheel back to the page at their ends; the whole screen keeps it */
+.rm .ivp-main{ overscroll-behavior:auto; scroll-padding-top:52px }
+.rm .dv-cv{ overscroll-behavior:auto }
+.ivp-full .dv-cv{ overscroll-behavior:contain }
+.rm .dv-bar .rm-ico[aria-disabled="true"]{ opacity:.35; cursor:default }
+/* where motion is not welcome the answer between the table and the document is a still sign, held for a moment */
+@media (prefers-reduced-motion:reduce){
+  .rm .ivp-tb tr.is-seek td{ background:var(--info-sub) }
+  .rm .sd-hot.is-flash{ box-shadow:0 0 0 1.5px var(--info); background:rgb(34 86 187 / .07) }
+  .rm .sd-mk.is-flash{ box-shadow:0 0 0 4px var(--fg) }
+  .rm .ivp-box.is-seek{ outline:3px solid var(--fg); outline-offset:2px }
+}
+/* the divider: a finger gets 44 px; the table never squeezes its amounts into each other */
+@media (pointer:coarse){ .rm .ivp-split::before{ content:''; position:absolute; inset:0 -12px } }
+#inv-page:not(.is-narrow) .ivp-tb{ min-width:420px }
+/* the message with "ביטול" stands over the foot of the data pane, clear of the document and its sentence */
+#inv-page:not(.is-narrow) .rm-main > .iv-toast{ inset-inline:28px auto; margin:0; max-width:min(440px, 38%); white-space:normal }
+/* the whole screen: which item, the two numbers, the amount; then the decision */
+.ivp-full .fl-s{ flex:1 1 300px; min-width:0; display:grid; gap:2px }
+.ivp-full .fl-i{ margin:0; font-size:14px; line-height:20px; color:var(--fg2) }
+.ivp-full .fl-i b{ font-weight:600; color:var(--fg) }
+.ivp-full .fl-g{ flex:none; display:flex; flex-wrap:wrap; align-items:baseline; gap:0 16px }
+.ivp-full .fl-g .fl-a{ margin:0 }
+.rm.ivp-full:focus{ outline:none }
+
+/* ================= round 17: the confirmation review of Version 5 ================= */
+/* the data pane has a floor: its table and the gap's amount are never cut; the document takes what is left */
+.rm .ivp-grid{ grid-template-columns:minmax(448px,1fr) 20px minmax(0,var(--doc,58%)) }
+/* the divider shows where to take hold of it */
+.rm .ivp-split::after{ background:linear-gradient(var(--line-strong),var(--line-strong)) center / 100% 32px no-repeat, var(--rule) }
+/* the amounts of the lines share one edge and never push the table wider than its pane */
+#inv-page:not(.is-narrow) .ivp-tb .money.acc{ min-width:0; width:100% }
+#inv-page:not(.is-narrow) .ivp-tb .c-item{ width:19% }
+#inv-page:not(.is-narrow) .ivp-tb .c-gap{ width:15% }
+/* the names of the columns stay in sight while all the lines are read, under the pinned amount */
+#inv-page:not(.is-narrow) .ivp-main .tb-wrap{ overflow:visible }
+#inv-page:not(.is-narrow) .ivp-main .ivp-tb thead tr:last-child th{ position:sticky; top:44px; z-index:2; background:var(--ivp-bg, var(--surface)); box-shadow:0 1px 0 var(--rule) }
+/* the pinned amount: its button takes the focus where it stands; its words may take two lines and are never cut */
+.rm .ivp-pin [data-ivp="top"]{ scroll-margin-top:-52px; flex:none }
+.rm .ivp-pin > div{ border-radius:0 0 8px 8px }
+.rm .ivp-pin > div > span{ white-space:normal; overflow:visible; text-overflow:clip }
+/* a phone: the caption over the two decisions may take two lines; the place among the invoices is said in short */
+.rm .ivp-dock .dk-c{ white-space:normal; overflow:visible; text-overflow:clip }
+.rm-app.iv.is-narrow .ivp-pos-w{ position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap }
+/* the card's head: the kind and the state on one row, the item on its own row under them */
+#inv-page .bx-h{ flex-wrap:wrap; row-gap:2px }
+#inv-page .bx-h .bx-item{ order:9; flex:1 1 100%; min-width:0 }
+/* a phone's line card: the three quantities on one row, the two prices on the next */
+.rm-app.iv.is-narrow .ivp-tb tbody tr{ grid-template-columns:repeat(6, minmax(0,1fr)) }
+.rm-app.iv.is-narrow .ivp-tb tbody td:nth-child(2), .rm-app.iv.is-narrow .ivp-tb tbody td:nth-child(3), .rm-app.iv.is-narrow .ivp-tb tbody td:nth-child(4){ grid-column:span 2 }
+.rm-app.iv.is-narrow .ivp-tb tbody td:nth-child(5), .rm-app.iv.is-narrow .ivp-tb tbody td:nth-child(6){ grid-column:span 3 }
+.rm-app.iv.is-narrow .ivp-tb tbody td[data-l] .money.acc{ min-width:0 }
+/* the product's tag on the document: one word in the paper's margin, at the edge a Hebrew line starts at, clear of
+   the supplier's print. The tag and the outline keep their size on the screen at every size of the document. */
+.rm .sd-tag{ inset-inline-start:auto; inset-inline-end:calc(100% + 4px + (var(--k, 1) - 1) * 17px); inset-block-start:50%; inset-block-end:auto; padding:2px 6px; border-radius:4px;
+  transform:translateY(-50%) rotate(calc(-1 * var(--rot, 0deg))) scale(var(--k, 1)) }
+.sd:not(.is-photo){ overflow:visible }
+.sd-mk{ box-shadow:0 0 0 calc(2px * var(--k, 1)) var(--fg) }
+.sd-mk.is-done{ box-shadow:0 0 0 calc(1.5px * var(--k, 1)) var(--line-strong) }
+/* a pressed tool of the viewer is ink, never a colour of warning */
+.rm .dv-bar .rm-ico[aria-pressed="true"] svg.i{ color:inherit; --i-duo:0 }
+/* the whole screen: the foot stands under the page it belongs to; a finger gets room around the mark */
+.ivp-full:not(.is-narrow) .fl-f{ padding-inline:max(20px, calc((100% - 920px) / 2)) }
+.ivp-full.is-narrow .sd-mk::before{ content:''; position:absolute; inset:-12px 0 }

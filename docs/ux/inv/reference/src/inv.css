@@ -1,0 +1,531 @@
+/* =====================================================================
+   The invoices area: four screens in the clean finish.
+   Shared pieces first (.iv-*), then one block per screen.
+   ===================================================================== */
+.rm .iv-wait::before{ display:none }
+.rm .iv-wait svg.i{ width:13px; height:13px; color:var(--fg3) }
+.rm .iv-quiet{ color:var(--fg2); font-size:13px }
+.rm .iv-line{ font-size:14px; line-height:20px; font-weight:500 }
+.rm .iv-toast{ top:0; bottom:auto; inset-inline:0; margin-inline:auto; width:fit-content; max-width:calc(100% - 32px); transform:none; white-space:nowrap; z-index:6 }
+.rm .iv-toast[hidden]{ display:none }
+.rm-app.iv{ min-height:0 }
+.rm-app.iv .rm-main{ position:relative; min-width:0 }
+
+/* ---- the register -------------------------------------------------- */
+.reg{ display:grid; grid-template-columns:minmax(0,1fr); height:728px }
+.reg.has-peek{ grid-template-columns:minmax(0,1fr) 320px }
+.reg-main{ padding:22px 28px 0; min-width:0; min-height:0; display:flex; flex-direction:column }
+.reg-main .tb-wrap{ flex:1; min-height:0; overflow:auto; margin-top:6px; padding-bottom:0; scroll-padding-block:44px 64px }
+.rm .reg-tb thead th{ position:sticky; top:0; z-index:1; background:var(--canvas) }
+.rm .reg-tb tfoot td{ position:sticky; bottom:0; background:var(--canvas); padding-bottom:12px; box-shadow:0 -10px 12px -10px rgb(18 28 23 / .14) }
+.reg-head{ display:flex; align-items:center; gap:14px }
+.reg-head h1{ font-size:24px; line-height:32px; font-weight:600 }
+.reg-head .sp, .reg-bar .sp{ flex:1 }
+.reg-month{ font-size:14px; color:var(--fg2); padding:4px 10px; border-radius:8px; background:var(--sunken) }
+.reg-q{ display:flex; align-items:center; gap:8px; height:36px; width:260px; padding:0 12px; border-radius:8px; background:var(--surface); box-shadow:inset 0 0 0 1px var(--line-strong); color:var(--fg3) }
+.reg-q:focus-within{ outline:2px solid var(--focus); outline-offset:2px }
+.reg-q input{ flex:1; min-width:0; border:0; outline:0; background:none; font:inherit; color:var(--fg) }
+.reg-q input::placeholder{ color:var(--fg3) }
+/* one sentence on top: what waits for you; and the one way to act on it */
+.reg-lead{ display:flex; align-items:center; gap:16px; margin-top:10px }
+.reg-say{ flex:1; min-width:0; font-size:20px; line-height:28px; font-weight:600; color:var(--fg) }
+.reg-say .money, .reg-say .money .cur, .reg-say .money .dec{ color:inherit }
+.reg-say small{ margin-inline-start:8px; font-size:13px; font-weight:400; color:var(--fg3) }
+.reg-bar{ display:flex; align-items:flex-end; gap:16px; margin-top:10px; border-bottom:1px solid var(--rule) }
+.reg-bar .desk-tabs{ margin-top:0; border-bottom:0 }
+.reg-sel{ position:relative; display:inline-flex; align-items:center; margin-bottom:8px }
+.reg-sel select{ appearance:none; -webkit-appearance:none; height:32px; padding:0 12px 0 30px; border-radius:16px; border:0; background:var(--surface); box-shadow:inset 0 0 0 1px var(--line-strong); font:inherit; font-size:13px; color:var(--fg); cursor:pointer }
+.reg-sel svg.i{ position:absolute; left:10px; pointer-events:none; color:var(--fg3) }
+.reg-sel select:focus-visible{ outline:2px solid var(--focus); outline-offset:2px }
+.rm .reg-tb{ margin-top:0 }
+.rm .reg-tb th{ padding-top:12px }
+.rm .reg-tb tbody tr{ cursor:pointer }
+.rm .reg-tb tbody tr:hover{ background:var(--sunken) }
+.rm .reg-tb tbody tr[aria-current="true"]{ background:var(--info-sub) }
+.rm .reg-tb tbody tr:focus-visible{ outline:2px solid var(--focus); outline-offset:-2px }
+.rm .reg-tb td{ padding-block:9px }
+.rm .reg-tb td, .rm .reg-tb th{ padding-inline:8px }
+.rm .reg-tb .reg-sup{ font-weight:500 }
+.rm .reg-tb tr.is-calm .reg-sup{ font-weight:400 }
+.rm .reg-tb .reg-due small, .rm .reg-who small{ color:var(--fg3); font-size:12px }
+.rm .reg-tb .reg-left{ margin-inline-start:8px }
+.rm .reg-who{ display:block; font-size:13px; line-height:18px; color:var(--fg2) }
+.rm .reg-who b{ font-weight:500 }
+.rm .reg-who.is-me, .rm .reg-who.is-me b{ color:var(--fg); font-weight:600 }
+.rm .reg-why{ display:block; font-size:12px; line-height:16px; color:var(--fg3) }
+.rm .reg-tb td.reg-whoc{ min-width:200px }
+.rm .reg-who.is-sys{ color:var(--fg3) }
+.rm .reg-tb tr.is-calm .reg-gap{ color:var(--fg3) }
+.rm .reg-tb tr.is-calm .reg-gap .dec{ color:inherit }
+.rm .reg-tb tr.is-open .reg-gap{ font-weight:600 }
+.reg-empty{ display:grid; justify-items:center; gap:12px; padding:64px 20px; color:var(--fg2) }
+.reg-empty b{ font-size:16px; font-weight:500; color:var(--fg) }
+.reg-peek{ border-inline-start:1px solid var(--rule); background:var(--surface); padding:16px 20px 20px; display:flex; flex-direction:column; gap:12px; min-width:0; overflow:auto }
+.reg-peek[hidden]{ display:none }
+.pk-top{ display:flex; align-items:flex-start; gap:8px }
+.pk-t{ flex:1; font-size:16px; line-height:22px; font-weight:600; padding-top:6px }
+.pk-meta{ display:flex; align-items:center; gap:10px; font-size:13px; color:var(--fg2) }
+.pk-dl{ display:grid; gap:6px; margin:0; padding:10px 0; border-block:1px solid var(--rule) }
+.pk-dl div{ display:flex; align-items:baseline; justify-content:space-between; gap:12px }
+.pk-dl dt{ font-size:13px; color:var(--fg2) }
+.pk-dl dd{ margin:0; font-weight:500 }
+.pk-dl dd small{ font-weight:400; color:var(--fg3); font-size:12px }
+.pk-gap{ display:grid; gap:4px }
+.pk-item{ margin-top:6px; font-size:13px; line-height:18px; color:var(--fg2) }
+.pk-item b{ color:var(--fg); font-weight:500 }
+.pk-calc{ font-size:13px; line-height:18px; color:var(--fg2) }
+.pk-calc .money{ font-weight:600; color:var(--fg); font-size:16px }
+.pk-calc small, .pk-item small{ color:var(--fg3); font-size:12px }
+.pk-act{ display:flex; gap:8px; flex-wrap:wrap; margin-top:10px }
+.pk-ro{ margin-top:8px; font-size:13px; color:var(--fg2); padding:8px 10px; border-radius:8px; background:var(--sunken) }
+.pk-note{ font-size:13px; line-height:20px; color:var(--fg2) }
+.pk-open{ margin-top:auto; display:inline-flex; align-items:center; gap:4px; min-height:24px; font-size:14px; font-weight:500; color:var(--brand) !important }
+.pk-open svg.i{ width:14px; height:14px }
+.rm-app.iv.is-compact .reg-tb td{ padding-block:5px }
+.rm-app.iv.is-compact .reg-tb{ font-size:13px; line-height:18px }
+.rm-app.iv.is-compact .reg-main{ padding-top:16px }
+/* phone: the table becomes a list, the summary opens over it */
+.rm-app.iv.is-narrow .reg{ height:auto }
+.rm-app.iv.is-narrow .reg-main .tb-wrap{ overflow:visible }
+.rm-app.iv.is-narrow .reg-tb thead th, .rm-app.iv.is-narrow .reg-tb tfoot td{ position:static }
+.rm-app.iv.is-narrow .reg.has-peek{ grid-template-columns:minmax(0,1fr) }
+.rm-app.iv.is-narrow .reg-main{ padding:16px 12px 18px }
+.rm-app.iv.is-narrow .reg-head{ flex-wrap:wrap; gap:8px 12px }
+.rm-app.iv.is-narrow .reg-q{ width:100%; height:44px }
+.rm-app.iv.is-narrow .reg-bar{ flex-wrap:wrap }
+.rm-app.iv.is-narrow .reg-bar .desk-tabs{ flex-wrap:wrap; gap:4px 16px }
+.rm-app.iv.is-narrow .reg-bar .desk-tabs button{ min-height:44px }
+.rm-app.iv.is-narrow .reg-sel select{ height:44px; border-radius:22px }
+/* on a phone the summary is a sheet that rises over the list and stays at the bottom of the screen */
+.rm-app.iv.is-narrow .reg-peek{ position:sticky; bottom:0; z-index:4; max-height:min(72vh, 560px); border-inline-start:0; border-radius:16px 16px 0 0; box-shadow:0 -1px 0 var(--rule), 0 -12px 28px rgb(18 28 23 / .16) }
+/* with the summary open the table gives up what the summary already says */
+.rm-app.iv:not(.is-narrow) .reg.has-peek .reg-tb .reg-date, .rm-app.iv:not(.is-narrow) .reg.has-peek .reg-tb .reg-due, .rm-app.iv:not(.is-narrow) .reg.has-peek .reg-tb .reg-why{ display:none }
+.rm-app.iv:not(.is-narrow) .reg.has-peek .reg-tb td.reg-whoc{ min-width:0 }
+.rm-app.iv:not(.is-narrow) .reg.has-peek .reg-tb td, .rm-app.iv:not(.is-narrow) .reg.has-peek .reg-tb th{ padding-inline:7px }
+
+/* the map of the month's money: one place per invoice, the places add up to the month */
+.reg-map{ display:flex; gap:6px; margin-top:12px }
+.reg-pl{ flex:1 1 0; min-width:132px; display:grid; align-content:start; gap:1px; padding:10px 12px 9px; border-radius:12px; background:var(--surface); box-shadow:inset 0 0 0 1px var(--rule); text-align:start; position:relative }
+.reg-pl:hover{ background:var(--sunken) }
+.reg-pl[aria-pressed="true"]{ background:var(--sunken); box-shadow:inset 0 0 0 1px var(--line-strong), inset 0 -2px 0 var(--fg) }
+.reg-pl.is-all{ background:none; box-shadow:inset 0 0 0 1px var(--rule) }
+.reg-pl.is-all[aria-pressed="true"]{ background:var(--sunken); box-shadow:inset 0 0 0 1px var(--line-strong), inset 0 -2px 0 var(--fg) }
+.reg-pl .pl-t{ display:flex; align-items:center; gap:6px; font-size:13px; line-height:18px; font-weight:500; color:var(--fg2); white-space:nowrap }
+.reg-pl .pl-t .c{ color:var(--fg3); font-weight:400; font-variant-numeric:tabular-nums }
+.reg-pl .pl-v{ display:flex; align-items:baseline; flex-wrap:wrap; gap:0 6px; font-size:16px; line-height:24px; font-weight:600 }
+.reg-pl .pl-v small{ font-size:12px; line-height:16px; font-weight:400; color:var(--fg3) }
+.reg-pl .pl-s{ font-size:12px; line-height:16px; color:var(--fg3) }
+.reg-pl .pl-s .money, .reg-pl .pl-s .money .cur, .reg-pl .pl-s .money .dec{ color:inherit }
+.reg-pl.is-leak .pl-t, .reg-pl.is-warn .pl-t{ color:var(--fg) }
+.reg-bar{ border-bottom:0; align-items:center; margin-top:12px }
+.reg-cnt{ font-size:13px; color:var(--fg2) }
+.reg-sel{ margin-bottom:0 }
+.rm-app.iv.is-narrow .reg-map{ display:grid; grid-template-columns:repeat(2, minmax(0,1fr)) }
+.rm-app.iv.is-narrow .reg-pl{ min-width:0; min-height:44px }
+.rm-app.iv.is-narrow .reg-pl.is-all{ flex:none }
+
+/* ---- the page of one invoice ---------------------------------------- */
+.ivp{ padding:16px 28px 28px }
+.ivp-top{ display:flex; align-items:center; gap:8px; min-height:36px }
+.ivp-top .sp, .ivp-sec .sp, .bx-h .sp{ flex:1 }
+.ivp-back{ display:inline-flex; align-items:center; gap:4px; font-size:13px; font-weight:500; color:var(--brand) !important }
+.ivp-back svg.i{ width:14px; height:14px }
+.ivp-pos{ font-size:13px; color:var(--fg3) }
+.ivp-pos b{ font-weight:500; color:var(--fg2) }
+.ivp .rm-ico[disabled]{ opacity:.35; cursor:default }
+.rm .ivp svg.i.up{ transform:rotate(180deg) }
+.ivp-head{ display:flex; align-items:center; gap:12px; margin-top:6px }
+.ivp-head h1{ font-size:24px; line-height:32px; font-weight:600 }
+.ivp-meta{ display:flex; flex-wrap:wrap; gap:4px 18px; margin-top:2px; font-size:14px; line-height:20px; color:var(--fg2) }
+.ivp-chain{ display:flex; gap:0; margin:14px 0 0; padding:0; list-style:none; font-size:13px; line-height:18px }
+.ivp-chain li{ position:relative; display:grid; gap:0; padding:6px 14px 6px 26px; color:var(--fg2); background:var(--surface); box-shadow:inset 0 0 0 1px var(--rule) }
+.ivp-chain li:first-child{ border-radius:0 8px 8px 0; padding-inline-start:14px }
+.ivp-chain li:last-child{ border-radius:8px 0 0 8px }
+.ivp-chain li + li{ margin-inline-start:-1px }
+.ivp-chain li small{ font-size:12px; line-height:16px; color:var(--fg3) }
+.ivp-chain li.is-here{ color:var(--fg); font-weight:500; background:var(--sunken) }
+.ivp-chain li.is-off{ color:var(--fg3) }
+.ivp-box{ margin-top:14px; padding:16px 20px 18px; border-radius:12px; background:var(--surface); box-shadow:inset 0 0 0 1px var(--rule), var(--sh1); display:grid; gap:6px }
+.ivp-box.is-block{ box-shadow:inset 0 0 0 1px var(--leak-bd), var(--sh1) }
+.ivp-box.is-warn{ box-shadow:inset 0 0 0 1px var(--warn-bd), var(--sh1) }
+.bx-h{ display:flex; align-items:center; gap:6px; font-size:16px; line-height:22px }
+.bx-h b{ font-weight:600 }
+.bx-item{ color:var(--fg2) }
+.bx-calc{ font-size:14px; line-height:22px; color:var(--fg2) }
+.bx-calc b{ font-size:20px; line-height:28px; font-weight:600; color:var(--fg) }
+.bx-calc small{ color:var(--fg3); font-size:12px }
+.bx-who{ margin-top:4px }
+.bx-esc{ font-weight:400; color:var(--fg2) }
+.bx-fx{ font-size:13px; line-height:20px; color:var(--fg2) }
+ul.bx-fx{ margin:8px 0 0; padding:0; list-style:none }
+.bx-fx .money, .bx-fx .money .cur, .bx-fx .money .dec{ color:inherit }
+.bx-act{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:10px }
+.bx-note{ font-size:13px; color:var(--fg3); margin-inline-start:6px }
+.bx-ask{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:10px; font-size:14px; font-weight:500 }
+.bx-ro{ margin-top:8px; font-size:14px; line-height:20px; padding:10px 12px; border-radius:8px; background:var(--sunken); color:var(--fg2) }
+.bx-done{ display:flex; align-items:center; gap:8px; margin-top:4px; font-size:14px; line-height:20px }
+.bx-done svg.i{ width:18px; height:18px; color:var(--fg2) }
+.bx-done span{ color:var(--fg2) }
+.ivp-grid{ display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:28px; margin-top:22px; align-items:start }
+.ivp-sec{ display:flex; align-items:center; gap:10px; margin-bottom:8px }
+.ivp-sec h2{ font-size:16px; line-height:22px; font-weight:600 }
+.ivp-main .ivp-sum + .ivp-sec{ margin-top:26px }
+.ivp-hist{ max-width:520px }
+.rm .ivp-tb td{ padding-block:9px }
+.rm .ivp-tb .is-off{ font-weight:600 }
+.rm .ivp-tb tr.is-hit.is-block td{ background:var(--leak-sub) }
+.rm .ivp-tb tr.is-hit.is-warn td{ background:var(--warn-sub) }
+.rm .ivp-tb tr.is-hit.is-done td{ background:var(--sunken) }
+.rm .ivp-tb tr.is-hit td:first-child{ font-weight:500 }
+.rm .ivp-tb .ivp-g{ font-weight:600 }
+.ivp-more{ margin-top:8px; font-size:13px; color:var(--fg3) }
+.ivp-sum{ display:flex; flex-wrap:wrap; gap:6px 28px; margin:16px 0 0; padding-top:12px; border-top:1px solid var(--rule) }
+.ivp-sum div{ display:grid; gap:0 }
+.ivp-sum dt{ font-size:12px; line-height:16px; color:var(--fg3) }
+.ivp-sum dd{ margin:0; font-size:16px; line-height:24px; font-weight:500 }
+.ivp-sum .is-tot dd{ font-weight:600 }
+.ivp-sum .is-gap{ margin-inline-start:auto; text-align:end }
+.ivp-hist{ margin:0; padding:0; list-style:none; display:grid; gap:0; position:relative }
+.ivp-hist li{ display:grid; grid-template-columns:8px minmax(0,1fr); column-gap:10px; padding:0 0 12px; position:relative; font-size:13px; line-height:18px }
+.ivp-hist li::before{ content:""; grid-column:1; grid-row:1 / span 3; width:8px; height:8px; margin-top:5px; border-radius:50%; background:var(--line-strong) }
+.ivp-hist li::after{ content:""; position:absolute; inset-inline-start:3.5px; top:15px; bottom:-3px; width:1px; background:var(--rule) }
+.ivp-hist li:last-child::after{ display:none }
+.ivp-hist li.is-live::before{ background:var(--fg) }
+.ivp-hist .h-at{ grid-column:2; color:var(--fg3); font-size:12px; line-height:16px }
+.ivp-hist .h-t{ grid-column:2; color:var(--fg) }
+.ivp-hist .h-t small{ color:var(--fg2); font-size:12px }
+.ivp-hist .h-why{ grid-column:2; color:var(--fg2); font-size:12px; line-height:16px }
+.rm-app.iv.is-compact .ivp-tb td{ padding-block:5px }
+.rm-app.iv.is-narrow .ivp{ padding:12px 12px 20px }
+.rm-app.iv.is-narrow .ivp-grid{ grid-template-columns:minmax(0,1fr); gap:20px }
+.rm-app.iv.is-narrow .ivp-chain{ flex-wrap:wrap; gap:4px }
+.rm-app.iv.is-narrow .ivp-chain li{ border-radius:8px !important; margin:0 !important; padding:6px 12px }
+.rm-app.iv.is-narrow .bx-act .btn{ min-height:44px }
+.rm-app.iv.is-narrow .ivp-sum .is-gap{ margin-inline-start:0; text-align:start }
+
+/* ---- approvals by role ---------------------------------------------- */
+.rm .dk{ height:716px }
+.rm .dk-sum{ display:grid; gap:0 }
+.rm .dk .grp{ align-items:baseline; flex-wrap:wrap; padding-top:12px }
+.rm .dk .grp b{ font-size:13px; color:var(--fg); font-weight:600 }
+.rm .dk .grp-s{ color:var(--fg2) }
+.rm .dk .grp-s .money, .rm .dk .grp-s .money .cur, .rm .dk .grp-s .money .dec{ color:inherit }
+.rm .dk .grp-n{ margin-inline-start:auto; color:var(--fg3) }
+.rm .dk .row .why{ display:block; margin-top:1px; font-size:12px; line-height:16px; color:var(--fg3) }
+.rm .dk-none{ padding:2px 12px 6px 30px; font-size:13px; line-height:20px; color:var(--fg2) }
+.rm .dk .desk-keys .act-only{ display:none }
+.rm .dk.can-act .desk-keys .act-only{ display:inline-flex }
+.rm .dk-who{ display:flex; align-items:flex-start; gap:8px; margin-top:12px; padding:10px 12px; border-radius:12px; background:var(--sunken); font-weight:400; color:var(--fg2) }
+.rm .dk-who.is-me{ background:var(--info-sub); color:var(--fg); font-weight:500 }
+.rm .dk-who svg.i{ margin-top:3px; color:var(--fg3) }
+.rm .dk-who span{ flex:1 }
+.rm .dk-why{ flex:none; display:inline-flex; align-items:center; min-height:24px; font-size:13px; font-weight:500; color:var(--brand); text-decoration:underline; text-underline-offset:3px }
+.rm .dk .match.is-warn .off, .rm .dk .match .off.is-warn{ background:var(--warn-sub); box-shadow:inset 0 0 0 1.5px var(--warn-bd) }
+.rm .dk .match.is-warn .delta{ color:var(--warn); box-shadow:none }
+.rm .dk .doc{ margin-top:12px }
+.rm .dk-ro{ font-size:14px; line-height:20px; color:var(--fg2) }
+.rm .dk .ev-bar .hint{ text-align:end }
+.rm .dk .ev-bar .was + .hint{ max-width:none; margin-inline-start:6px }
+.rm .dk-rules{ position:absolute; inset:0; z-index:5; background:rgb(18 28 23 / .32); display:grid; place-items:center; padding:20px }
+.rm .dk-rules[hidden]{ display:none }
+.rm .rl-card{ width:min(560px, 100%); max-height:100%; overflow:auto; background:var(--surface); border-radius:16px; box-shadow:var(--sh2); padding:18px 22px 20px }
+.rm .rl-top{ display:flex; align-items:center; gap:8px }
+.rm .rl-top h2{ flex:1; font-size:18px; line-height:24px; font-weight:600 }
+.rm .rl-lede{ margin-top:2px; font-size:14px; line-height:20px; color:var(--fg2) }
+.rm .rl-tb{ width:100%; border-collapse:collapse; margin-top:12px; font-size:14px; line-height:20px }
+.rm .rl-tb th{ text-align:start; font-size:12px; font-weight:500; color:var(--fg3); padding:0 0 6px; border-bottom:1px solid var(--line) }
+.rm .rl-tb th:last-child{ padding-inline-start:16px }
+.rm .rl-tb td{ padding:8px 0; border-bottom:1px solid var(--rule); vertical-align:top }
+.rm .rl-tb td:last-child{ white-space:nowrap; font-weight:500; padding-inline-start:16px }
+.rm .rl-note{ margin-top:10px; font-size:13px; line-height:20px; color:var(--fg2) }
+.rm-app.iv.is-compact .dk .row{ padding:4px 12px 5px }
+.rm-app.iv.is-narrow .dk{ height:auto }
+.rm .dk .desk-list{ position:relative }
+.rm .desk-list > .iv-toast{ position:absolute; top:0; bottom:auto; inset-inline:8px; width:auto; max-width:none; margin:0; white-space:normal; justify-content:space-between }
+
+.rm .iv-branch{ margin-inline-start:10px; padding:2px 10px; border-radius:12px; background:var(--sunken); font-size:13px; line-height:20px; color:var(--fg2) }
+.rm .dk-who .dk-also{ flex:none; font-size:13px; line-height:20px; font-weight:400; color:var(--fg3) }
+.rm .dk-ro.is-nudge{ animation:dk-nudge 400ms var(--e-out, ease-out) both }
+@keyframes dk-nudge{ 0%{ transform:translateX(0) } 30%{ transform:translateX(-5px) } 60%{ transform:translateX(3px) } 100%{ transform:translateX(0) } }
+@media (prefers-reduced-motion: reduce){ .rm .dk-ro.is-nudge{ animation:none } }
+.rm .rl-sub{ margin-top:14px; font-size:13px; line-height:18px; font-weight:600 }
+.rm .rl-list{ margin:4px 0 0; padding:0; list-style:none; display:flex; flex-wrap:wrap; gap:6px; font-size:13px; line-height:20px }
+.rm .rl-list li{ padding:2px 10px; border-radius:12px; background:var(--sunken); color:var(--fg2) }
+.rm-app.iv.is-narrow .reg-lead{ flex-direction:column; align-items:stretch; gap:10px }
+.rm-app.iv.is-narrow .reg-lead .btn{ min-height:44px }
+.rm-app.iv.is-narrow .reg-tb td.reg-whoc{ min-width:0 }
+
+/* ---- the pay run ---------------------------------------------------- */
+.pr{ padding:16px 28px 28px }
+.pr-off{ display:flex; align-items:center; gap:8px; padding:8px 12px; border-radius:8px; background:var(--sunken); font-size:13px; line-height:20px; color:var(--fg2) }
+.pr-off svg.i{ flex:none; color:var(--fg3) }
+.pr-head{ display:flex; align-items:center; gap:14px; margin-top:14px }
+.pr-head h1{ font-size:24px; line-height:32px; font-weight:600 }
+.pr-head .sp, .pr-sec .sp, .pg-h .sp{ flex:1 }
+.pr-tiles{ display:grid; grid-template-columns:220px 220px minmax(0,1fr); gap:10px; align-items:center; margin-top:14px }
+.pr-tile{ display:grid; gap:1px; padding:12px 16px; border-radius:12px; background:var(--surface); box-shadow:inset 0 0 0 1px var(--rule) }
+.pr-tile .pt-t{ display:flex; align-items:center; gap:6px; font-size:13px; line-height:18px; font-weight:500; color:var(--fg2) }
+.pr-tile .c, .pr-sec .c, .pg-h .c{ color:var(--fg3); font-weight:400; font-variant-numeric:tabular-nums }
+.pr-tile .pt-v{ font-size:24px; line-height:32px; font-weight:600 }
+.pr-tile .pt-s{ font-size:12px; line-height:16px; color:var(--fg3) }
+.pr-say{ padding-inline-start:14px; font-size:16px; line-height:24px; color:var(--fg) }
+.pr-say b{ font-weight:600; color:var(--fg) }
+.pr-say .money, .pr-say .money .cur, .pr-say .money .dec{ color:inherit }
+.pr-sec{ display:flex; align-items:baseline; gap:8px; margin:24px 0 8px }
+.pr-sec h2{ font-size:16px; line-height:22px; font-weight:600 }
+.pr-groups{ display:grid; gap:8px }
+.pr-grp{ border-radius:12px; background:var(--surface); box-shadow:inset 0 0 0 1px var(--rule); padding:10px 16px 6px }
+.pg-h{ display:flex; align-items:center; gap:8px; min-height:32px; font-size:14px; line-height:20px }
+.pg-h b{ font-weight:600 }
+.pg-h .dot{ flex:none; width:8px; height:8px; border-radius:50%; background:var(--line-strong) }
+.pg-h .dot.dot-leak{ background:var(--leak-solid) }
+.pg-h .dot.dot-warn{ background:var(--warn-solid); box-shadow:0 0 0 1px var(--warn-ring) }
+.pg-sum{ font-weight:500 }
+.pg-sum small, .pr-due small{ font-weight:400; color:var(--fg3); font-size:12px }
+.pg-note{ font-size:13px; color:var(--fg2) }
+.pg-note .money, .pg-note .money .cur, .pg-note .money .dec{ color:inherit }
+.pg-rows{ margin:4px 0 0; padding:0; list-style:none }
+.pg-rows li{ display:grid; grid-template-columns:190px 120px 210px minmax(0,1fr) 120px; gap:12px; align-items:baseline; padding:7px 0; border-top:1px solid var(--rule); font-size:14px; line-height:20px }
+.pr-sup{ font-weight:500 }
+.pr-why{ font-size:13px; color:var(--fg2) }
+.pr-why .money, .pr-why .money .cur, .pr-why .money .dec{ color:inherit }
+.pr-amt{ text-align:left; font-variant-numeric:tabular-nums }
+.rm .pr-tb td{ padding-block:8px }
+.rm .pr-tb .pr-note{ font-size:13px; color:var(--fg2) }
+.rm .pr-tb .pr-note .money, .rm .pr-tb .pr-note .money .cur, .rm .pr-tb .pr-note .money .dec{ color:inherit }
+.rm .pr-tb tr.is-new td{ background:var(--sunken) }
+.rm-app.iv.is-compact .pg-rows li{ padding:4px 0; font-size:13px; line-height:18px }
+.rm-app.iv.is-compact .pr-tb td{ padding-block:5px }
+.rm-app.iv.is-narrow .pr{ padding:12px 12px 20px }
+.rm-app.iv.is-narrow .pr-head{ flex-wrap:wrap }
+.rm-app.iv.is-narrow .pr-head .btn{ min-height:44px }
+.rm-app.iv.is-narrow .pr-tiles{ grid-template-columns:repeat(2, minmax(0,1fr)) }
+.rm-app.iv.is-narrow .pr-say{ grid-column:1 / -1; padding-inline-start:0 }
+.rm-app.iv.is-narrow .pg-h{ flex-wrap:wrap }
+.rm-app.iv.is-narrow .pg-rows li{ grid-template-columns:minmax(0,1fr) auto; gap:2px 12px }
+.rm-app.iv.is-narrow .pg-rows li .pr-sup{ grid-column:1; grid-row:1 }
+.rm-app.iv.is-narrow .pg-rows li .pr-amt{ grid-column:2; grid-row:1 }
+.rm-app.iv.is-narrow .pg-rows li .pr-n{ grid-column:1 / -1; grid-row:2 }
+.rm-app.iv.is-narrow .pg-rows li .pr-due, .rm-app.iv.is-narrow .pg-rows li .pr-why{ grid-column:1 / -1 }
+.rm-app.iv.is-narrow .pg-rows li .pr-why:empty{ display:none }
+
+/* ---- the phone: every table of the area is a list of its own shape ---- */
+.rm-app.iv .reg-more{ display:none }
+.rm-app.iv.is-narrow .tb, .rm-app.iv.is-narrow .tb tbody, .rm-app.iv.is-narrow .tb tfoot{ display:block }
+.rm-app.iv.is-narrow .tb thead{ display:none }
+.rm-app.iv.is-narrow .tb td{ padding:0; border:0; white-space:normal; background:none }
+.rm-app.iv.is-narrow .tb tbody td:nth-child(n){ grid-column:auto; grid-row:auto; font-weight:400; font-size:inherit; color:inherit }
+.rm-app.iv.is-narrow .tb tbody td:empty{ display:none }
+.rm-app.iv.is-narrow .tb tr{ display:grid; gap:2px 12px; padding:10px 0; border-bottom:1px solid var(--rule) }
+.rm-app.iv.is-narrow .tb tfoot tr{ grid-template-columns:minmax(0,1fr) auto; border-bottom:0; border-top:3px double var(--fg); padding-top:10px }
+.rm-app.iv.is-narrow .tb tfoot td:empty{ display:none }
+/* the register: supplier and state, number and date and amount, the due date, with whom and the gap */
+.rm-app.iv.is-narrow .reg-tb tbody tr{ grid-template-columns:auto minmax(0,1fr) auto; min-height:44px }
+.rm-app.iv.is-narrow .reg-tb tbody td:nth-child(1){ grid-column:1 / span 2; grid-row:1; font-weight:500 }
+.rm-app.iv.is-narrow .reg-tb tbody td:nth-child(6){ grid-column:3; grid-row:1; justify-self:end }
+.rm-app.iv.is-narrow .reg-tb tbody td:nth-child(2){ grid-column:1; grid-row:2 }
+.rm-app.iv.is-narrow .reg-tb tbody td:nth-child(3){ grid-column:2; grid-row:2 }
+.rm-app.iv.is-narrow .reg-tb tbody td:nth-child(4){ grid-column:3; grid-row:2; justify-self:end }
+.rm-app.iv.is-narrow .reg-tb tbody td:nth-child(5){ grid-column:1 / -1; grid-row:3; font-size:13px; color:var(--fg2) }
+.rm-app.iv.is-narrow .reg-tb tbody td:nth-child(7){ grid-column:1 / span 2; grid-row:4; min-width:0 }
+.rm-app.iv.is-narrow .reg-tb tbody td:nth-child(8){ grid-column:3; grid-row:4; justify-self:end; font-weight:600 }
+.rm-app.iv.is-narrow .reg-tb tfoot td:nth-child(n+2):not(:nth-child(3)){ display:none }
+.rm-app.iv.is-narrow .reg:not(.is-all) .reg-tb tbody tr:nth-child(n+9){ display:none }
+.rm-app.iv.is-narrow .reg-more{ display:inline-flex; align-self:stretch; justify-content:center; min-height:44px; margin-top:12px }
+/* the lines of an invoice: the item and the gap, then every number with its label */
+.rm-app.iv.is-narrow .ivp-tb tbody tr{ grid-template-columns:repeat(2, minmax(0,1fr)); padding:10px 12px; border-radius:8px }
+.rm-app.iv.is-narrow .ivp-tb tbody tr.is-hit.is-block{ background:var(--leak-sub) }
+.rm-app.iv.is-narrow .ivp-tb tbody tr.is-hit.is-warn{ background:var(--warn-sub) }
+.rm-app.iv.is-narrow .ivp-tb tbody tr.is-hit.is-done{ background:var(--sunken) }
+.rm-app.iv.is-narrow .ivp-tb tbody td:nth-child(1){ grid-column:1 / -1; font-weight:500 }
+.rm-app.iv.is-narrow .ivp-tb tbody td[data-l]{ display:flex; align-items:baseline; justify-content:flex-start; gap:6px; text-align:start }
+.rm-app.iv.is-narrow .ivp-tb tbody td[data-l]::before{ content:attr(data-l); font-size:12px; font-weight:400; color:var(--fg2) }
+.rm-app.iv.is-narrow .ivp-tb tbody td.is-off{ font-weight:600 }
+.rm-app.iv.is-narrow .ivp-tb tbody td.ivp-g{ grid-column:1 / -1; font-weight:600; padding-top:4px; border-top:1px solid var(--rule) }
+/* the pay run's list of what can be paid */
+.rm-app.iv.is-narrow .pr-tb tbody tr{ grid-template-columns:minmax(0,1fr) auto }
+.rm-app.iv.is-narrow .pr-tb tbody td:nth-child(1){ grid-column:1; grid-row:1; font-weight:500 }
+.rm-app.iv.is-narrow .pr-tb tbody td:nth-child(5){ grid-column:2; grid-row:1 }
+.rm-app.iv.is-narrow .pr-tb tbody td:nth-child(2){ grid-column:1; grid-row:2 }
+.rm-app.iv.is-narrow .pr-tb tbody td:nth-child(3){ grid-column:2; grid-row:2; font-size:13px; color:var(--fg2) }
+.rm-app.iv.is-narrow .pr-tb tbody td:nth-child(4){ grid-column:1 / -1; grid-row:3 }
+.rm-app.iv.is-narrow .pr-tb tfoot td:nth-child(n){ display:block }
+/* the invoice page's head on a phone */
+.rm-app.iv.is-narrow .ivp-top{ flex-wrap:wrap }
+.rm-app.iv.is-narrow .ivp-back{ white-space:nowrap; min-height:44px }
+.rm-app.iv.is-narrow .ivp-pos{ white-space:nowrap }
+.rm-app.iv.is-narrow .ivp-head{ flex-wrap:wrap; gap:6px 12px }
+.rm-app.iv.is-narrow .bx-h{ flex-wrap:wrap }
+.rm-app.iv.is-narrow .bx-h .sp{ display:none }
+.rm-app.iv.is-narrow .ivp-sec{ flex-wrap:wrap }
+.rm-app.iv.is-narrow .ivp .rm-ico{ min-width:44px; min-height:44px }
+.rm-app.iv.is-narrow .bx-act .btn{ flex:1 1 100% }
+.rm-app.iv.is-narrow .dk-who{ flex-wrap:wrap }
+.rm-app.iv.is-narrow .dk-why{ min-height:44px }
+
+/* ---- the page around the mock-ups ----------------------------------- */
+.tri{ margin-top:12px; display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); border-block:1px solid var(--pg-line) }
+.tri > div{ display:grid; gap:2px; padding:16px 20px 18px 16px; border-inline-start:1px solid var(--pg-line) }
+.tri > div:first-child{ border-inline-start:0; padding-inline-start:0 }
+.tri .k{ font-size:.8125rem; color:var(--pg-fg3) }
+.tri .v{ display:flex; align-items:center; gap:8px; font-size:clamp(1.125rem, 2.1vw, 1.625rem); line-height:1.3; font-weight:600; letter-spacing:-.01em }
+.tri .d{ flex:none; width:10px; height:10px; border-radius:50%; background:#DD2729 }
+.facts{ display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:0 36px; margin:0; padding:0; list-style:none; counter-reset:fx }
+.facts li{ counter-increment:fx; position:relative; padding:12px 0 12px; padding-inline-start:34px; border-top:1px solid var(--pg-rule); font-size:.9375rem; line-height:1.55; color:var(--pg-fg2) }
+.facts li::before{ content:counter(fx); position:absolute; inset-inline-start:0; top:12px; width:22px; height:22px; border-radius:50%; background:var(--pg-chip); color:var(--pg-fg2); font:600 12px/22px var(--pg-font); text-align:center }
+.rm .dk .desk-keys .esc-only{ display:none }
+.rm .dk.can-esc .desk-keys .esc-only{ display:inline-flex }
+@media (max-width: 720px){
+  .tri{ grid-template-columns:minmax(0,1fr) }
+  .tri > div{ border-inline-start:0; border-top:1px solid var(--pg-line); padding:12px 0 }
+  .tri > div:first-child{ border-top:0 }
+  .facts{ grid-template-columns:minmax(0,1fr) }
+}
+.shots3.is-wide{ grid-template-columns:minmax(0,1fr); gap:24px }
+.shots3.is-wide figcaption{ text-align:start; font-size:.9375rem }
+.shots3 .shot{ border-radius:12px }
+@media (max-width: 720px){ .shots3{ grid-template-columns:minmax(0,1fr) } }
+.why.w3{ grid-template-columns:repeat(3, minmax(0,1fr)) }
+@media (max-width: 900px){ .why.w3{ grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)) } }
+.rm-app.iv.is-narrow .kit-seg button{ min-height:44px; padding-inline:14px }
+.rm-app.iv.is-narrow .btn-sm{ min-height:44px }
+.rm .reg-tb tfoot .reg-open{ display:block; font-size:12px; line-height:16px; font-weight:400; color:var(--fg2) }
+.rm .reg-tb tfoot .reg-open .money, .rm .reg-tb tfoot .reg-open .money .cur, .rm .reg-tb tfoot .reg-open .money .dec{ color:inherit }
+
+/* ---- round 9 --------------------------------------------------------- */
+/* a decision that was just made is neutral: green is kept for money that came back */
+.rm .dk .ev-bar .was svg.i{ color:var(--fg2) }
+.rm bdi.id, .rm bdi[dir="ltr"]{ white-space:nowrap }
+.rm .nar-only{ display:none }
+.rm-app.iv.is-narrow .nar-only{ display:inline }
+.rm-app.iv.is-narrow .reg-pl .pl-s{ white-space:normal; overflow:visible; text-overflow:clip }
+.rm .ivp-basis{ font-size:12px; line-height:16px; color:var(--fg3) }
+.rm .dk .match th[scope="row"] small{ display:block; font-size:12px; line-height:16px; font-weight:400; color:var(--fg3) }
+.rm .rl-base{ margin-top:6px; font-size:13px; line-height:20px; color:var(--fg2) }
+
+/* ---- round 10 -------------------------------------------------------- */
+/* the message on a phone: over the screen's end, above the decision bar; never part of the flow */
+.rm-app.iv.is-narrow .iv-toast{ position:absolute; top:0; bottom:auto; inset-inline:12px; width:auto; max-width:none; margin:0; white-space:normal; justify-content:space-between; box-shadow:var(--sh2) }
+/* who is looking, in every frame */
+.rm .iv-me{ font-size:13px; line-height:20px; color:var(--fg2); white-space:nowrap }
+.rm-app.iv.is-narrow .iv-me .me-n{ display:none }
+.stage-bar .role-note{ font-size:.8125rem; color:var(--pg-fg3) }
+/* the search field: one focus ring, and no second clear button from the browser */
+.rm .reg-q input:focus-visible{ outline:0 }
+.reg-q input::-webkit-search-cancel-button{ -webkit-appearance:none; appearance:none; display:none }
+/* amounts on a phone: the ₪ and the VAT basis stay with the figure */
+.rm-app.iv.is-narrow .tb td[data-la]{ display:flex; align-items:baseline; gap:6px }
+.rm-app.iv.is-narrow .tb td[data-la]::after{ content:attr(data-la); font-size:12px; line-height:16px; font-weight:400; color:var(--fg2) }
+.rm-app.iv.is-narrow .reg-tb tbody td.reg-gap[data-l]{ display:flex; align-items:baseline; gap:6px }
+.rm-app.iv.is-narrow .reg-tb tbody td.reg-gap[data-l]::before{ content:attr(data-l); font-size:12px; line-height:16px; font-weight:400; color:var(--fg2) }
+.rm-app.iv.is-narrow .reg-tb tbody td:nth-child(4){ grid-column:1 / -1; grid-row:3; justify-self:start }
+.rm-app.iv.is-narrow .reg-tb tbody td:nth-child(3){ grid-column:2 / -1; grid-row:2; justify-self:end }
+.rm-app.iv.is-narrow .reg-tb tbody td:nth-child(5){ grid-row:4 }
+.rm-app.iv.is-narrow .reg-tb tbody td:nth-child(7){ grid-column:1 / -1; grid-row:5 }
+.rm-app.iv.is-narrow .reg-tb tbody td:nth-child(8){ grid-column:1 / -1; grid-row:6; justify-self:start }
+.rm-app.iv.is-narrow .reg-tb tfoot td[data-la]{ justify-self:end }
+.rm-app.iv.is-narrow .pr-amt small{ font-size:12px; font-weight:400; color:var(--fg2) }
+.rm-app.iv.is-narrow .pr-amt .money.acc, .rm-app.iv.is-narrow .tb td[data-la] .money.acc{ min-width:0 }
+/* quantities share one right edge */
+.rm .ivp-tb .qn{ display:inline-block; min-width:2.8em; text-align:right }
+.rm-app.iv.is-narrow .ivp-tb .qn{ min-width:0 }
+/* a decided gap is calm everywhere: the evidence and the supplier's document lose their red and amber */
+.rm .paper.is-done .hit{ background:var(--sunken); box-shadow:0 0 0 1px var(--line) }
+.rm .dk .match.is-done .off{ background:var(--sunken); box-shadow:inset 0 0 0 1px var(--line) }
+.rm .dk .match.is-done .delta{ color:var(--fg2) }
+/* "everything is handled" is calm too: green is kept for money that came back */
+.rm .dk .ev-empty .ic{ background:var(--sunken); color:var(--fg2); box-shadow:inset 0 0 0 1px var(--line) }
+.rm .dk .ev-empty b{ font-size:18px; line-height:24px }
+/* small targets */
+.rm .dk .ev-meta a{ display:inline-flex; align-items:center; min-height:24px }
+.rm-app.iv.is-narrow .dk .ev-meta a{ min-height:44px; padding-inline:4px }
+.rm-app.iv.is-narrow .bx-ask .chip{ min-height:44px }
+.rm-app.iv.is-narrow .pk-open{ min-height:44px }
+.rm .ivp-box:focus-visible{ outline:2px solid var(--focus); outline-offset:2px }
+.rm .ivp-head h1:focus-visible{ outline:2px solid var(--focus); outline-offset:4px; border-radius:4px }
+/* the held rows of the pay run read like the rows of the table under them */
+.rm .pg-rows .pr-n .id, .rm .pg-rows .pr-due .id{ direction:ltr; unicode-bidi:isolate; font-variant-numeric:tabular-nums; color:var(--fg2) }
+/* …and line up with them: the supplier, the number, the due date and the amount start where the table's do */
+.rm-app.iv:not(.is-narrow) .pg-rows .pr-amt{ margin-inline-end:-6px }
+.rm-app.iv:not(.is-narrow) .pr-tb th:nth-child(1), .rm-app.iv:not(.is-narrow) .pr-tb td:nth-child(1){ width:208px; padding-inline-start:16px }
+.rm-app.iv:not(.is-narrow) .pr-tb th:nth-child(2), .rm-app.iv:not(.is-narrow) .pr-tb td:nth-child(2){ width:132px }
+.rm-app.iv:not(.is-narrow) .pr-tb th:nth-child(3), .rm-app.iv:not(.is-narrow) .pr-tb td:nth-child(3){ width:222px }
+.rm-app.iv:not(.is-narrow) .pr-tb{ table-layout:fixed }
+.rm-app.iv:not(.is-narrow) .pr-tb th:nth-child(5), .rm-app.iv:not(.is-narrow) .pr-tb td:nth-child(5){ width:150px }
+.rm-app.iv:not(.is-narrow) .pr-tb td.pr-note{ white-space:normal }
+/* the three answers start on one line */
+.tri > div{ align-content:start }
+@media (max-width: 560px){ .seg button{ min-height:44px } .toc a{ height:44px; border-radius:22px } }
+/* the roles table on a phone: every cell says what it answers */
+@media (max-width: 700px){
+  .tbl td[data-l]::before{ content:attr(data-l); display:block; font-size:.75rem; line-height:1.4; font-weight:500; color:var(--pg-fg3) }
+  #roles .tbl tr{ grid-template-columns:minmax(0,1fr) }
+}
+
+/* ---- round 11 -------------------------------------------------------- */
+/* "אחר": the reason in words, before the decision */
+.rm .iv-other{ display:inline-flex; align-items:center; gap:8px; flex:1 1 220px; min-width:0; font-size:14px; font-weight:500 }
+.rm .iv-other input{ flex:1; min-width:0; height:36px; padding:0 12px; border:0; border-radius:8px; background:var(--surface); box-shadow:inset 0 0 0 1px var(--line-strong); font:inherit; font-weight:400; color:var(--fg) }
+.rm .iv-other input:focus-visible{ outline:2px solid var(--focus); outline-offset:2px }
+.rm-app.iv.is-narrow .iv-other{ flex:1 1 100% }
+.rm-app.iv.is-narrow .iv-other input{ height:44px }
+.rm .btn[disabled]{ opacity:.45; cursor:default }
+
+/* ---- round 12 -------------------------------------------------------- */
+/* a number written left to right never breaks in the middle, in the page text too */
+bdi[dir="ltr"], bdi.id{ white-space:nowrap }
+/* the pay run's held rows carry the reason under the gap, as the register's rows do */
+.rm .pr-why small{ display:block; font-size:12px; line-height:16px; color:var(--fg3) }
+
+/* ---- round 13 -------------------------------------------------------- */
+/* a narrow phone: the amount of a tile stays inside its tile */
+.rm-app.iv.is-narrow .pr-tile .pt-v{ font-size:20px; line-height:28px }
+@media (max-width: 350px){ .rm-app.iv.is-narrow .pr-tiles{ grid-template-columns:minmax(0,1fr) } }
+/* the bookkeeper's dense heads wrap when the summary takes its share of the width */
+.rm-app.iv:not(.is-narrow) .reg.has-peek .reg-tb th.n{ white-space:normal }
+/* the roles table turns into a list before it would scroll sideways */
+@media (max-width: 800px){
+  #roles .tbl-wrap{ overflow:visible }
+  #roles .tbl{ min-width:0; display:block }
+  #roles .tbl thead{ display:none }
+  #roles .tbl tbody{ display:block }
+  #roles .tbl tr{ display:grid; grid-template-columns:minmax(0,1fr); gap:2px 16px; padding:14px 0; border-top:1px solid var(--pg-rule) }
+  #roles .tbl tr:first-child{ border-top:0 }
+  #roles .tbl td{ display:block; padding:0; border:0; white-space:normal }
+  #roles .tbl td[data-l]::before{ content:attr(data-l); display:block; font-size:.75rem; line-height:1.4; font-weight:500; color:var(--pg-fg3) }
+}
+
+/* ---- round 14 -------------------------------------------------------- */
+/* the desk follows the window, as the product's desk does, so its decision is on screen on a laptop */
+.rm .dk{ height:clamp(520px, calc(100vh - 184px), 716px) }
+.rm-app.iv.is-narrow .dk{ height:auto }
+/* with the summary open the cards give up their third line and may narrow; the summary says it */
+.rm-app.iv:not(.is-narrow) .reg.has-peek .reg-pl{ min-width:0 }
+.rm-app.iv:not(.is-narrow) .reg.has-peek .reg-pl .pl-s{ display:none }
+.rm-app.iv.is-compact .reg.has-peek .reg-tb td, .rm-app.iv.is-compact .reg.has-peek .reg-tb th{ padding-inline:5px }
+/* the line that says what was decided: the result on one line, the details under it when they do not fit */
+.rm .bx-done{ flex-wrap:wrap }
+.rm .bx-done b{ flex:none; white-space:nowrap }
+.rm .bx-done span{ flex:1 1 220px; min-width:0 }
+/* words a person typed never leave their box */
+.rm .bx-done span, .rm .ivp-hist .h-why, .rm .pk-calc, .rm .dk .ev-bar .hint, .rm .dk .row .res{ overflow-wrap:anywhere; min-width:0 }
+/* a phone: the who line of another role's gap keeps its sentence together */
+.rm-app.iv.is-narrow .dk-who > span:not(.dk-also){ flex:1 1 calc(100% - 28px) }
+/* a phone: "הכול מטופל" keeps clear of the message under it */
+.rm-app.iv.is-narrow .dk .ev-empty{ padding-bottom:112px }
+/* the rules card is above the message */
+.rm .dk-rules{ z-index:7 }
+/* the legend keeps Z while a decision can be taken back, and the manager's legend keeps its two lines */
+.rm-app.iv.has-undo .dk .desk-keys .z-only{ display:inline-flex }
+.rm .dk.is-manager .desk-keys{ min-height:67px; align-content:flex-start }
+/* the bookkeeper's dense pay run: the table reads like the held rows above it */
+.rm-app.iv.is-compact .pr-tb{ font-size:13px; line-height:18px }
+.rm-app.iv.is-narrow .pr-tb tfoot td[data-la]{ display:flex }
+.rm .ivp-back{ min-height:24px }
+/* the reason field: 16 px on a phone, so the browser does not zoom the page */
+.rm-app.iv.is-narrow .iv-other input{ font-size:16px }
+.rm .dk .reasons:focus{ outline:0 }
+.rm .dk .desk-ev:focus{ outline:0 }
+.rm .dk .ev-h:focus-visible{ outline:2px solid var(--focus); outline-offset:4px; border-radius:4px }
+/* small captures: smaller pins, nudged off the words they mark */
+@media (max-width: 700px){ .pin{ width:14px; height:14px; margin:-7px 0 0 -7px; font:600 9px/14px var(--pg-font); transform:translateX(var(--dx, 0)) } }
