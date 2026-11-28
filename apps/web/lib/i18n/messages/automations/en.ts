@@ -107,6 +107,22 @@ export const en: Shape<typeof he> = {
       what: 'Supplier agreed to a credit request, no credit invoice yet: draft ready.',
       when: 'Every day at 08:30',
     },
+    // W3-09 / AU-11 — the order autopilot (nothing is sent to a supplier by itself).
+    orderPrepared: {
+      name: 'Prepared order draft',
+      what: 'On an order day: a draft from the order guide, sent only on your tap.',
+      when: 'Every day at 09:00',
+    },
+    orderBackorder: {
+      name: 'Follow-up draft for a short delivery',
+      what: 'A short delivery: a draft of the missing quantities the invoice does not bill.',
+      when: 'When a partial receipt is closed',
+    },
+    orderSendRescue: {
+      name: 'Order that was not sent',
+      what: 'An order that did not reach the supplier: its sender resends from WhatsApp.',
+      when: 'Every day at 09:00',
+    },
     orderCapture: {
       name: 'Order capture from WhatsApp',
       what: 'An order sent on WhatsApp becomes a draft in the system.',

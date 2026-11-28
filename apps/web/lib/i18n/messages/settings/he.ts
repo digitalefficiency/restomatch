@@ -26,7 +26,7 @@ export const he = {
     custom: 'הותאם',
     approvalsTitle: 'מה עובר לאישור',
     largeInvoiceWithoutPo: 'חשבונית בלי הזמנה מעל {a} עוברת לאישור הבעלים',
-    payApprovalOverAmount: 'חשבונית של {a} ומעלה, או ראשונה מספק חדש: רק הבעלים מאשר לתשלום',
+    payApprovalOverAmount: 'תשלום מ-{a} ומעלה, או לספק חדש: לאישור הבעלים',
     unorderedItemSignificant: 'פריט שלא הוזמן עם פער מעל {a} עובר לאישור הבעלים',
     cumulativeLarge: 'פערים בחשבונית מעל {a} או מעל {b} מהסכום עוברים לאישור הבעלים',
     cumulativeMedium: 'פערים בחשבונית מעל {a} או מעל {b} מהסכום עוברים לאישור המנהל',
@@ -139,8 +139,7 @@ export const he = {
       cumulativeLargePct: 'אחוז מצטבר גבוה (%)',
       cumulativeMediumAmountMin: 'סכום מצטבר בינוני — מינ׳ (₪)',
       cumulativeMediumPctMin: 'אחוז מצטבר בינוני — מינ׳ (%)',
-      payApprovalOverAmount: 'אישור בעלים לתשלום מסכום (₪)',
-      payApprovalOverAmountHint: 'מהסכום הזה כולל מע״מ, או בחשבונית ראשונה מספק חדש: רק הבעלים מאשר.',
+      payApprovalOverAmount: 'סף אישור תשלום (₪)',
     },
   },
   twoFactor: {

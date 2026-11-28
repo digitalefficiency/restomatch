@@ -42,6 +42,8 @@ export interface ImportPoResult {
   supplierId: string;
   /** 'sent' when the checksum passed; 'draft' (needs review) when it failed. */
   status: 'sent' | 'draft';
+  /** true → an existing DRAFT PO became 'sent' (G-04 Q4: its pinned invoices are re-matched). */
+  promotedFromDraft: boolean;
   lineCount: number;
   mappedCount: number;
   unmappedCount: number;
@@ -199,12 +201,16 @@ export async function importPurchaseOrder(
     }
     poId = existing.id;
     created = false;
+    // G-04 Q4: a draft promoted to 'sent' is a new send — stamp it, so its
+    // re-match dedupe key differs from any earlier send of this PO.
+    const promotes = existing.status === 'draft' && status === 'sent';
     await db
       .update(purchaseOrders)
       .set({
         supplierId,
         expectedDeliveryAt,
         status,
+        ...(promotes ? { sentAt: new Date() } : {}),
         totalEstimated,
         vatRate: vatRateStr,
         customerRef,
@@ -261,6 +267,7 @@ export async function importPurchaseOrder(
     created,
     supplierId,
     status,
+    promotedFromDraft: !created && existing?.status === 'draft' && status === 'sent',
     lineCount: resolved.length,
     mappedCount,
     unmappedCount: resolved.length - mappedCount,

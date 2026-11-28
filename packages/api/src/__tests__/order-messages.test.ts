@@ -41,4 +41,11 @@ describe('order autopilot notices', () => {
     expect(ordersAutopilotHe.preparedTitle('תנובה', 9, '14:00')).toBe('טיוטה מוכנה לתנובה · 9 פריטים · השליחה עד 14:00');
     expect(ordersAutopilotHe.preparedTitle('תנובה', 9, null)).toBe('טיוטה מוכנה לתנובה · 9 פריטים');
   });
+
+  it("tomorrow's title names the order day and date, never \"מחר\" (it may arrive on the day itself)", () => {
+    const he = ordersAutopilotHe.preparedTomorrowTitle('תנובה', 9, '08:00', '2026-10-29');
+    expect(he).toBe('טיוטה מוכנה לתנובה ליום חמישי 29/10 · 9 פריטים · השליחה עד 08:00');
+    expect(he).not.toMatch(/\d+\.\d{2}(?!\d)/);
+    expect(ordersAutopilotEn.preparedTomorrowTitle('Tnuva', 9, '08:00', '2026-10-29')).toBe('Draft ready for Tnuva for Thursday 29/10 · 9 items · send by 08:00');
+  });
 });
