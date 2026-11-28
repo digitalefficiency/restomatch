@@ -75,10 +75,22 @@ import { dockPriceContext, type DockPriceContextLine } from '../dockPriceContext
 import { readConsolidatedRaw } from '../match/consolidated';
 import { invoiceQuestionCount } from '../catalog/linkQuestions';
 
-/** A dock price line as priceContext returns it: the prices are null for staff roles (H-11). */
-type DockPriceContextView = Omit<DockPriceContextLine, 'billedUnitPrice' | 'usualUnitPrice'> & {
+/**
+ * A dock price line as priceContext returns it. For a role without ₪ (H-11) the
+ * prices, the % over usual and the invoice count are null; `priceHigher` and
+ * `aboveUsual` stay.
+ */
+type DockPriceContextView = Omit<DockPriceContextLine, 'billedUnitPrice' | 'usualUnitPrice' | 'pctVsUsual' | 'samples'> & {
   billedUnitPrice: number | null;
   usualUnitPrice: number | null;
+  pctVsUsual: number | null;
+  samples: number | null;
+  /**
+   * The billed price is above the usual (p50) price: `pctVsUsual > 0`, computed on
+   * the server so a role without the % still gets the same answer. `priceHigher`
+   * alone is not enough: the matcher also flags against the PO price or the p90.
+   */
+  aboveUsual: boolean;
 };
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
@@ -1817,11 +1829,16 @@ export const receivingRouter = router({
     .query(async ({ ctx, input }) => {
       const enabled = await isFeatureOn(ctx.db, ctx.session.restaurantId, 'dockPriceContext');
       if (!enabled || !input.invoiceId) return { enabled, lines: [] as DockPriceContextView[] };
-      const lines: DockPriceContextView[] = await dockPriceContext(ctx.db, ctx.session.restaurantId, input.invoiceId);
-      // H-11 strip (slice c): the receiver keeps the non-₪ signal ("מחיר גבוה
-      // מהרגיל": priceHigher, %, samples), never the prices themselves.
+      const lines: DockPriceContextView[] = (
+        await dockPriceContext(ctx.db, ctx.session.restaurantId, input.invoiceId)
+      ).map((l) => ({ ...l, aboveUsual: l.pctVsUsual > 0 }));
+      // H-11 strip (slice c + owner Q1(ב), 14.11): the receiver keeps only the
+      // yes/no behind "מחיר גבוה מהרגיל" (priceHigher, aboveUsual): no prices, no %, no count.
       if (!seesNoMoney(ctx.session.role)) return { enabled, lines };
-      return { enabled, lines: lines.map((l) => ({ ...l, billedUnitPrice: null, usualUnitPrice: null })) };
+      return {
+        enabled,
+        lines: lines.map((l) => ({ ...l, billedUnitPrice: null, usualUnitPrice: null, pctVsUsual: null, samples: null })),
+      };
     }),
 });
 
