@@ -1,0 +1,42 @@
+{
+  "id": "WA-G-BOOKKEEPER-09",
+  "role": "bookkeeper",
+  "adversarial": false,
+  "flow": "K1",
+  "title": "VAT at risk this month",
+  "neverList": [],
+  "ownerRules": [],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "כמה מע״מ בסיכון החודש?"
+    }
+  ],
+  "expect": {
+    "intent": "vat.atRisk",
+    "tools": [
+      {
+        "name": "owner.vatAtRisk",
+        "args": {
+          "month": "2026-10"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {}
+  }
+}

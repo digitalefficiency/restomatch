@@ -1,0 +1,61 @@
+{
+  "caseId": "WA-G-RECEIVER-03",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "receiving.today",
+      "toolCalls": [
+        {
+          "name": "receiving.todayExpectations",
+          "args": {},
+          "result": {
+            "deliveries": [
+              {
+                "supplier": "מאפיית ברנר",
+                "until": "06:00",
+                "lineCount": 4
+              },
+              {
+                "supplier": "ירקות השרון",
+                "until": "07:30",
+                "lineCount": 9
+              },
+              {
+                "supplier": "יבשים בן-עמי",
+                "until": "13:00",
+                "lineCount": 7
+              }
+            ]
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "list",
+          "text": "המשלוחים של היום:",
+          "list": {
+            "button": "משלוחים היום",
+            "rows": [
+              {
+                "id": "row:0",
+                "title": "מאפיית ברנר · 06:00"
+              },
+              {
+                "id": "row:1",
+                "title": "ירקות השרון · 07:30"
+              },
+              {
+                "id": "row:2",
+                "title": "יבשים בן-עמי · 13:00"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {}
+}

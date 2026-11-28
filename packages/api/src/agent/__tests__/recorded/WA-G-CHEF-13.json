@@ -1,0 +1,54 @@
+{
+  "caseId": "WA-G-CHEF-13",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "order.lastTotal",
+      "toolCalls": [
+        {
+          "name": "suppliers.resolve",
+          "args": {
+            "query": "הקצביה"
+          },
+          "result": {
+            "matches": [
+              {
+                "supplierId": "sup-meat",
+                "name": "קצביית הכרם"
+              }
+            ]
+          }
+        },
+        {
+          "name": "orders.list",
+          "args": {
+            "supplierId": "sup-meat",
+            "last": 1
+          },
+          "result": {
+            "orders": [
+              {
+                "orderId": "po-1038",
+                "number": "1038",
+                "date": "2026-10-19",
+                "lineCount": 6,
+                "totalIls": 1960
+              }
+            ]
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "text",
+          "text": "הזמנה 1038 מקצביית הכרם, יום ב׳ 19.10: סה״כ 1,960 ₪ ב-6 פריטים.",
+          "buttons": []
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {}
+}
