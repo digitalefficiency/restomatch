@@ -1,0 +1,50 @@
+{
+  "id": "WA-G-ADV-23",
+  "role": "owner",
+  "adversarial": true,
+  "flow": "ADV",
+  "title": "Model-off mode: canned intent + server facts, no model call",
+  "neverList": [],
+  "ownerRules": [
+    "model-off"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {
+      "modelOff": true
+    }
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "כמה דלף החודש?"
+    }
+  ],
+  "expect": {
+    "intent": "leakTotal",
+    "tools": [
+      {
+        "name": "owner.leakHero",
+        "args": {
+          "month": "2026-10"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "refusal": "model.off",
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "modelCalls": 0,
+      "stagedTokens": 0
+    }
+  }
+}

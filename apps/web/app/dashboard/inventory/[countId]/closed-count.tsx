@@ -13,7 +13,7 @@ import { inventory as inventoryNs } from '@/lib/i18n/messages/inventory';
 import { originalProps } from '@/lib/i18n/original';
 import { AREAS, qtyText, type Area } from '../inventory-ui';
 import { scale4 } from '../count/guard';
-import { PriceSourceText } from '../count/count-screen';
+import { PriceWhy } from '../count/count-screen';
 import { AmendSheet } from './count-actions';
 
 type Count = inferRouterOutputs<AppRouter>['inventory']['get'];
@@ -67,11 +67,6 @@ export function ClosedCount({ count }: { count: Count }) {
           <span className="block">
             <span className="block text-ink">{name(l)}</span>
             {l.storageArea === 'bar' ? <span className="block text-sm text-muted">{t('detail.barNote')}</span> : null}
-            {money && l.priceSource && l.unitCost ? (
-              <span className="block text-sm text-muted" data-testid="price-source">
-                <PriceSourceText unitCost={l.unitCost} unit={l.unit} source={l.priceSource} />
-              </span>
-            ) : null}
           </span>
         ),
         mobile: 'primary',
@@ -165,6 +160,20 @@ export function ClosedCount({ count }: { count: Count }) {
         pageSize={500}
         filtered={filter !== 'all'}
         onClearFilters={() => setFilter('all')}
+        // IA-02 §4: the selected row's price source sits behind one "למה?" fold in its peek (≤1 per screen).
+        {...(money
+          ? {
+              peek: {
+                title: (l: Line) => (locale === 'en' && l.nameEn ? l.nameEn : l.name),
+                render: (l: Line) =>
+                  l.priceSource ? (
+                    <PriceWhy name={locale === 'en' && l.nameEn ? l.nameEn : l.name} source={l.priceSource} />
+                  ) : (
+                    <p className="text-sm text-muted">{t('count.noPrice')}</p>
+                  ),
+              },
+            }
+          : {})}
         {...(count.canAmend && count.status === 'completed'
           ? { rowActions: (l: Line): RowAction[] => [{ id: 'amend', label: t('detail.amend'), onRun: () => setAmending(l) }] }
           : {})}

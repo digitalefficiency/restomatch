@@ -16,18 +16,19 @@ import { CLAIM_ANSWER_DAYS, NEVER_CLAIMABLE_TYPES, isNeverClaimable } from '../l
  * in apps/web/app/dashboard/recovery/logic.ts) that a parity test locks.
  *
  * A claim is awaiting a chase when:
- *  • its status is `claimed`, `letter_sent`, or `acknowledged` (the last only
- *    when the `chaseAcknowledged` option is on — AD5, default on);
+ *  • its letter went out: status `letter_sent`, or `acknowledged` (the latter
+ *    only when the `chaseAcknowledged` option is on — AD5, default on);
  *  • something is still outstanding (amount > credited);
  *  • its discrepancy type is not one the owner never asks back;
  *  • MORE than CLAIM_ANSWER_DAYS whole calendar days (restaurant time zone,
  *    Asia/Jerusalem by default) passed since COALESCE(letter_sent_at, claimed_at).
  *
- * A `claimed` claim has no letter: it is reported as UNSENT ("טרם נשלח מכתב"),
- * never as "no reply" — a reminder to a supplier who never got the letter is wrong.
+ * A `claimed` claim has no letter yet: it is never chased and never counted in
+ * a chase figure (train-C gate, 11.11) — a reminder to a supplier who never got
+ * the letter is wrong. It belongs to the "לשליחה" (to send) queue instead.
  */
 
-export const CHASE_STATUSES = ['claimed', 'letter_sent', 'acknowledged'] as const;
+export const CHASE_STATUSES = ['letter_sent', 'acknowledged'] as const;
 export type ChaseStatus = (typeof CHASE_STATUSES)[number];
 
 export interface ChaseOptions {
@@ -84,12 +85,10 @@ export function isAwaitingChase(c: ChaseClaim, nowIso: string, opts: ChaseOption
   return isPastAnswerWindow(chaseClockFrom(c), nowIso, opts.tz);
 }
 
-/** How a chased claim is shown: never-sent letter, no reply to a letter, or acknowledged without credit. */
-export type ChaseKind = 'unsent' | 'no_reply' | 'acknowledged';
+/** How a chased claim is shown: no reply to the letter, or acknowledged without a credit invoice. */
+export type ChaseKind = 'no_reply' | 'acknowledged';
 export function chaseKindOf(status: string): ChaseKind {
-  if (status === 'claimed') return 'unsent';
-  if (status === 'acknowledged') return 'acknowledged';
-  return 'no_reply';
+  return status === 'acknowledged' ? 'acknowledged' : 'no_reply';
 }
 
 /**

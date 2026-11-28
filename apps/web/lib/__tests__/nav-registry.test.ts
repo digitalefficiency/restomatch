@@ -176,6 +176,8 @@ describe('ROUTE_ROLES generated from the registry', () => {
       ['/dashboard/orders']: orders,
       ['/dashboard/suppliers']: suppliersHub,
       ['/dashboard/inventory']: inventory,
+      ['/dashboard/recipes']: recipes,
+      ['/dashboard/recipes/new']: recipesNew,
       ['/dashboard/chain/matrix']: chainMatrix,
       ['/dashboard/settings/automations']: automations,
       ['/dashboard/ask']: ask,
@@ -187,6 +189,7 @@ describe('ROUTE_ROLES generated from the registry', () => {
       ['/dashboard/orders']: ordersBefore,
       ['/dashboard/suppliers']: suppliersHubBefore,
       ['/dashboard/inventory']: inventoryBefore,
+      ['/dashboard/recipes']: recipesBefore,
       ['/dashboard/ask']: askBefore,
       ...restBefore
     } = without(ROUTE_ROLES_BEFORE);
@@ -206,6 +209,11 @@ describe('ROUTE_ROLES generated from the registry', () => {
     // Same decision: inventory, read-only for the bookkeeper (W2-07 serves the read tier).
     expect(inventoryBefore).toEqual(['owner', 'manager', 'chef']);
     expect(inventory).toEqual(['owner', 'manager', 'chef', 'bookkeeper']);
+    // Same decision: recipes, read-only for the bookkeeper (W3-02 #281 serves the read tier);
+    // the create form stays chef/manager (explicit roles, never inherited).
+    expect(recipesBefore).toEqual(['owner', 'manager', 'chef']);
+    expect(recipes).toEqual(['owner', 'manager', 'chef', 'bookkeeper']);
+    expect(recipesNew).toEqual(['owner', 'manager', 'chef']);
     // W3-01 (decision 7, granted 7.11): the chain's bookkeeper reads the branch matrix, read-only.
     expect(ROUTE_ROLES_BEFORE['/dashboard/chain/matrix']).toBeUndefined();
     expect([...(chainMatrix ?? [])].sort()).toEqual(['bookkeeper', 'owner']);
@@ -250,6 +258,9 @@ describe('ROUTE_ROLES generated from the registry', () => {
       const suppliersBookkeeper = (role: UserRole) =>
         role === 'bookkeeper' &&
         ['/dashboard/suppliers', '/dashboard/inventory'].some((p) => concrete === p || concrete.startsWith(`${p}/`));
+      // Same decision: recipes (list + a recipe), read-only — never the create form.
+      const recipesBookkeeper = (role: UserRole) =>
+        role === 'bookkeeper' && (concrete === '/dashboard/recipes' || (concrete.startsWith('/dashboard/recipes/') && concrete !== '/dashboard/recipes/new'));
       // W3-01 (decision 7): the bookkeeper reads the chain matrix (read-only; chain.matrix re-checks per branch).
       const matrixBookkeeper = (role: UserRole) => role === 'bookkeeper' && concrete === '/dashboard/chain/matrix';
       // AU-06, owner decision I3: the bookkeeper opens Ask (read-only).
@@ -257,7 +268,7 @@ describe('ROUTE_ROLES generated from the registry', () => {
       // Owner decision I3 (7.11): the bookkeeper reads the month report (W3-08).
       const reportsBookkeeper = (role: UserRole) => role === 'bookkeeper' && (concrete === '/dashboard/reports' || concrete.startsWith('/dashboard/reports/'));
       for (const role of now)
-        if (!ordersChef(role) && !suppliersBookkeeper(role) && !matrixBookkeeper(role) && !askBookkeeper(role) && !reportsBookkeeper(role))
+        if (!ordersChef(role) && !suppliersBookkeeper(role) && !recipesBookkeeper(role) && !matrixBookkeeper(role) && !askBookkeeper(role) && !reportsBookkeeper(role))
           expect(was, `${role} on ${concrete}`).toContain(role);
     }
   });
@@ -265,6 +276,19 @@ describe('ROUTE_ROLES generated from the registry', () => {
 
 describe('nav per role', () => {
   const keysOf = (v: NavViewer) => navGroups(v).flatMap((g) => g.items.map((d) => d.key));
+
+  it('recipes (owner decision 7.11): the bookkeeper sees and opens recipes, never the create form; the chef is unchanged', () => {
+    expect(keysOf(viewer('bookkeeper'))).toContain('recipes');
+    expect(canOpenPath('bookkeeper', '/dashboard/recipes')).toBe(true);
+    expect(canOpenPath('bookkeeper', '/dashboard/recipes/1a2b3c4d-0000-4000-8000-000000000000')).toBe(true);
+    expect(canOpenPath('bookkeeper', '/dashboard/recipes/new')).toBe(false);
+    expect(canOpenPath('bookkeeper', '/dashboard/recipes/new?sub=1')).toBe(false);
+    for (const role of ['owner', 'manager', 'chef'] as const) expect(canOpenPath(role, '/dashboard/recipes/new')).toBe(true);
+    expect(canOpenPath('receiver', '/dashboard/recipes')).toBe(false);
+    // The chef's bar keeps "מנות" in slot 3; the bookkeeper's bar does not gain it.
+    expect(barItems(viewer('chef')).map((b) => `${b.def.key}:${b.label}`)).toContain('recipes:dishes');
+    expect(barItems(viewer('bookkeeper')).map((b) => b.def.key)).not.toContain('recipes');
+  });
 
   it('no nav entry targets a route the role cannot open', () => {
     for (const role of ALL_ROLES) {

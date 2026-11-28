@@ -1,7 +1,7 @@
 import { briefCopy } from './copy';
-import { ilDayMonthDot, ilDayMonthSlash } from './dates';
+import { supplierDelayEmail } from '../notifications/templates';
+import { ilDayMonthDot, ilDayMonthSlash, ilTimeLabel } from './dates';
 import { goLink, mailtoLink, waMeLink } from './links';
-import { briefHtml, esc } from './render';
 import type { BriefContext, BriefMessage } from './types';
 
 /**
@@ -10,6 +10,8 @@ import type { BriefContext, BriefMessage } from './types';
  *    the supplier (wa.me / mailto). Nothing is sent to the supplier by the server.
  *  - On day 1 only, the RECEIVER hears the truck is late: no ₪, no supplier link
  *    (the manager owns the chase).
+ * Both render through W2-13's `supplierDelayEmail` (one design); this file adds only
+ * the supplier draft text and its pre-addressed links.
  */
 export interface LateTruckInput extends BriefContext {
   poId: string;
@@ -37,39 +39,32 @@ export interface LateTruckManagerMessage extends BriefMessage {
   mailtoLink: string | null;
 }
 
+/** "02/11 08:00" (dd/MM HH:mm, Israel time): never readable as an amount. */
+function plannedLabel(at: Date): string {
+  return `${ilDayMonthSlash(at)} ${ilTimeLabel(at)}`;
+}
+
+/**
+ * The manager's message: W2-13's reviewed `supplierDelayEmail` (one design) plus
+ * the pre-addressed wa.me / mailto supplier drafts this file builds.
+ */
 export function lateTruckManagerBrief(input: LateTruckInput): LateTruckManagerMessage {
   const locale = input.locale ?? 'he';
-  const c = briefCopy(locale).lateTruck;
   const supplierText = lateTruckSupplierText(input);
   const wa = waMeLink(input.contactWhatsapp, supplierText);
-  const mail = mailtoLink(input.contactEmail, c.supplierSubject(input.poRef), supplierText);
+  const mail = mailtoLink(input.contactEmail, briefCopy('he').lateTruck.supplierSubject(input.poRef), supplierText);
   const deepLink = goLink(input.baseUrl, input.restaurantId, `/dashboard/receiving/${encodeURIComponent(input.poId)}`);
-  const line = c.managerLine(input.supplierName, input.poRef, ilDayMonthSlash(input.expectedAt), input.daysLate, input.lineCount);
-  const links = [wa ? `${c.whatsapp}: ${wa}` : null, mail ? `${c.email}: ${mail}` : null].filter(Boolean);
-  const chaseText = links.length > 0 ? `${c.sendToSupplier}\n${links.join('\n')}` : c.noContact;
-  const chaseHtml =
-    wa || mail
-      ? `<p style="margin:10px 0 0">${esc(c.sendToSupplier)} ${[
-          wa ? `<a href="${esc(wa)}" style="color:#4f46e5;font-weight:700">[${esc(c.whatsapp)}]</a>` : '',
-          mail ? `<a href="${esc(mail)}" style="color:#4f46e5;font-weight:700">[${esc(c.email)}]</a>` : '',
-        ]
-          .filter(Boolean)
-          .join(' ')}</p>`
-      : `<p style="margin:10px 0 0">${esc(c.noContact)}</p>`;
-  const subject = c.managerSubject(input.supplierName);
-  const text = `${line}\n\n${chaseText}\n\n${c.openPo}: ${deepLink}`;
-  const html = briefHtml({
+  const m = supplierDelayEmail({
+    supplierName: input.supplierName,
+    expectedAtLabel: plannedLabel(input.expectedAt),
+    daysLate: input.daysLate,
+    lineCount: input.lineCount,
+    poUrl: deepLink,
+    chase: { whatsapp: wa, mailto: mail },
     locale,
-    preview: line,
-    heading: subject,
-    lines: [{ text: line }],
-    extraHtml: chaseHtml,
-    cta: { label: c.openPo, url: deepLink },
   });
   return {
-    subject,
-    text,
-    html,
+    ...m,
     deepLink,
     dedupeSuffix: `${input.poId}:d${input.daysLate}`,
     automationId: 'A6',
@@ -79,17 +74,26 @@ export function lateTruckManagerBrief(input: LateTruckInput): LateTruckManagerMe
   };
 }
 
-/** Day 1 only; any other chase day → `null`. No ₪, no supplier contact. */
+/** Day 1 only; any other chase day → `null`. No ₪, no supplier contact (the manager owns the chase). */
 export function lateTruckReceiverBrief(
-  input: Pick<LateTruckInput, 'restaurantId' | 'baseUrl' | 'locale' | 'poId' | 'supplierName' | 'expectedAt' | 'daysLate' | 'invoiceId'>,
+  input: Pick<LateTruckInput, 'restaurantId' | 'baseUrl' | 'locale' | 'poId' | 'supplierName' | 'expectedAt' | 'daysLate' | 'lineCount' | 'invoiceId'>,
 ): BriefMessage | null {
   if (input.daysLate !== 1) return null;
-  const locale = input.locale ?? 'he';
-  const c = briefCopy(locale).lateTruck;
-  const line = c.receiverLine(input.supplierName, ilDayMonthSlash(input.expectedAt));
   const deepLink = goLink(input.baseUrl, input.restaurantId, '/dashboard/receiving');
-  const subject = c.receiverSubject(input.supplierName);
-  const text = `${line}\n\n${c.receiverCta}: ${deepLink}`;
-  const html = briefHtml({ locale, preview: line, heading: subject, lines: [{ text: line }], cta: { label: c.receiverCta, url: deepLink } });
-  return { subject, text, html, deepLink, dedupeSuffix: `${input.poId}:d1`, automationId: 'A6', ...(input.invoiceId ? { invoiceId: input.invoiceId } : {}) };
+  const m = supplierDelayEmail({
+    supplierName: input.supplierName,
+    expectedAtLabel: ilDayMonthSlash(input.expectedAt),
+    daysLate: input.daysLate,
+    lineCount: input.lineCount,
+    poUrl: deepLink,
+    forReceiver: true,
+    locale: input.locale ?? 'he',
+  });
+  return {
+    ...m,
+    deepLink,
+    dedupeSuffix: `${input.poId}:d1`,
+    automationId: 'A6',
+    ...(input.invoiceId ? { invoiceId: input.invoiceId } : {}),
+  };
 }

@@ -1,0 +1,61 @@
+{
+  "id": "WA-G-ADV-37",
+  "role": "receiver",
+  "adversarial": true,
+  "flow": "ADV",
+  "title": "Receiver asks what was ordered: quantities only, no price keys",
+  "neverList": [
+    13
+  ],
+  "ownerRules": [
+    "receiver-no-ils"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "מה הזמנו מהשרון?"
+    }
+  ],
+  "expect": {
+    "intent": "order.lines",
+    "tools": [
+      {
+        "name": "orders.get",
+        "args": {
+          "orderId": "po-1043"
+        }
+      }
+    ],
+    "allowedFields": [
+      "orderId",
+      "supplier",
+      "lines",
+      "product",
+      "qty",
+      "unit"
+    ],
+    "forbiddenFields": [
+      "ils|agorot|amount|total|price"
+    ],
+    "forbiddenText": [
+      "₪",
+      "\\d+[.,]\\d{2}"
+    ],
+    "buttons": [],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "stagedTokens": 0
+    }
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "caseId": "WA-G-ADV-23",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "leakTotal",
+      "refusal": "model.off",
+      "toolCalls": [
+        {
+          "name": "owner.leakHero",
+          "args": {
+            "month": "2026-10"
+          },
+          "result": {
+            "month": "2026-10",
+            "leakIls": 3180
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "הדליפה באוקטובר עד היום: 3,180 ₪.",
+          "buttons": [
+            {
+              "id": "b:36",
+              "title": "פירוט לפי ספק"
+            },
+            {
+              "id": "b:37",
+              "title": "להחלטות עכשיו"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "modelCalls": 0,
+    "stagedTokens": 0
+  }
+}

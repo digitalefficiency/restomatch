@@ -1,0 +1,66 @@
+{
+  "caseId": "WA-G-CHEF-10",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "order.new",
+      "toolCalls": [
+        {
+          "name": "suppliers.resolve",
+          "args": {
+            "query": "ברנר"
+          },
+          "result": {
+            "matches": [
+              {
+                "supplierId": "sup-bakery",
+                "name": "מאפיית ברנר"
+              }
+            ]
+          }
+        },
+        {
+          "name": "orders.captureFromText",
+          "args": {
+            "text": "order פיתות מברנר for tomorrow",
+            "supplierId": "sup-bakery",
+            "deliveryDate": "2026-10-26"
+          },
+          "result": {
+            "edits": [
+              {
+                "product": "פיתות",
+                "qty": 120
+              }
+            ],
+            "estimatedTotalIls": 108
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "טיוטה ממאפיית ברנר לאספקה מחר (עוד לא נשלחה):\n• פיתות 120 יח׳\nסה״כ משוער 108 ₪",
+          "buttons": [
+            {
+              "id": "b:22",
+              "title": "צור טיוטה"
+            },
+            {
+              "id": "b:23",
+              "title": "שנה כמויות"
+            },
+            {
+              "id": "b:24",
+              "title": "ביטול"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {}
+}

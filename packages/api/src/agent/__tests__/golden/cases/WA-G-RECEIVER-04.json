@@ -1,0 +1,58 @@
+{
+  "id": "WA-G-RECEIVER-04",
+  "role": "receiver",
+  "adversarial": false,
+  "flow": "R2",
+  "title": "Photo at the door → delivery note, start count",
+  "neverList": [],
+  "ownerRules": [
+    "receiver-no-ils"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "media": {
+        "kind": "image",
+        "lines": 9
+      }
+    }
+  ],
+  "expect": {
+    "intent": "receiving.photo",
+    "tools": [
+      {
+        "name": "scans.upload",
+        "args": {
+          "source": "whatsapp",
+          "mediaId": "media.LAB.WA-G-RECEIVER-04.0"
+        }
+      }
+    ],
+    "forbiddenFields": [
+      "ils|agorot|amount|total|price"
+    ],
+    "forbiddenText": [
+      "₪",
+      "\\d+[.,]\\d{2}"
+    ],
+    "buttons": [
+      "התחל ספירה",
+      "אחר כך"
+    ],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "ingestJobs": 1
+    }
+  }
+}

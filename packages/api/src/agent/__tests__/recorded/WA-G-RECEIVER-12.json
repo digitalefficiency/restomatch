@@ -1,0 +1,52 @@
+{
+  "caseId": "WA-G-RECEIVER-12",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "delivery.when",
+      "toolCalls": [
+        {
+          "name": "suppliers.resolve",
+          "args": {
+            "query": "השרון"
+          },
+          "result": {
+            "matches": [
+              {
+                "supplierId": "sup-veg",
+                "name": "ירקות השרון"
+              }
+            ]
+          }
+        },
+        {
+          "name": "receiving.todayExpectations",
+          "args": {
+            "supplierId": "sup-veg"
+          },
+          "result": {
+            "deliveries": [
+              {
+                "supplier": "ירקות השרון",
+                "until": "07:30",
+                "lineCount": 9,
+                "received": false
+              }
+            ]
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "text",
+          "text": "המשלוח מירקות השרון היה צפוי עד 07:30 ועוד לא נקלט. המנהל רואה את זה באפליקציה.",
+          "buttons": []
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {}
+}

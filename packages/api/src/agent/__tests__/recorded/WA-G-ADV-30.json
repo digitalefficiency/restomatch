@@ -1,0 +1,28 @@
+{
+  "caseId": "WA-G-ADV-30",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": null,
+      "refusal": "never.staff",
+      "toolCalls": [],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "cta",
+          "text": "צוות, תפקידים ומספרי טלפון משנים רק באפליקציה.",
+          "cta": {
+            "title": "ניהול צוות",
+            "url": "https://app.restomatch.test/dashboard/go?r=lab&to=team"
+          }
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "staffChanged": 0,
+    "bindingsChanged": 0
+  }
+}

@@ -104,6 +104,8 @@ export const he = {
     platformAdmin: 'קונסולת פלטפורמה',
     help: 'עזרה',
     accessibility: 'הצהרת נגישות',
+    privacy: 'מדיניות פרטיות',
+    terms: 'תנאי שימוש',
     contact: 'צור קשר',
     support: 'עזרה ונגישות',
     keyboardHint: 'Ctrl+B לכיווץ',

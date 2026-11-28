@@ -1,0 +1,42 @@
+{
+  "id": "WA-G-MANAGER-05",
+  "role": "manager",
+  "adversarial": false,
+  "flow": "M2",
+  "title": "Late truck → \"הגיע, אעדכן\" opens receiving",
+  "neverList": [],
+  "ownerRules": [],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "tap": {
+        "kind": "template_button",
+        "id": "late:arrived:po-1043",
+        "title": "הגיע, אעדכן"
+      }
+    }
+  ],
+  "expect": {
+    "intent": "delivery.arrived",
+    "tools": [],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "cta": "פתח קבלה",
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "poDatesRevised": 0
+    }
+  }
+}

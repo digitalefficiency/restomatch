@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { isFeatureOn } from '../lib/featureGate';
 import { memberProcedure, router, userScopedProcedure } from '../trpc';
-import { foldBadges, linkBadge } from '../tasks/badges';
+import { connectionsBadge, foldBadges, linkBadge } from '../tasks/badges';
+import { integrationsRouter } from './integrations';
 import { buildLinkQueue, summarizeLinkQueue } from '../catalog/linkQueue';
 import { loadLinkQueueCandidates } from '../catalog/linkQueueLoad';
 import { collectTasks } from '../tasks/collect';
@@ -40,6 +41,17 @@ export const navRouter = router({
         badges.claims = { ...badges.claims, ilsAgorot: owed > 0 ? owed : null, money: 'owed' };
       } catch {
         failed.push('claimsOwed');
+      }
+    }
+    // W3-07a · "חיבורים": a dot only while a connection needs action (owner + manager,
+    // who see the procurement section; flag `integrations`).
+    if ((ctx.session.role === 'owner' || ctx.session.role === 'manager') && (await isFeatureOn(ctx.db, rid, 'integrations'))) {
+      try {
+        const providers = await integrationsRouter.createCaller(sub).procurementProviders();
+        const dot = connectionsBadge(providers.filter((p) => p.syncStale).length);
+        if (dot) badges.connections = dot;
+      } catch {
+        failed.push('connections');
       }
     }
     // W3-10 · "N לקישור · ₪X עוד לא נבדקו": the one לקשר queue's summary, neutral

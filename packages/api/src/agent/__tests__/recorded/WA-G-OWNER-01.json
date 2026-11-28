@@ -1,0 +1,75 @@
+{
+  "caseId": "WA-G-OWNER-01",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "brief.owner",
+      "toolCalls": [
+        {
+          "name": "owner.leakHero",
+          "args": {
+            "month": "2026-10"
+          },
+          "result": {
+            "month": "2026-10",
+            "leakIls": 3180
+          }
+        },
+        {
+          "name": "approvals.queueSummary",
+          "args": {},
+          "result": {
+            "count": 4,
+            "totalIls": 1412
+          }
+        },
+        {
+          "name": "recovery.list",
+          "args": {
+            "overdueOnly": true
+          },
+          "result": {
+            "overdue": 2,
+            "claims": []
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "template",
+          "text": "בוקר טוב. בכפר הזיתים מחכים לך היום:\n• 4 פערים להחלטה, בסך 1,412 ₪\n• 2 בקשות זיכוי שממתינות לתשובה יותר מ-7 ימים מהספק\nהדליפה החודש עד עכשיו: 3,180 ₪. הפרטים באפליקציה.",
+          "template": {
+            "name": "rm_owner_brief",
+            "vars": [
+              "כפר הזיתים",
+              "4",
+              "1,412 ₪",
+              "2",
+              "3,180 ₪"
+            ]
+          },
+          "buttons": [
+            {
+              "id": "brief:decide",
+              "title": "להחלטות עכשיו"
+            },
+            {
+              "id": "brief:mute",
+              "title": "השתק להיום"
+            }
+          ],
+          "cta": {
+            "title": "פתח באפליקציה",
+            "url": "https://app.restomatch.test/dashboard/go?r=lab&to=approvals"
+          }
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "proactiveSent": 1
+  }
+}

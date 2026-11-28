@@ -41,7 +41,7 @@ export type BarSlot = 1 | 2 | 3 | 4;
  * count only. `priceAlerts` is neutral below W2-12's materiality. `link` (W3-10)
  * carries spend not price-checked yet, always neutral.
  */
-export const BADGE_KEYS = ['approvals', 'payRun', 'claims', 'receiving', 'count', 'intake', 'priceAlerts', 'link'] as const;
+export const BADGE_KEYS = ['approvals', 'payRun', 'claims', 'receiving', 'count', 'intake', 'priceAlerts', 'connections', 'link'] as const;
 export type BadgeKey = (typeof BADGE_KEYS)[number];
 
 export interface RouteDef {

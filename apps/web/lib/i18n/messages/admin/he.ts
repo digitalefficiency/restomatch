@@ -83,6 +83,16 @@ export const he = {
     saved: 'נשמר ✓',
     noChanges: 'אין שינויים לשמירה',
     confirm: 'לשמור {count} שינויים?\n{list}',
+    colSource: 'מקור',
+    activeTitle: 'פיצ׳רים פעילים: {count} מתוך {total}',
+    activeNone: 'אין פיצ׳רים פעילים למסעדה הזו.',
+    source: {
+      killed: 'כבוי לכולם (FEATURES_OFF)',
+      stored: 'הוגדר למסעדה',
+      demo: 'טננט דמו (all)',
+      default: 'פעיל כברירת מחדל',
+      none: 'לא הוגדר',
+    },
   },
   twoFactor: {
     title: 'נדרש אימות דו־שלבי',

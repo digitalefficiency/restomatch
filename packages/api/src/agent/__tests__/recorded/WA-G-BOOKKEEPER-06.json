@@ -1,0 +1,54 @@
+{
+  "caseId": "WA-G-BOOKKEEPER-06",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "queue.mine",
+      "toolCalls": [
+        {
+          "name": "approvals.myQueue",
+          "args": {},
+          "result": {
+            "items": [
+              {
+                "discrepancyId": "d-drinks-7781-1",
+                "type": "DUPLICATE_INVOICE",
+                "supplier": "משקאות שטיינברג",
+                "invoiceNumber": "7781",
+                "duplicateOf": "7712",
+                "deltaIls": 420,
+                "requiredRole": "bookkeeper",
+                "severity": "warn"
+              }
+            ],
+            "ownerOnlyCount": 0
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "פער 1 מתוך 1 · משקאות שטיינברג\nחשבונית 7781 נראית כפולה של 7712\nפער: 420 ₪",
+          "buttons": [
+            {
+              "id": "card:claim:d-drinks-7781-1",
+              "title": "לבקש זיכוי"
+            },
+            {
+              "id": "card:waive:d-drinks-7781-1",
+              "title": "לשלם כפי שחויב"
+            },
+            {
+              "id": "card:info:d-drinks-7781-1",
+              "title": "פרטים"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {}
+}

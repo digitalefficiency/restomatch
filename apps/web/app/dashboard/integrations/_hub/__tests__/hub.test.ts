@@ -41,3 +41,16 @@ describe('procurementTiles', () => {
     expect(tiles[0]!.lastSyncAt?.toISOString()).toBe('2026-10-25T09:00:00.000Z');
   });
 });
+
+describe('a stuck live connection needs action', () => {
+  it('syncStale → error chip with a plain reason, and lights the nav dot', () => {
+    const tiles = procurementTiles([
+      { platform: 'marketman', adapter: true, connected: true, mode: 'live', lastSyncAt: '2026-10-20T09:00:00Z', syncStale: true },
+      { platform: 'zester', adapter: true, connected: true, mode: 'live', lastSyncAt: '2026-10-25T09:00:00Z', syncStale: false },
+    ]);
+    expect(tiles.map((x) => x.status)).toEqual(['error', 'connected']);
+    expect(tiles[0]!.errorKey).toBe('hub.errors.syncStale');
+    expect(needsAction(tiles)).toBe(true);
+    expect(needsAction([tiles[1]!])).toBe(false);
+  });
+});
