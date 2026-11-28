@@ -26,8 +26,8 @@ export function ShareClient({
   canReceive: boolean;
   /** Another user's parked shares are wiped before anything is read (shared phone). */
   userId: string | null;
-  /** The session's expiry: the owner stamp lapses with it. */
-  sessionExpires?: string | null;
+  /** When this login really ends (`session.loginEndsAt`, epoch ms): the owner stamp lapses with it. */
+  sessionExpires?: number | null;
 }) {
   const t = useT(common);
   const router = useRouter();

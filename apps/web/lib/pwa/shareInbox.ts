@@ -8,7 +8,7 @@
  *
  * Shares are this user's content on a possibly shared phone, so:
  * - sign-out deletes the whole cache (`purgeFieldSnapshot` → `purgeShares`);
- * - every signed-in mount writes {userId, exp: session expiry} to
+ * - every signed-in mount writes {userId, exp: the login's real end} to
  *   `/__share/owner` (`claimSharesFor`), and the worker copies the user into
  *   each share's meta at park time (an expired stamp = no owner), so every
  *   share carries the user it was parked under;
@@ -154,7 +154,7 @@ export async function purgeShares(api: CacheStorageLike | null = storage()): Pro
 
 const pathOf = (k: Request | string) => new URL(typeof k === 'string' ? k : k.url, 'https://x').pathname;
 
-/** Session expiry → epoch ms (the owner stamp's `exp`); unknown → one day from now. */
+/** Login end → epoch ms (the owner stamp's `exp`); unknown → one day from now (the short login window). */
 function expMs(expires: string | number | Date | null | undefined): number {
   const t = expires instanceof Date ? expires.getTime() : typeof expires === 'number' ? expires : expires ? Date.parse(expires) : NaN;
   return Number.isFinite(t) ? t : Date.now() + 24 * 3600 * 1000;
@@ -165,7 +165,8 @@ function expMs(expires: string | number | Date | null | undefined): number {
  * before the share page reads:
  * 1. each share stamped with another user is deleted (meta + files);
  * 2. each unstamped share (parked while signed out) is stamped `userId`;
- * 3. `/__share/owner` := {userId, exp} (`exp` = the session's expiry), so the
+ * 3. `/__share/owner` := {userId, exp} (`exp` = when the login really ends:
+ *    `session.loginEndsAt`, not Auth.js's sliding `expires`), so the
  *    worker stamps new shares with this user until the session runs out.
  * Deletions come first: a failed stamp write never skips the purge. Returns
  * whether it deleted anything. Never throws.

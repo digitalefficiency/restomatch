@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
@@ -8,6 +9,7 @@ import { claimSharesFor, readShare, routeShare, shareText, takeShareFiles, isSha
 import { purgeFieldSnapshot } from '../fieldSnapshot';
 import { MANIFEST_BASE } from '../manifest';
 import { canFollowPath } from '../../nav/visibility';
+import { loginEndsAtMs, SESSION_TTL_LONG_SEC } from '../../sessionLifetime';
 
 const ORIGIN = 'https://app.test';
 /** A live session's expiry (the owner stamp lapses with it). */
@@ -53,7 +55,14 @@ async function loadWorker(scope = `${ORIGIN}/dashboard`, fetchImpl: (r: unknown)
   const shown: Array<{ title: string; options: Record<string, unknown> }> = [];
   const opened: string[] = [];
   const badge = { set: vi.fn(async () => undefined), clear: vi.fn(async () => undefined) };
-  let windows: Array<{ url: string; focus: () => Promise<unknown>; navigate: (u: string) => Promise<unknown> }> = [];
+  type Win = { url: string; controlled?: boolean; focus: () => Promise<unknown>; navigate: (u: string) => Promise<unknown> };
+  let windows: Win[] = [];
+  // Chromium: a notificationclick grants ONE window interaction, spent by focus() or openWindow().
+  let token = 0;
+  const spend = () => {
+    if (token < 1) throw new Error('Not allowed to open a window.');
+    token -= 1;
+  };
   const self = {
     location: { origin: ORIGIN },
     crypto: globalThis.crypto,
@@ -66,12 +75,16 @@ async function loadWorker(scope = `${ORIGIN}/dashboard`, fetchImpl: (r: unknown)
     },
     clients: {
       claim: () => Promise.resolve(),
-      matchAll: async () => windows,
-      openWindow: async (u: string) => void opened.push(u),
+      matchAll: async (o?: { includeUncontrolled?: boolean }) => windows.filter((w) => o?.includeUncontrolled || w.controlled !== false),
+      openWindow: async (u: string) => {
+        spend();
+        opened.push(u);
+      },
     },
   };
   runInNewContext(src, { self, caches: c.api, fetch: fetchImpl, URL, Request, Response, Promise, console, Uint8Array, Array, String, Date, JSON });
   const run = async (type: string, event: Record<string, unknown>) => {
+    if (type === 'notificationclick') token = 1;
     let waited: Promise<unknown> = Promise.resolve();
     let responded: Promise<Response> | null = null;
     listeners[type]!({
@@ -82,7 +95,12 @@ async function loadWorker(scope = `${ORIGIN}/dashboard`, fetchImpl: (r: unknown)
     await waited;
     return responded ? await (responded as Promise<Response>) : null;
   };
-  return { run, caches: c, shown, opened, badge, setWindows: (w: typeof windows) => void (windows = w) };
+  /** A window whose focus() spends the click's one interaction, like Chromium. */
+  const win = (url: string, navigate: (u: string) => Promise<unknown>, controlled = true): Win => {
+    const w: Win = { url, controlled, navigate, focus: async () => (spend(), w) };
+    return w;
+  };
+  return { run, caches: c, shown, opened, badge, win, setWindows: (w: Win[]) => void (windows = w) };
 }
 
 function shareRequest(form: FormData) {
@@ -216,6 +234,25 @@ describe('share target in the worker (W3-03b)', () => {
     expect((await readShare(id, open))?.owner).toBe('user-b');
   });
 
+  it("the stamp lapses with the real login (1 day without remember-me), not Auth.js's sliding 30-day expires", async () => {
+    const w = await loadWorker();
+    const api = w.caches.api as unknown as CacheStorageLike;
+    const open = async () => (await w.caches.open('rm-share-v1')) as unknown as CacheLike;
+    const now = Date.now();
+    const loginAt = now - 25 * 3600_000; // signed in 25 h ago, "remember me" off (the password form's default)
+    const authJsExpires = now + SESSION_TTL_LONG_SEC * 1000; // what session.expires says: never in the past
+    expect(authJsExpires).toBeGreaterThan(now);
+    const loginEnds = loginEndsAtMs(loginAt, false)!;
+    expect(loginEnds).toBeLessThan(now);
+    expect(loginEndsAtMs(loginAt, true)).toBeGreaterThan(now);
+    await claimSharesFor('user-a', loginEnds, api);
+    const form = new FormData();
+    form.set('text', 'אחרי שהכניסה פגה');
+    const res = (await w.run('fetch', { request: shareRequest(form) }))!;
+    const id = new URL(res.headers.get('location')!, ORIGIN).searchParams.get('id');
+    expect((await readShare(id, open))?.owner).toBe('');
+  });
+
   it('a failed owner-stamp write never skips the purge', async () => {
     const w = await loadWorker();
     const api = w.caches.api as unknown as CacheStorageLike;
@@ -278,9 +315,36 @@ describe('two registrations, one script (W3-03b)', () => {
     expect((await nav(online, '/dashboard'))!.status).toBe(403);
     const offline = await loadWorker(`${ORIGIN}/dashboard`, async () => Promise.reject(new TypeError('Failed to fetch')));
     await offline.run('install', {});
+    const html = readFileSync(join(__dirname, '../../../public/pwa/offline.html'), 'utf8');
+    await (await offline.caches.open('rm-receiver-v2')).put('/pwa/offline.html', new Response(html));
     const page = (await nav(offline, '/dashboard'))!;
     expect(page.status).toBe(200);
-    expect(await page.text()).toBe('/pwa/offline.html'); // the precached file (fakeCaches stores its path)
+    const body = await page.text();
+    expect(body).toContain('אין חיבור לאינטרנט');
+    // Every role launches the app; not every role can open receiving: the launch's offline page retries the launch.
+    expect(body).toContain('href="/dashboard?source=pwa"');
+    expect(body).not.toContain('/dashboard/receiving');
+    // The receiving shell's own fallback keeps the way into the board (its snapshot).
+    const shell = await loadWorker(`${ORIGIN}/dashboard/receiving`, async () => Promise.reject(new TypeError('offline')));
+    await (await shell.caches.open('rm-receiver-v2')).put('/pwa/offline.html', new Response(html));
+    expect(await (await nav(shell, '/dashboard/receiving/x'))!.text()).toContain('href="/dashboard/receiving?source=pwa"');
+  });
+  it('the manifest is network first (a deploy reaches the installed app), the precached copy offline', async () => {
+    const get = (w: Awaited<ReturnType<typeof loadWorker>>) =>
+      w.run('fetch', { request: { url: `${ORIGIN}/pwa/manifest.webmanifest`, method: 'GET', mode: 'no-cors' } });
+    const online = await loadWorker(`${ORIGIN}/dashboard`, async () => new Response('{"v":"new"}'));
+    await (await online.caches.open('rm-receiver-v2')).put('/pwa/manifest.webmanifest', new Response('{"v":"old"}'));
+    expect(await (await get(online))!.text()).toBe('{"v":"new"}');
+    const offline = await loadWorker(`${ORIGIN}/dashboard`, async () => Promise.reject(new TypeError('offline')));
+    await (await offline.caches.open('rm-receiver-v2')).put('/pwa/manifest.webmanifest', new Response('{"v":"old"}'));
+    expect(await (await get(offline))!.text()).toBe('{"v":"old"}');
+  });
+  it('PRECACHE_REV is the hash of the precached files: change one and the worker must change too', async () => {
+    const src = await GET().text();
+    const list = /const PRECACHE = \[([\s\S]*?)\];/.exec(src)![1]!.match(/'([^']+)'/g)!.map((q) => q.slice(1, -1));
+    const h = createHash('sha256');
+    for (const p of list) h.update(readFileSync(join(__dirname, '../../../public', p)));
+    expect(/const PRECACHE_REV = '([0-9a-f]{12})';/.exec(src)?.[1]).toBe(h.digest('hex').slice(0, 12));
   });
 });
 
@@ -301,28 +365,41 @@ describe('push + notification click (W3-03b)', () => {
     expect(w.shown.map((s) => (s.options.data as { url: string }).url)).toEqual(['/dashboard', '/dashboard', '/dashboard', '/dashboard']);
   });
 
-  it('a click focuses an open window on the exact card, else opens one', async () => {
+  it('a click navigates an open window to the exact card and focuses it, else opens one', async () => {
     const w = await loadWorker();
     const close = vi.fn();
     await w.run('notificationclick', { notification: { close, data: { url: '/dashboard/approvals?invoice=1' } } });
     expect(close).toHaveBeenCalled();
     expect(w.opened).toEqual(['/dashboard/approvals?invoice=1']);
 
-    const navigate = vi.fn(async () => null);
-    const win = { url: `${ORIGIN}/dashboard`, focus: async () => win, navigate };
-    w.setWindows([win]);
+    const focused = vi.fn();
+    const navigate = vi.fn(async () => {
+      focused();
+      return open;
+    });
+    const open = w.win(`${ORIGIN}/dashboard/orders`, navigate);
+    w.setWindows([open]);
     await w.run('notificationclick', { notification: { close, data: { url: '/dashboard/receiving/9' } } });
     expect(navigate).toHaveBeenCalledWith('/dashboard/receiving/9');
+    expect(w.opened).toHaveLength(1); // navigated in place, no second window
   });
 
-  it("a window this registration does not control (navigate rejects): it opens the card in a new window", async () => {
+  it('navigate() rejects: the one window interaction is still unspent, so the card opens in a new window', async () => {
     const w = await loadWorker();
-    const navigate = vi.fn(async () => Promise.reject(new TypeError('This service worker is not the client\'s active service worker.')));
-    const win = { url: `${ORIGIN}/dashboard/receiving`, focus: async () => win, navigate };
-    w.setWindows([win]);
+    const navigate = vi.fn(async () => Promise.reject(new TypeError("This service worker is not the client's active service worker.")));
+    w.setWindows([w.win(`${ORIGIN}/dashboard/orders`, navigate)]);
     await w.run('notificationclick', { notification: { close: vi.fn(), data: { url: '/dashboard/approvals?invoice=7' } } });
     expect(navigate).toHaveBeenCalled();
     expect(w.opened).toEqual(['/dashboard/approvals?invoice=7']);
+  });
+
+  it("a window another registration controls (the receiving board, /login) is never navigated: a new window opens", async () => {
+    const w = await loadWorker();
+    const navigate = vi.fn(async () => null);
+    w.setWindows([w.win(`${ORIGIN}/dashboard/receiving`, navigate, false), w.win(`${ORIGIN}/login`, navigate, false)]);
+    await w.run('notificationclick', { notification: { close: vi.fn(), data: { url: '/dashboard/receiving/5' } } });
+    expect(navigate).not.toHaveBeenCalled();
+    expect(w.opened).toEqual(['/dashboard/receiving/5']);
   });
 });
 

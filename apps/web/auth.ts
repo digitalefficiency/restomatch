@@ -41,6 +41,7 @@ import { clearLoginFailures, enforceLoginLimit, enforceMagicLinkLimit, refundLog
 import {
   SESSION_TTL_LONG_SEC,
   isSessionExpired,
+  loginEndsAtMs,
 } from './lib/sessionLifetime';
 
 declare module 'next-auth' {
@@ -52,6 +53,12 @@ declare module 'next-auth' {
       /** 2FA enrolled but the second factor not yet presented (Epic C gate). */
       twoFactorPending: boolean;
     } & DefaultSession['user'];
+    /**
+     * Epoch ms this login really ends (loginAt + its remember-me window), unlike
+     * `expires`, which Auth.js always slides to now + 30d. W3-03b: the
+     * parked-share owner stamp lapses with it.
+     */
+    loginEndsAt?: number;
   }
 }
 
@@ -442,6 +449,7 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         session.user.restaurantId = t.restaurantId ?? null;
         session.user.role = t.role ?? null;
         session.user.twoFactorPending = t.twoFactorPending === true;
+        session.loginEndsAt = loginEndsAtMs(t.loginAt, t.rememberMe === true);
       }
       return session;
     },

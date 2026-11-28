@@ -53,6 +53,11 @@ const SHARE_TTL_MS = 24 * 3600 * 1000;
 const SHARE_TYPES = /^(image\/|application\/pdf$)/;
 const STATIC_PREFIX = '/_next/static/';
 const STATIC_MAX = 400;
+// sha256 (first 12 hex) of the PRECACHE files, in order. A change to any of
+// them must change this line (receiverSw/appPwaSw tests pin it to the files),
+// so the script changes, the browser installs this worker again, and install
+// refetches PRECACHE: a stale offline page or icon never outlives a deploy.
+const PRECACHE_REV = 'cf579d4df15b';
 const PRECACHE = [
   '/pwa/offline.html',
   '/pwa/manifest.webmanifest',
@@ -203,19 +208,34 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const target = safeTarget(event.notification.data && event.notification.data.url);
   event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => {
+    self.clients.matchAll({ type: 'window' }).then((wins) => {
+      // A click grants ONE window interaction: navigate first (it needs none),
+      // focus after; only a window this registration controls can be
+      // navigated, so matchAll lists just those. navigate() can still reject:
+      // then the unspent interaction opens the card in a new window.
       for (const w of wins) {
-        if (new URL(w.url).origin !== self.location.origin) continue;
-        // navigate() rejects for a window this registration does not control
-        // (another registration's page, an uncontrolled tab): open one instead.
-        return w.focus()
-          .then((f) => (f && typeof f.navigate === 'function' ? f.navigate(target) : Promise.reject(new Error('no navigate'))))
+        if (new URL(w.url).origin !== self.location.origin || typeof w.navigate !== 'function') continue;
+        return w.navigate(target)
+          .then((c) => (c ? c.focus().catch(() => c) : self.clients.openWindow(target)))
           .catch(() => self.clients.openWindow(target));
       }
       return self.clients.openWindow(target);
     }),
   );
 });
+
+const MANIFEST_PATH = '/pwa/manifest.webmanifest';
+// offline.html's one action leads into receiving (the receiving shell's
+// fallback: its snapshot serves the board). Every role launches the app,
+// though, so the launch page's offline copy retries the launch instead.
+const RECEIVING_RETRY = 'href="/dashboard/receiving?source=pwa"';
+const LAUNCH_RETRY = 'href="/dashboard?source=pwa"';
+async function offlineLaunch() {
+  const hit = await caches.match('/pwa/offline.html');
+  if (!hit) return Response.error();
+  const html = (await hit.text()).split(RECEIVING_RETRY).join(LAUNCH_RETRY);
+  return new Response(html, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } });
+}
 
 async function offlineNavigation(url) {
   const snapshot = await caches.open(SNAPSHOT_CACHE);
@@ -232,7 +252,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   if (req.method !== 'GET') return;
-  // Static PWA assets: cache-first (public files only).
+  // The manifest: network first (a deploy's change reaches the installed app
+  // at once), the precached copy offline. Never written here.
+  if (url.pathname === MANIFEST_PATH) {
+    event.respondWith(fetch(req).then((res) => (res.ok ? res : caches.match(MANIFEST_PATH).then((hit) => hit || res))).catch(() => caches.match(MANIFEST_PATH).then((hit) => hit || Response.error())));
+    return;
+  }
+  // Other static PWA assets: cache-first (public files only; PRECACHE_REV refreshes them).
   if (PRECACHE.includes(url.pathname)) {
     event.respondWith(caches.match(url.pathname).then((hit) => hit || fetch(req)));
     return;
@@ -250,10 +276,10 @@ self.addEventListener('fetch', (event) => {
   // browser, so the real status (the in-shell 403, a 404) reaches the page.
   // The app-wide registration answers exactly one navigation: the launch page
   // /dashboard, and only offline (network first, no HTML stored, so an online
-  // 403/404/redirect reaches the page as is). The offline page links to the
-  // receiving board, which the receiving registration's snapshot serves.
+  // 403/404/redirect reaches the page as is). Its offline page retries the
+  // launch (every role can open /dashboard; not all can open receiving).
   if (req.mode === 'navigate' && !RECEIVING_SHELL && url.pathname === '/dashboard') {
-    event.respondWith(fetch(req).catch(() => caches.match('/pwa/offline.html').then((hit) => hit || Response.error())));
+    event.respondWith(fetch(req).catch(() => offlineLaunch()));
     return;
   }
   if (req.mode === 'navigate' && RECEIVING_SHELL && (url.pathname === '/dashboard/receiving' || url.pathname.startsWith('/dashboard/receiving/'))) {

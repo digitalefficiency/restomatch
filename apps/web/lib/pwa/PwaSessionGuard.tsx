@@ -39,8 +39,8 @@ export function PwaSessionGuard({
   appPwa = false,
 }: {
   userId: string;
-  /** W3-03b: the session's expiry; the parked-share owner stamp lapses with it. */
-  sessionExpires?: string | null;
+  /** W3-03b: when this login really ends (`session.loginEndsAt`, epoch ms); the parked-share owner stamp lapses with it. */
+  sessionExpires?: number | null;
   /** W3-03b: the app-wide PWA shell (manifest, worker, install sheet, badge). Off by default. */ appPwa?: boolean;
 }) {
   const t = useT(receivingDelivery);

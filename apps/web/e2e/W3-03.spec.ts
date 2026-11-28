@@ -113,12 +113,13 @@ test('the installed app launches controlled, and offline its launch page is the 
   await expect
     .poll(() => page.evaluate(() => navigator.serviceWorker.controller?.scriptURL ?? ''), { timeout: 30_000 })
     .toContain('/receiver-sw.js');
-  // No signal: the launch shows the offline page with the way into receiving, never the browser's error.
+  // No signal: the launch shows the offline page, never the browser's error; its one
+  // action retries the launch (every role can open it, not every role can open receiving).
   await context.setOffline(true);
   try {
     await page.goto('/dashboard?source=pwa');
     await expect(page.getByRole('heading', { name: 'אין חיבור לאינטרנט' })).toBeVisible();
-    await expect(page.locator('a.retry')).toHaveAttribute('href', '/dashboard/receiving?source=pwa');
+    await expect(page.locator('a.retry')).toHaveAttribute('href', '/dashboard?source=pwa');
   } finally {
     await context.setOffline(false);
   }
