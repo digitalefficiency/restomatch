@@ -103,3 +103,51 @@ describe('W3-10 "מה ישתנה" on the basis the import writes', () => {
     expect(res.diff.counts).toMatchObject({ up: 3, same: 1, unclear: 1, new: 0, missing: 0 });
   });
 });
+
+describe('W3-10 "מה ישתנה" basis review fixes (orchestrator 28.11)', () => {
+  const preview = (text: string) =>
+    owner().catalog.parsePreview({
+      supplierId: A.supplierId,
+      file: { filename: 'p.csv', text },
+      mapping: { sku: 'sku', name: 'name', unit: 'unit', packSize: 'pack', price: 'price' },
+    });
+
+  it('the kind follows the exact difference: a gap below the rounding is still ↓ / ↑ with its ₪', async () => {
+    await item({ sku: 'A', name: 'זעתר', price: '40.3490', unit: 'ק״ג' });
+    await billed('A', '1000', 'ק״ג');
+    await item({ sku: 'B', name: 'כמון', price: '39.9900', unit: 'ק״ג' });
+    await billed('B', '1000', 'ק״ג');
+    const res = await preview(['sku,name,unit,pack,price', 'A,זעתר,גרם,,0.0403', 'B,כמון,גרם,,0.04'].join('\n'));
+    const by = new Map(res.diff.lines.map((l) => [l.supplierSku, l]));
+    // ₪40.3490/kg → ₪0.0403/g = ₪40.30/kg: −₪0.049/kg × 1,000 kg = −₪49.00.
+    expect(by.get('A')).toMatchObject({ kind: 'down', basisChanged: true, monthlyImpactAgorot: -4_900 });
+    // ₪39.99/kg → ₪0.04/g = ₪40/kg: +₪0.01/kg × 1,000 kg = +₪10.00.
+    expect(by.get('B')).toMatchObject({ kind: 'up', basisChanged: true, monthlyImpactAgorot: 1_000 });
+    expect(res.diff.counts).toMatchObject({ up: 1, down: 1, same: 0 });
+    expect(res.diff).toMatchObject({ upAgorot: 1_000, downAgorot: 4_900 });
+  });
+
+  it('mg → kg is restated exactly (no zero divisor, no throw)', async () => {
+    await item({ sku: 'S', name: 'זעפרן', price: '0.0001', unit: 'mg' }); // ₪0.0001/mg = ₪100/kg
+    await billed('S', '500000', 'mg'); // 0.5 kg
+    const res = await preview(['sku,name,unit,pack,price', 'S,זעפרן,kg,,120'].join('\n'));
+    // On the new basis ₪100/kg → ₪120/kg: +₪20 × 0.5 kg = +₪10.00.
+    expect(res.diff.lines.find((l) => l.supplierSku === 'S')).toMatchObject({
+      kind: 'up',
+      basisChanged: true,
+      deltaUnits: 200_000,
+      monthlyImpactAgorot: 1_000,
+    });
+  });
+
+  it("a pack cell of '0' is a degenerate basis: unclear, ₪0, the preview still answers", async () => {
+    await item({ sku: 'Z', name: 'מיץ', price: '120.0000', unit: 'ארגז', pack: '12' });
+    await billed('Z', '5', 'ארגז');
+    const res = await preview(['sku,name,unit,pack,price', 'Z,מיץ,ארגז,0,66'].join('\n'));
+    expect(res.diff.lines.find((l) => l.supplierSku === 'Z')).toMatchObject({
+      kind: 'unclear',
+      unclearReason: 'BASIS_NOT_COMPARABLE',
+      monthlyImpactAgorot: 0,
+    });
+  });
+});

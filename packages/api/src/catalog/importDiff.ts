@@ -178,7 +178,9 @@ export function buildImportDiff(current: CurrentCatalogRow[], incoming: Incoming
       const impact = Number(divRoundHalfAway(num * qtyToMilli(Math.max(0, match.monthlyQty)), a1 * 1000n * 100n));
       lines.push({
         ...base,
-        kind: restatedDelta > 0 ? 'up' : restatedDelta < 0 ? 'down' : 'same',
+        // The kind follows the exact difference, like the ₪ does: 'same' ⇔ ₪0
+        // (a gap below the rounding of deltaUnits still moves money).
+        kind: num > 0n ? 'up' : num < 0n ? 'down' : 'same',
         currentId: match.id,
         beforeUnits: match.priceUnits,
         deltaUnits: restatedDelta,
@@ -239,9 +241,11 @@ const packMilli = (p: string | null | undefined): bigint => (p == null ? 1000n :
 /**
  * Does the row's basis change, and how do the two priced units compare? null:
  * the same basis. Otherwise a0 / a1 are the physical amount in one old / new
- * priced unit, in one common scale (pack × unit factor, both in thousandths),
+ * priced unit on one common integer scale (pack in thousandths × the unit
+ * ratio held exactly as num / den — every UNIT_MAP ratio is a power of ten),
  * so `qty_new = qty_old × a0 / a1` and `price_old_on_new = price_old × a1 / a0`.
- * NOT_COMPARABLE: no restatement exists (unknown units, a case → kg).
+ * NOT_COMPARABLE: no restatement exists (unknown units, a case → kg) or the
+ * basis is degenerate (a pack of 0) — never a zero divisor, never a throw.
  */
 function basisChange(cur: CurrentCatalogRow, row: IncomingCatalogRow): { a0: bigint; a1: bigint } | null | 'NOT_COMPARABLE' {
   if (row.unit === undefined && row.packSize === undefined) return null;
@@ -249,14 +253,19 @@ function basisChange(cur: CurrentCatalogRow, row: IncomingCatalogRow): { a0: big
   const u1 = row.unit === undefined ? u0 : row.unit;
   const k0 = packMilli(cur.packSize);
   const k1 = packMilli(row.packSize === undefined ? cur.packSize : row.packSize);
-  let f0: bigint;
+  let num = 1n;
+  let den = 1n;
   if (u0 == null || u1 == null ? u0 === u1 : sameUnit(u0, u1)) {
     if (k0 === k1) return null;
-    f0 = 1000n;
   } else {
     const f = u0 && u1 ? unitConversionFactor(u0, u1) : null; // qty_u1 = qty_u0 × f
-    if (f == null) return 'NOT_COMPARABLE';
-    f0 = BigInt(Math.round(f * 1000));
+    if (f == null || !(f > 0)) return 'NOT_COMPARABLE';
+    // Exact rational: f ≥ 1 → f / 1, else 1 / (1 / f) (mg → kg = 1 / 1,000,000).
+    if (f >= 1) num = BigInt(Math.round(f));
+    else den = BigInt(Math.round(1 / f));
   }
-  return { a0: k0 * f0, a1: k1 * 1000n };
+  const a0 = k0 * num;
+  const a1 = k1 * den;
+  if (a0 <= 0n || a1 <= 0n) return 'NOT_COMPARABLE';
+  return { a0, a1 };
 }
