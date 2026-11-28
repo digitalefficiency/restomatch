@@ -318,6 +318,40 @@ describe('owner home, a leak month (the lab, 21.11)', () => {
   });
 });
 
+describe('the change and the pace line: only against what can be compared, only where a line can come', () => {
+  const NONE = 'אין נתוני השוואה';
+  it('last month’s same days had invoices but none checked: "no comparison" (its ₪0 is not a figure), never "up by ₪770"', async () => {
+    lab.hero = { current: lab.current, previous: { ...lab.previous, invoiceCount: 3, matchedInvoiceCount: 0, leakIls: 0 } };
+    const delta = blockOf(blockOf(await home('owner'), 'leak-hero'), 'leak-hero-delta');
+    expect(tagOf(delta, 'leak-hero-delta')).toMatch(/data-direction="none"/);
+    expect(textOf(delta)).toBe(NONE);
+  });
+  it('the same for a clean month', async () => {
+    lab.hero = {
+      current: { ...lab.current, leakIls: 0, invoicesWithLeak: 0, caughtBeforePaymentIls: 0, leakPct: 0 },
+      previous: { ...lab.previous, invoiceCount: 3, matchedInvoiceCount: 0, leakIls: 0 },
+    };
+    const hero = blockOf(await home('owner'), 'leak-hero');
+    expect(tagOf(hero, 'leak-hero')).toMatch(/data-state="clean"/);
+    const delta = blockOf(hero, 'leak-hero-delta');
+    expect(tagOf(delta, 'leak-hero-delta')).toMatch(/data-direction="none"/);
+    expect(textOf(delta)).toBe(NONE);
+  });
+  it('the 1st of the month (Israel time): no pace line can come, so no slot and no placeholder beside the number', async () => {
+    vi.setSystemTime(new Date('2026-11-01T08:00:00.000Z'));
+    try {
+      const hero = blockOf(await home('owner'), 'leak-hero');
+      expect(tagOf(hero, 'leak-hero')).toMatch(/data-state="leak"/);
+      expect(hero).not.toContain('data-pace-placeholder');
+      expect(hero).not.toContain('data-testid="leak-hero-pace"');
+      // Not even the empty slot (LeakHero draws it only with a `pace`): the number stands alone.
+      expect(hero).not.toContain('sm:basis-40');
+    } finally {
+      vi.setSystemTime(new Date('2026-11-21T10:00:00.000Z'));
+    }
+  });
+});
+
 describe('owner home, the other states of the card', () => {
   it('pendingOnly: "—" (unknown is not ₪0), what waits in place, no calculation, no entry', async () => {
     lab.hero = { current: { ...lab.current, leakIls: 0, matchedInvoiceCount: 0, invoicesWithLeak: 0, caughtBeforePaymentIls: 0, spendIls: 0, leakPct: null as unknown as number }, previous: null };

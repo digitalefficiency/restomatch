@@ -183,12 +183,17 @@ async function Hero(ctx: Ctx) {
   const told = leaked || state === 'clean';
   const drillHref = '/dashboard/leaks/breakdown';
   const d = heroDelta(current, previous);
+  // The pace line can only come for a leak month from its 2nd day (paceSeries): only then is its
+  // place held, so no empty slot stands beside the number on the 1st or in another state.
+  const today = todayDayIndex(Date.now(), current.monthStart);
+  const paceCanCome = leaked && today >= 2;
 
   // The change against the same days last month, in words (heroDelta: exact agorot of the two
-  // procedure figures, unchanged); the % unsigned, in parentheses. No comparable days → a caption.
+  // procedure figures, unchanged); the % unsigned, in parentheses. No comparable days — none at all,
+  // or none with a checked invoice (its ₪0 is not a figure to compare with) → a caption.
   let delta: LeakHeroProps['delta'] = null;
   if (told) {
-    if (!d || !previous) delta = { none: t('hero.delta.none') };
+    if (!d || !previous || previous.matchedInvoiceCount <= 0) delta = { none: t('hero.delta.none') };
     else {
       const pct = d.pct == null ? '' : ` (${formatNumber(Math.abs(d.pct), locale, { style: 'percent', maximumFractionDigits: 0 })})`;
       const word =
@@ -331,10 +336,10 @@ async function Hero(ctx: Ctx) {
       thinNote={thin ? t('hero.thinBase', { count: current.matchedInvoiceCount }) : null}
       delta={delta}
       pace={
-        leaked ? (
+        paceCanCome ? (
           // Its own boundary: the T1 number never waits for the trend, and nothing moves when it lands.
           <Suspense fallback={<PacePlaceholder />}>
-            <HeroPace current={current} previous={previous} direction={d?.direction ?? null} t={t} locale={locale} />
+            <HeroPace current={current} previous={previous} direction={d?.direction ?? null} today={today} t={t} locale={locale} />
           </Suspense>
         ) : undefined
       }
@@ -366,12 +371,15 @@ async function HeroPace({
   current,
   previous,
   direction,
+  today,
   t,
   locale,
 }: {
   current: { monthStart: string; leakIls: number };
   previous: { monthStart: string; leakIls: number; matchedInvoiceCount: number } | null;
   direction: DeltaDirection | null;
+  /** The hero's local day of the month (todayDayIndex), as the caller decided the slot with it. */
+  today: number;
   t: Ctx['t'];
   locale: Locale;
 }) {
@@ -385,7 +393,7 @@ async function HeroPace({
     bucket: trend.bucket,
     points: trend.points,
     current: { monthStart: current.monthStart, leakIls: current.leakIls },
-    today: todayDayIndex(Date.now(), current.monthStart),
+    today,
     previous: previous
       ? { monthStart: previous.monthStart, leakIls: previous.leakIls, matchedInvoiceCount: previous.matchedInvoiceCount, points: trend.previous }
       : null,
