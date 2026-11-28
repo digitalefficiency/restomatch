@@ -4,6 +4,7 @@ import { createServerCaller } from '@/lib/trpc/server';
 import { PageHeader } from '@/lib/components/PageHeader';
 import { formatDay } from '@/lib/components/money/format';
 import { parseView } from '@/lib/components/views';
+import { viewDefaults } from '@/lib/components/views/defaults';
 import { formatDate } from '@/lib/i18n/format';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { overview } from '@/lib/i18n/messages/overview';
@@ -80,7 +81,7 @@ export default async function DashboardPage({
     );
   }
 
-  const [tv, tl, tr, tp, ta] = await Promise.all([getT(viewsNs), getT(leaksNs), getT(recoveryNs), getT(leakProofNs), getT(approvalsNs)]);
+  const [tv, tl, tr, tp, ta, defaults] = await Promise.all([getT(viewsNs), getT(leaksNs), getT(recoveryNs), getT(leakProofNs), getT(approvalsNs), viewDefaults(role)]);
   return (
     <div data-home={role}>
       {/* Finance homes: the work starts right under the title. The manager's and the bookkeeper's
@@ -94,7 +95,8 @@ export default async function DashboardPage({
         restaurantId={active.restaurantId}
         restaurantName={active.restaurantName}
         locale={locale}
-        view={parseView(sp)}
+        // The display density chosen in הגדרות → תצוגה (else the role's), as every view parses it.
+        view={parseView(sp, defaults)}
         fail={fail}
         t={t}
         tv={tv}
