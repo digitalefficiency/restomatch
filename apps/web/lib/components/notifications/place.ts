@@ -8,3 +8,27 @@ export function bellPanelEnd(bell: { left: number; right: number }, viewport: nu
   const shown = Math.min(width, viewport - 2 * gutter);
   return Math.round(Math.max(gutter, Math.min(end, viewport - gutter - shown)));
 }
+
+/** What placing the panel needs from its <dialog> (an HTMLDialogElement has all of it). */
+export interface PlaceableDialog {
+  readonly open: boolean;
+  readonly style: { insetInlineEnd: string };
+  getBoundingClientRect(): { left: number; right: number };
+}
+
+/**
+ * Writes the panel's `inset-inline-end`. Once the dialog is open (laid out, not yet painted) it measures where
+ * the panel landed and corrects any gap between client coordinates and the box a fixed dialog is placed in,
+ * such as a page scrollbar on the left (Firefox under a right-to-left interface). Returns the inset written.
+ */
+export function placeBellPanel(d: PlaceableDialog, bell: { left: number; right: number }, viewport: number, rtl: boolean): number {
+  const end = bellPanelEnd(bell, viewport, rtl);
+  d.style.insetInlineEnd = `${end}px`;
+  if (!d.open) return end;
+  const landed = d.getBoundingClientRect();
+  const drift = (rtl ? landed.left : viewport - landed.right) - end;
+  if (Math.abs(drift) < 0.5) return end;
+  const fixed = Math.round(end - drift);
+  d.style.insetInlineEnd = `${fixed}px`;
+  return fixed;
+}

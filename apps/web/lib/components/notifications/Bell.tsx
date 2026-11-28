@@ -15,7 +15,7 @@ import { nav } from '@/lib/i18n/messages/nav';
 import { overview } from '@/lib/i18n/messages/overview';
 import { trpc } from '@/lib/trpc/client';
 import { cappedCount, readSeen, taskSig, unseenCount, writeSeen, type Task } from './model';
-import { bellPanelEnd } from './place';
+import { placeBellPanel } from './place';
 import { othersLine, taskRow, type TaskRow } from './rows';
 
 function storage(): Storage | null {
@@ -94,11 +94,12 @@ export function Bell({ className, activity = false }: { className?: string; /** 
         <Icon as={BellIcon} size="bar" />
         {unseen > 0 ? (
           // An 8 px ink dot, never a count (sidebar SPEC §1.6; the reference's .cnt-dot); the number stays in the
-          // trigger's name. It sits 2 px outside the glyph's top-end corner (the centre less 9 + 2) at any box size.
+          // trigger's name. It sits 2 px outside the 18 px glyph's top-end corner: the centre less half the glyph
+          // and the gap (0.5625 + 0.125 rem), in rem like the glyph, so it holds at any box size and text size.
           <span
             aria-hidden="true"
             data-testid="bell-dot"
-            className="absolute end-[calc(50%-11px)] top-[calc(50%-11px)] size-2 rounded-full bg-fg ring-2 ring-surface forced-color-adjust-none"
+            className="absolute end-[calc(50%-0.6875rem)] top-[calc(50%-0.6875rem)] size-2 rounded-full bg-fg ring-2 ring-surface forced-color-adjust-none"
           />
         ) : null}
       </button>
@@ -177,14 +178,16 @@ function BellPanel({ open, onClose, title, closeLabel, anchor, children }: { ope
   useEffect(() => {
     const d = ref.current;
     if (!d || typeof d.showModal !== 'function') return;
-    // Placed before it shows (a closed dialog is not drawn, so it never jumps), and again if the window resizes.
+    // Placed before it shows (a closed dialog is not drawn, so it never jumps), checked once it is laid out
+    // (the same task, before the next paint), and again whenever the window resizes.
     const place = () => {
       const a = anchor.current;
-      if (a) d.style.insetInlineEnd = `${bellPanelEnd(a.getBoundingClientRect(), document.documentElement.clientWidth, getComputedStyle(a).direction === 'rtl')}px`;
+      if (a) placeBellPanel(d, a.getBoundingClientRect(), document.documentElement.clientWidth, getComputedStyle(d).direction === 'rtl');
     };
     if (open && !d.open) {
       place();
       d.showModal();
+      place();
     } else if (!open && d.open) d.close();
     if (!open) return;
     window.addEventListener('resize', place);
@@ -202,7 +205,7 @@ function BellPanel({ open, onClose, title, closeLabel, anchor, children }: { ope
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      className="fixed end-4 start-auto top-16 m-0 w-[384px] max-w-[calc(100vw-2rem)] rounded-overlay bg-surface p-4 text-ink shadow-e2 ring-1 ring-line-rule backdrop:bg-transparent"
+      className="fixed end-4 start-auto top-16 m-0 w-[384px] max-w-[calc(100%-2rem)] rounded-overlay bg-surface p-4 text-ink shadow-e2 ring-1 ring-line-rule backdrop:bg-transparent"
     >
       <div className="mb-3 flex items-center justify-between gap-2">
         <h2 id={titleId} className="text-base font-bold">
