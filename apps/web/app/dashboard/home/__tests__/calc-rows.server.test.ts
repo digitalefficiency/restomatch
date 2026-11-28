@@ -123,7 +123,9 @@ describe('the panel never shows rows that do not prove THIS hero (v4 H3)', () =>
   it('loading: a delayed skeleton in a busy region (screen readers are told it is loading)', () => {
     const markup = html();
     expect(markup).toMatch(/<div aria-busy="true" data-testid="hero-calc-loading"/);
-    expect(markup).toContain('delay-1000');
+    // DS3-01's <Skeleton delayed>: the wait is the `--dur-skeleton-wait` token (SPEC §9's one second), no longer `delay-1000`.
+    expect(markup).toContain('[transition-delay:var(--dur-skeleton-wait,0ms)]');
+    expect(markup).toContain('[@starting-style]:opacity-0');
   });
 });
 
