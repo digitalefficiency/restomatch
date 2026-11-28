@@ -1,5 +1,6 @@
 import { sql, type Database } from '@restomatch/db';
 import { PO_MATCH_WINDOW_DAYS } from './buildMatchInput';
+import { discrepancyDecidableSql } from '../lifecycle/predicates';
 import { requeueInvoicesForRematch, type RematchReport } from '../routers/mapping';
 
 /**
@@ -48,7 +49,7 @@ export async function invoicesAwaitingPo(db: Database, restaurantId: string, poI
           EXISTS (
             SELECT 1 FROM discrepancies d
             WHERE d.match_run_id = l.id AND d.restaurant_id = ${restaurantId}
-              AND d.type = 'UNORDERED_ARRIVAL' AND d.resolution_status IN ('open', 'escalated')
+              AND d.type = 'UNORDERED_ARRIVAL' AND ${discrepancyDecidableSql(sql`d.resolution_status`)}
           )
           AND COALESCE(i.invoice_date, i.created_at)
             BETWEEN po.at - make_interval(days => ${windowDays}) AND po.at + make_interval(days => ${windowDays})
