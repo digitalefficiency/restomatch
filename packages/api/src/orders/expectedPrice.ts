@@ -91,6 +91,7 @@ export async function resolveExpectedPrice(
         eq(supplierCatalogItems.supplierId, args.supplierId),
         inArray(supplierCatalogItems.productId, productIds),
         isNotNull(supplierCatalogItems.listPrice),
+        eq(supplierCatalogItems.active, true),
       ),
     )
     .orderBy(desc(supplierCatalogItems.active), desc(supplierCatalogItems.updatedAt));
