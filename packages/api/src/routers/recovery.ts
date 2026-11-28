@@ -17,6 +17,7 @@ import {
   transitionClaim,
   transitionClaims,
 } from '../recovery/service';
+import { seesMoney } from '../lib/moneyVisibility';
 import { exportRecovery } from '../recovery/export';
 import { buildClaimLetters, sendLetter, unsendLetter } from '../recovery/letters';
 import { supplierReminderDraft } from '../recovery/reminders';
@@ -277,10 +278,21 @@ export const recoveryRouter = router({
       confirmCreditSuggestion(ctx.db, ctx.session.restaurantId, { ...input, actorId: ctx.session.userId }),
     ),
 
-  /** Hero tile: "₪ actually returned this month" — aggregate only, any member (like the hero). */
+  /**
+   * Hero tile: "₪ actually returned this month" — aggregate only, any member.
+   * H-11 strip: receiver and chef get `returnedAgorot: null` (the count stays).
+   */
   returnedThisMonth: flagged(memberProcedure)
     .input(z.object({ monthOffset }).optional())
-    .query(({ ctx, input }) => returnedInMonth(ctx.db, ctx.session.restaurantId, { monthOffset: input?.monthOffset })),
+    .query(
+      async ({
+        ctx,
+        input,
+      }): Promise<{ monthStart: string; monthEnd: string; returnedAgorot: number | null; claimCount: number }> => {
+        const r = await returnedInMonth(ctx.db, ctx.session.restaurantId, { monthOffset: input?.monthOffset });
+        return seesMoney(ctx.session.role) ? r : { ...r, returnedAgorot: null };
+      },
+    ),
 });
 
 export { computeRecoverySummary };

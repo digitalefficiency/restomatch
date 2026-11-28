@@ -2846,3 +2846,75 @@ describe('owner.vatAtRisk (vatAtRisk): isolation + foreign-id attack (A → B)',
     expect(r).toMatchObject({ count: 0, totalVatAtRisk: 0, rows: [] });
   });
 });
+
+/**
+ * H-11ʰ · least-privilege money visibility (owner decision 6). Add-only block.
+ * The receiver and the chef get no purchase or leak ₪ from the server: FORBIDDEN,
+ * or the ₪ key present with a null value. The chef is exempt on orders.* and on
+ * the catalog list prices the order wizard reads. A's own ids; B's ids stay
+ * NOT_FOUND / FORBIDDEN for every role.
+ */
+describe('H-11 · receiver and chef get no ₪ (A own ids; B ids rejected)', () => {
+  let saved: unknown;
+  beforeAll(async () => {
+    const [row] = await db.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, A.restaurantId));
+    saved = row?.settings ?? {};
+    await db
+      .update(restaurants)
+      .set({ settings: { ...(saved as object), features: { ...((saved as { features?: object }).features ?? {}), recovery: true } } as never })
+      .where(eq(restaurants.id, A.restaurantId));
+    await db.update(purchaseOrders).set({ totalEstimated: '321.00' }).where(eq(purchaseOrders.id, A.poId));
+    await db.insert(supplierCatalogItems).values({
+      restaurantId: A.restaurantId,
+      supplierId: A.supplierId,
+      productId: A.productId,
+      supplierNameRaw: 'H-11 פריט',
+      listPrice: '7.25',
+    });
+  });
+  afterAll(async () => {
+    await db.update(restaurants).set({ settings: saved as never }).where(eq(restaurants.id, A.restaurantId));
+  });
+
+  it('orders.list / orders.get: the receiver gets no order ₪; the chef keeps it', async () => {
+    const receiverList = await callerWithRole(A, 'receiver').orders.list();
+    expect(receiverList.length).toBeGreaterThan(0);
+    expect(receiverList.every((r) => (r.totalEstimated ?? null) === null)).toBe(true);
+    const receiverPo = await callerWithRole(A, 'receiver').orders.get({ poId: A.poId });
+    expect(receiverPo.po?.totalEstimated ?? null).toBeNull();
+    expect(receiverPo.lines.every((l) => (l.unitPriceExpected ?? null) === null)).toBe(true);
+    const chefPo = await callerWithRole(A, 'chef').orders.get({ poId: A.poId });
+    expect(chefPo.po?.totalEstimated).toBe('321.00');
+  });
+
+  it('orders.supplierMessagePreview: receiver FORBIDDEN on A and B ids; B id never resolves for the chef', async () => {
+    await expect(callerWithRole(A, 'receiver').orders.supplierMessagePreview({ poId: A.poId })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(callerWithRole(A, 'receiver').orders.supplierMessagePreview({ poId: B.poId })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(callerWithRole(A, 'chef').orders.supplierMessagePreview({ poId: B.poId })).rejects.toMatchObject({
+      code: expect.stringMatching(/NOT_FOUND|FORBIDDEN/),
+    });
+  });
+
+  it('catalog.items / productDetail: no list price for the receiver; no product-page ₪ for receiver or chef', async () => {
+    const items = await callerWithRole(A, 'receiver').catalog.items();
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.every((r) => 'listPrice' in r && r.listPrice === null)).toBe(true);
+    const chefItems = await callerWithRole(A, 'chef').catalog.items();
+    expect(chefItems.some((r) => r.listPrice !== null)).toBe(true);
+    for (const role of ['receiver', 'chef'] as const) {
+      const d = await callerWithRole(A, role).catalog.productDetail({ productId: A.productId });
+      expect(d?.cheapestUnitPrice, role).toBeNull();
+      expect(d?.items.every((it) => it.listPrice === null && it.unitPricePerDefaultUnit === null), role).toBe(true);
+      expect(d?.history.every((h) => h.unitPrice === null), role).toBe(true);
+      expect(await callerWithRole(A, role).catalog.productDetail({ productId: B.productId }), role).toBeNull();
+    }
+  });
+
+  it('recovery.returnedThisMonth: receiver and chef get returnedAgorot null; the owner gets a number', async () => {
+    expect(typeof (await callerFor(A).recovery.returnedThisMonth()).returnedAgorot).toBe('number');
+    for (const role of ['receiver', 'chef'] as const) {
+      const r = await callerWithRole(A, role).recovery.returnedThisMonth();
+      expect(r, role).toHaveProperty('returnedAgorot', null);
+    }
+  });
+});

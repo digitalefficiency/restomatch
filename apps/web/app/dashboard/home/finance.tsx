@@ -270,7 +270,8 @@ async function GoodNews({ caller, role, t, locale }: Ctx) {
   const flags = await loadRecoveryFlags();
   if (!flags.recovery) return null;
   const returned = await caller.recovery.returnedThisMonth();
-  if (returned.returnedAgorot <= 0) return null;
+  // H-11 strip: a role without ₪ gets null; never render it as ₪0.
+  if (returned.returnedAgorot == null || returned.returnedAgorot <= 0) return null;
   const body = (
     <>
       <span className="min-w-0 truncate text-sm font-semibold text-ink">{t('hero.returned')}</span>

@@ -26,6 +26,7 @@ import { latestReceiptStatusSql } from '../lib/deliveryState';
 import { resolveTolerances } from '@restomatch/matching';
 import { ClaudePoParser, ORDER_TEXT_MAX_CHARS, orderTextParserFromEnv } from '@restomatch/ocr';
 import { ZesttAdapter } from '@restomatch/procurement';
+import { seesMoney } from '../lib/moneyVisibility';
 import { chefProcedure, managerProcedure, memberProcedure, requireFeature, router } from '../trpc';
 import { orderPriceKey } from '../contracts/orderPrices';
 import { resolveExpectedPrice, type ExpectedPrice } from '../orders/expectedPrice';
@@ -513,6 +514,17 @@ export function sendStateOf(
   return 'queued';
 }
 
+/**
+ * H-11 strip: order-builder reads that carry prices (the supplier message can
+ * print them; the guardrail compares them). FORBIDDEN for any role without
+ * order ₪ (the receiver); the chef is exempt on orders.*. Checked before any read.
+ */
+function assertOrderMoney(role: Parameters<typeof seesMoney>[0]): void {
+  if (!seesMoney(role, 'orders')) {
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'No order prices for this role' });
+  }
+}
+
 export const ordersRouter = router({
   /** Purchase orders for the restaurant, with supplier name + line count. */
   list: memberProcedure
@@ -592,6 +604,7 @@ export const ordersRouter = router({
         .orderBy(desc(purchaseOrders.createdAt), desc(purchaseOrders.id)) // unique: offset pages never repeat/skip
         .limit(input?.limit ?? 50)
         .offset(input?.offset ?? 0);
+      // H-11 + W2-06: no order ₪ for the receiver (keys removed by forRole); the chef is exempt on orders.*.
       return forRole(ctx.session.role, rows);
     }),
 
@@ -657,6 +670,7 @@ export const ordersRouter = router({
       const supplierMessage: SupplierMessageState | null = msg ? supplierMessageState(msg) : null;
       return forRole(ctx.session.role, {
         supplierMessage,
+        // H-11 + W2-06: forRole removes the receiver's price keys (po.totalEstimated, lines[].unitPriceExpected).
         po,
         lines,
         supplierName: supplier?.name ?? null,
@@ -825,6 +839,7 @@ export const ordersRouter = router({
       ]),
     )
     .query(async ({ ctx, input }) => {
+      assertOrderMoney(ctx.session.role); // H-11 strip
       const restaurantId = ctx.session.restaurantId;
       if ('poId' in input) {
         await assertPoOwned(ctx.db, input.poId, restaurantId);
@@ -1200,6 +1215,7 @@ export const ordersRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
+      assertOrderMoney(ctx.session.role); // H-11 strip
       const restaurantId = ctx.session.restaurantId;
       await assertSupplierOwned(ctx.db, input.supplierId, restaurantId);
       const { windowDays, threshold } = await guardrailSettings(ctx.db, restaurantId);
