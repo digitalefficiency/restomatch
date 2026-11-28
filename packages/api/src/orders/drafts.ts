@@ -1,7 +1,9 @@
 import { TRPCError } from '@trpc/server';
-import { and, asc, desc, eq, isNull, poLines, purchaseOrders, sql, users, type Database } from '@restomatch/db';
+import { and, asc, desc, eq, poLines, purchaseOrders, sql, users, type Database } from '@restomatch/db';
 import { orderPriceKey, resolveExpectedPrice } from './expectedPrice';
 import { estimateTotal, qty3 } from './totals';
+import { adoptAutopilotDraft } from './autopilot';
+import { AUTOPILOT_REF_LIKES } from './prepared';
 
 /**
  * Server drafts (W2-06 §5.7, deep-fix class 2, orders-07 P0). The wizard saves
@@ -65,7 +67,11 @@ export function draftConflict(by: string | null, at: Date): TRPCError {
 
 const lockKey = (r: string, s: string, u: string) => `po-draft:${r}:${s}:${u}`;
 
-/** A user's open draft for a supplier (W1-11's capture drafts carry a source_ref and are not "the" draft). */
+/**
+ * A user's open draft for a supplier. W1-11's capture drafts carry a source_ref
+ * and are not "the" draft; an autopilot draft (AU-11 `au:A16:` / `au:A16b:`)
+ * the user adopted is.
+ */
 async function findOpenDraft(db: Database, restaurantId: string, supplierId: string, userId: string) {
   const [row] = await db
     .select({ id: purchaseOrders.id })
@@ -76,7 +82,7 @@ async function findOpenDraft(db: Database, restaurantId: string, supplierId: str
         eq(purchaseOrders.supplierId, supplierId),
         eq(purchaseOrders.createdBy, userId),
         eq(purchaseOrders.status, 'draft'),
-        isNull(purchaseOrders.sourceRef),
+        sql`(${purchaseOrders.sourceRef} is null or ${purchaseOrders.sourceRef} like ${AUTOPILOT_REF_LIKES[0]} or ${purchaseOrders.sourceRef} like ${AUTOPILOT_REF_LIKES[1]})`,
       ),
     )
     .orderBy(desc(purchaseOrders.updatedAt), desc(purchaseOrders.id))
@@ -126,7 +132,10 @@ export async function openDraft(
   db: Database,
   args: { restaurantId: string; userId: string; supplierId: string },
 ): Promise<DraftState | null> {
-  const id = await findOpenDraft(db, args.restaurantId, args.supplierId, args.userId);
+  const id =
+    (await findOpenDraft(db, args.restaurantId, args.supplierId, args.userId)) ??
+    // AU-11 adoption: an unopened prepared/backorder draft becomes the first opener's.
+    (await adoptAutopilotDraft(db, args));
   return id ? loadDraft(db, args.restaurantId, id) : null;
 }
 

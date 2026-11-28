@@ -33,6 +33,8 @@ import { forRole, orderWriteProcedure } from '../orders/access';
 import { buildOrderGuide } from '../orders/guide';
 import { buildSupplierBoard } from '../orders/board';
 import { loadDraft, openDraft as openServerDraft, saveDraft as saveServerDraft } from '../orders/drafts';
+import { dismissAutopilotDraft, listAutopilotDrafts } from '../orders/autopilot';
+import { withIdempotency } from '../lib/idempotency';
 import { ORDER_VIEWS, orderViewConditions } from '../orders/views';
 import { buildThreeWay } from '../orders/threeWay';
 import { assertNoReceipt, lockPo, markSentManually as markPoSentManually, supplierAddress } from '../orders/manualSend';
@@ -1238,6 +1240,34 @@ export const ordersRouter = router({
       const restaurantId = ctx.session.restaurantId;
       await assertSupplierOwned(ctx.db, input.supplierId, restaurantId);
       return openServerDraft(ctx.db, { restaurantId, userId: ctx.session.userId, supplierId: input.supplierId });
+    }),
+
+  /**
+   * W3-09 / AU-11: drafts the autopilot prepared (order day / short delivery)
+   * that are still drafts — the board's T4 banner. Chef tier; ₪ only for
+   * roles that see order prices.
+   */
+  preparedDrafts: orderWriteProcedure.query(async ({ ctx }) => {
+    const rows = await listAutopilotDrafts(ctx.db, ctx.session.restaurantId);
+    return forRole(ctx.session.role, rows);
+  }),
+
+  /** Cancel an UNOPENED autopilot draft (draft → cancelled). Opened or sent → CONFLICT. */
+  dismissPreparedDraft: orderWriteProcedure
+    .input(z.object({ poId: z.string().uuid(), clientMutationId: z.string().min(8).max(64) }))
+    .mutation(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      await assertPoOwned(ctx.db, input.poId, restaurantId);
+      return withIdempotency(
+        { db: ctx.db, session: { restaurantId, userId: ctx.session.userId } },
+        { key: input.clientMutationId, procedure: 'orders.dismissPreparedDraft', input: { poId: input.poId } },
+        async () => {
+          const r = await dismissAutopilotDraft(ctx.db, { restaurantId, poId: input.poId, userId: ctx.session.userId });
+          if (r.status === 'not_found') throw new TRPCError({ code: 'NOT_FOUND', message: 'purchase order not found' });
+          if (r.status === 'conflict') throw new TRPCError({ code: 'CONFLICT', message: `PREPARED_DRAFT_${r.reason.toUpperCase()}` });
+          return { status: r.status };
+        },
+      );
     }),
 
   /** Save the wizard at every line (§5.7): xmin version, advisory lock, GR check, stale → CONFLICT. */
