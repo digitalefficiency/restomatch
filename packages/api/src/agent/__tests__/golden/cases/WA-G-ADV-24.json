@@ -1,0 +1,54 @@
+{
+  "id": "WA-G-ADV-24",
+  "role": "owner",
+  "adversarial": true,
+  "flow": "ADV",
+  "title": "WD2 edge: exactly 500 ₪ → confirm button with a token",
+  "neverList": [],
+  "ownerRules": [
+    "wd2-500"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "tap": {
+        "kind": "button_reply",
+        "id": "card:claim:d-fish-410-1",
+        "title": "לבקש זיכוי"
+      }
+    }
+  ],
+  "expect": {
+    "intent": "decide.claim",
+    "tools": [
+      {
+        "name": "wa.stageAction",
+        "args": {
+          "discrepancyId": "d-fish-410-1",
+          "action": "approve"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [
+      "אשר 500 ₪"
+    ],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "stagedTokens": 1,
+      "approvalsDecided": 0
+    }
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "caseId": "WA-G-CHEF-05",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "order.cutoff",
+      "toolCalls": [
+        {
+          "name": "orders.list",
+          "args": {
+            "status": "draft"
+          },
+          "result": {
+            "orders": [
+              {
+                "orderId": "po-1043",
+                "supplier": "ירקות השרון",
+                "deliveryDate": "2026-10-27",
+                "cutoff": "14:00"
+              }
+            ]
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "template",
+          "text": "טיוטת ההזמנה לירקות השרון עדיין לא נשלחה. החלון לאספקה של ג׳ 27.10 נסגר היום ב-14:00. טיוטה איננה הזמנה.",
+          "template": {
+            "name": "rm_order_cutoff",
+            "vars": [
+              "ירקות השרון",
+              "ג׳ 27.10",
+              "14:00"
+            ]
+          },
+          "buttons": [
+            {
+              "id": "cutoff:open:po-1043",
+              "title": "פתח טיוטה"
+            },
+            {
+              "id": "cutoff:send:po-1043",
+              "title": "שלח עכשיו"
+            },
+            {
+              "id": "cutoff:skip:po-1043",
+              "title": "לא צריך השבוע"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "proactiveSent": 1
+  }
+}

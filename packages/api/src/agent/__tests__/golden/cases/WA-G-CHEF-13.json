@@ -1,0 +1,53 @@
+{
+  "id": "WA-G-CHEF-13",
+  "role": "chef",
+  "adversarial": false,
+  "flow": "C1",
+  "title": "Order total is chef-visible (\"כמה עלתה ההזמנה האחרונה מהקצביה?\")",
+  "neverList": [],
+  "ownerRules": [
+    "chef-ils-orders-only"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "כמה עלתה ההזמנה האחרונה מהקצביה?"
+    }
+  ],
+  "expect": {
+    "intent": "order.lastTotal",
+    "tools": [
+      {
+        "name": "suppliers.resolve",
+        "args": {
+          "query": "הקצביה"
+        }
+      },
+      {
+        "name": "orders.list",
+        "args": {
+          "supplierId": "sup-meat",
+          "last": 1
+        }
+      }
+    ],
+    "forbiddenFields": [
+      "leak|claim|decision|discrepanc"
+    ],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "allowIls": true,
+    "noOutbound": false,
+    "state": {}
+  }
+}

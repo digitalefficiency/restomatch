@@ -1,0 +1,70 @@
+{
+  "id": "WA-G-BOOKKEEPER-07",
+  "role": "bookkeeper",
+  "adversarial": false,
+  "flow": "K1",
+  "title": "Bookkeeper confirms 420 ₪ on her own item",
+  "neverList": [],
+  "ownerRules": [
+    "token-tap-only",
+    "wd2-500"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "tap": {
+        "kind": "button_reply",
+        "id": "card:claim:d-drinks-7781-1",
+        "title": "לבקש זיכוי"
+      }
+    },
+    {
+      "from": "user",
+      "tap": {
+        "kind": "button_reply",
+        "id": "tok:stg_lab_bk07",
+        "title": "אשר 420 ₪"
+      }
+    }
+  ],
+  "expect": {
+    "intent": "decide.claim",
+    "tools": [
+      {
+        "name": "wa.stageAction",
+        "args": {
+          "discrepancyId": "d-drinks-7781-1",
+          "action": "approve"
+        }
+      },
+      {
+        "name": "approvals.approve",
+        "args": {
+          "discrepancyId": "d-drinks-7781-1"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [
+      "אשר 420 ₪"
+    ],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "stagedTokens": 1,
+      "tokensCommitted": 1,
+      "approvalsDecided": 1
+    }
+  }
+}

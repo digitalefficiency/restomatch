@@ -1,0 +1,66 @@
+{
+  "id": "WA-G-MANAGER-08",
+  "role": "manager",
+  "adversarial": false,
+  "flow": "M3",
+  "title": "Assign the document to a supplier; the allow-list stays web-only",
+  "neverList": [],
+  "ownerRules": [
+    "tenant-isolation"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "tap": {
+        "kind": "template_button",
+        "id": "doc:assign:doc-77",
+        "title": "שייך לספק"
+      }
+    },
+    {
+      "from": "user",
+      "tap": {
+        "kind": "list_reply",
+        "id": "sup:sup-veg",
+        "title": "ירקות השרון"
+      }
+    }
+  ],
+  "expect": {
+    "intent": "document.assign",
+    "tools": [
+      {
+        "name": "suppliers.list",
+        "args": {}
+      },
+      {
+        "name": "ingest.approveDocument",
+        "args": {
+          "documentId": "doc-77",
+          "supplierId": "sup-veg"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "cta": "הגדרות קליטה",
+    "listRows": 10,
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "documentsAssigned": 1,
+      "allowListChanged": 0
+    }
+  }
+}

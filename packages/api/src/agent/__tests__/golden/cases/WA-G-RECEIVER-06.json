@@ -1,0 +1,63 @@
+{
+  "id": "WA-G-RECEIVER-06",
+  "role": "receiver",
+  "adversarial": false,
+  "flow": "R2",
+  "title": "Count line 1: short (\"32\")",
+  "neverList": [],
+  "ownerRules": [
+    "receiver-no-ils"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {
+      "flowState": "receiving.line:gr-1:1"
+    }
+  },
+  "turns": [
+    {
+      "from": "user",
+      "tap": {
+        "kind": "button_reply",
+        "id": "gr:diff:1",
+        "title": "חסר / שונה"
+      }
+    },
+    {
+      "from": "user",
+      "text": "32"
+    }
+  ],
+  "expect": {
+    "intent": "receiving.count",
+    "tools": [
+      {
+        "name": "receiving.markGrLine",
+        "args": {
+          "receiptId": "gr-1",
+          "lineNo": 1,
+          "receivedQty": 32
+        }
+      }
+    ],
+    "forbiddenFields": [
+      "ils|agorot|amount|total|price"
+    ],
+    "forbiddenText": [
+      "₪",
+      "\\d+[.,]\\d{2}"
+    ],
+    "buttons": [],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "grLinesMarked": 1
+    }
+  }
+}

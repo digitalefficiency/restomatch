@@ -23,6 +23,7 @@ export const he = {
     ctaWatch: 'צפו ב-60 שניות',
     watchClose: 'סגירת הסרטון',
     watchTitle: 'RestoMatch ב-60 שניות',
+    watchTranscript: 'תמליל הסרטון',
     ctaDemo: 'לדמו החי',
     note1: '30 יום ניסיון חינם',
     note2: 'בלי כרטיס אשראי',

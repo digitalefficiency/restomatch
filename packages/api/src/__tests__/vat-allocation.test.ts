@@ -177,6 +177,16 @@ describe('AU-08 allocation case (DB)', () => {
     });
   });
 
+  it('invoiceCase reports the stored number and its format state, at risk or not', async () => {
+    const { vat } = callerFor(A);
+    const bad = await invoice(A, { day: dayOffset(-10), exVat: '6000.00', vat: '1080.00', alloc: '1234' });
+    expect(await vat.invoiceCase({ invoiceId: bad })).toMatchObject({ allocationNumber: '1234', numberState: 'invalid' });
+    const good = await invoice(A, { day: dayOffset(-10), exVat: '6000.00', vat: '1080.00', alloc: '123-456-789' });
+    const ok = await vat.invoiceCase({ invoiceId: good });
+    expect(ok).toMatchObject({ allocationNumber: '123-456-789', numberState: 'valid', row: null });
+    expect(ok!.ita.fields).toEqual([]);
+  });
+
   it('invalid format → BAD_REQUEST and no write', async () => {
     const id = await invoice(A, { day: dayOffset(-10), exVat: '6000.00', vat: '1080.00' });
     await expect(
@@ -231,7 +241,7 @@ describe('AU-08 allocation case (DB)', () => {
     expect(await db.select().from(notificationsOutbox)).toHaveLength(before.length);
 
     const ic = await vat.invoiceCase({ invoiceId: id });
-    expect(ic).toMatchObject({ daysSinceRequest: 0, canWrite: true, ita: { url: null } });
+    expect(ic).toMatchObject({ allocationNumber: null, numberState: 'missing', daysSinceRequest: 0, canWrite: true, ita: { url: null } });
     expect(ic!.ita.fields).toHaveLength(6);
   });
 

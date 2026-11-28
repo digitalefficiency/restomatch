@@ -97,6 +97,36 @@ describe('end-of-day report dedupe on the Israel day (DB)', () => {
     expect((await outbox())[0]!.dedupe_key).toBe(eodDedupeKey(rid, '2026-11-12', email));
   });
 
+  it('AU-04 A7: the eveningDigest option off → nothing; back on → sent', async () => {
+    await sql`delete from notifications_outbox where restaurant_id = ${rid}`;
+    await sql`update restaurants set settings = ${sql.json({ automations: { eveningDigest: false } })} where id = ${rid}`;
+    expect((await processEndOfDayReport(job({ restaurantId: rid, forDate: THU_1900 }))).sent).toBe(0);
+    await sql`update restaurants set settings = '{}'::jsonb where id = ${rid}`;
+    expect((await processEndOfDayReport(job({ restaurantId: rid, forDate: THU_1900 }))).sent).toBe(1);
+    await sql`delete from notifications_outbox where restaurant_id = ${rid}`;
+  });
+
+  it('AU-04 A7 REPLACES the end-of-day digest: one evening mail per recipient per Israel day (19:00 + catch-up + replay)', async () => {
+    await sql`delete from notifications_outbox where restaurant_id = ${rid}`;
+    await processEndOfDayReport(job({ restaurantId: rid, forDate: THU_1900 }));
+    await processEndOfDayReport(job({ restaurantId: rid, forDate: THU_1900 }));
+    await processEndOfDayReport(job({ restaurantId: rid, forDate: FRI_0030 }));
+    const evening = await sql<{ target: string; dedupe_key: string }[]>`
+      select target, dedupe_key from notifications_outbox where restaurant_id = ${rid}`;
+    expect(evening).toHaveLength(1);
+    expect(evening[0]!.dedupe_key.startsWith('eod-report:')).toBe(true);
+    // No second evening producer: no worker job sends the eveningBrief builder or an au:A7 key.
+    const { readFileSync, readdirSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const jobsDir = fileURLToPath(new URL('../jobs/', import.meta.url));
+    for (const f of readdirSync(jobsDir).filter((n) => n.endsWith('.ts'))) {
+      const src = readFileSync(join(jobsDir, f), 'utf8');
+      expect(src, f).not.toMatch(/eveningBrief\(|au:A7:/);
+    }
+    await sql`delete from notifications_outbox where restaurant_id = ${rid}`;
+  });
+
   it('deploy day: a recipient already sent the OLD-format key for the report day is not sent again', async () => {
     await sql`delete from notifications_outbox where restaurant_id = ${rid}`;
     const day = eodReportDay(new Date(THU_1900));

@@ -1,0 +1,27 @@
+{
+  "caseId": "WA-G-ADV-33",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": null,
+      "refusal": "never.billing",
+      "toolCalls": [],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "cta",
+          "text": "שינוי תוכנית וחיוב עושים באפליקציה.",
+          "cta": {
+            "title": "חיוב ותוכנית",
+            "url": "https://app.restomatch.test/dashboard/go?r=lab&to=billing"
+          }
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "planChanged": 0
+  }
+}

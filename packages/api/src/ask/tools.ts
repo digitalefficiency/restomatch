@@ -121,7 +121,7 @@ function heroData(h: LeakHero) {
     leakIls: r2(h.leakIls),
     spendIls: r2(h.spendIls),
     leakPctOfSpend: pct(h.leakPct),
-    caughtBeforePaymentIls: r2(h.caughtBeforePaymentIls),
+    // Owner G-14 Q2: no "caught before payment" figure until H-03 (the real paid_at).
     recoveredIls: r2(h.recoveredIls),
     invoiceCount: h.invoiceCount,
     invoicesWithLeak: h.invoicesWithLeak,
@@ -153,7 +153,6 @@ export function reportData(r: LeakReport, locale: AskLocale = 'en') {
       excessIls: r2(p.excessIls),
     })),
     status: {
-      caughtBeforePaymentIls: r2(r.status.caughtBeforePaymentIls),
       stillOpenIls: r2(r.status.stillOpenIls),
       stillOpenCount: r.status.stillOpenCount,
       claimedIls: r2(r.status.claimedIls),
@@ -250,7 +249,7 @@ export const TOOL_DEFINITIONS = [
   {
     name: 'leak_hero',
     description:
-      "The restaurant's headline leak for ONE month: leaked ₪, % of checked food spend, ₪ caught before payment, recoveredIls (₪ accepted for claim — not yet money back), invoice counts. `period` says which days it covers and whether the month is complete; the current month is to date. To compare with an earlier month use leak_change, never two leak_hero results.",
+      "The restaurant's headline leak for ONE month: leaked ₪, % of checked food spend, recoveredIls (₪ accepted for claim — not yet money back), invoice counts. `period` says which days it covers and whether the month is complete; the current month is to date. To compare with an earlier month use leak_change, never two leak_hero results.",
     input_schema: { type: 'object', properties: { month: MONTH_PROP }, additionalProperties: false },
     strict: true,
   },

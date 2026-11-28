@@ -1,0 +1,139 @@
+{
+  "caseId": "WA-G-OWNER-05",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "decide.next",
+      "toolCalls": [
+        {
+          "name": "approvals.myQueue",
+          "args": {
+            "limit": 1
+          },
+          "result": {
+            "total": 4,
+            "items": [
+              {
+                "discrepancyId": "d-veg-20931-1",
+                "type": "PRICE_HIGHER",
+                "supplier": "ירקות השרון",
+                "invoiceNumber": "20931",
+                "invoiceDate": "2026-10-21",
+                "product": "עגבניות שרי",
+                "chargedPrice": 14.9,
+                "agreedPrice": 12.5,
+                "qty": 40,
+                "unit": "ק״ג",
+                "deltaIls": 96,
+                "requiredRole": "owner"
+              }
+            ]
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "פער 1 מתוך 4 · ירקות השרון\nחשבונית 20931 מ-21.10\nעגבניות שרי: חויב 14.90 ₪ לק״ג, המחיר המוסכם 12.50 ₪ (40 ק״ג)\nפער: 96 ₪",
+          "buttons": [
+            {
+              "id": "card:claim:d-veg-20931-1",
+              "title": "לבקש זיכוי"
+            },
+            {
+              "id": "card:waive:d-veg-20931-1",
+              "title": "לשלם כפי שחויב"
+            },
+            {
+              "id": "card:info:d-veg-20931-1",
+              "title": "פרטים"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "intent": null,
+      "toolCalls": [
+        {
+          "name": "wa.stageAction",
+          "args": {
+            "discrepancyId": "d-veg-20931-1",
+            "action": "approve"
+          },
+          "result": {
+            "staged": true,
+            "token": "stg_lab_own05",
+            "amountAgorot": 9600,
+            "expiresInMin": 30
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "לבקש זיכוי של 96 ₪ מירקות השרון על חשבונית 20931?",
+          "buttons": [
+            {
+              "id": "tok:stg_lab_own05",
+              "title": "אשר 96 ₪"
+            },
+            {
+              "id": "cancel",
+              "title": "ביטול"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "intent": null,
+      "toolCalls": [
+        {
+          "name": "approvals.approve",
+          "args": {
+            "discrepancyId": "d-veg-20931-1"
+          },
+          "result": {
+            "status": "accepted",
+            "decidedAt": "2026-10-25T07:42:00+02:00"
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "נרשם: 96 ₪ נוספו לבקשת הזיכוי מול ירקות השרון. אפשר לבטל עד 07:52.",
+          "buttons": [
+            {
+              "id": "undo:d-veg-20931-1",
+              "title": "בטל"
+            },
+            {
+              "id": "next",
+              "title": "הפער הבא"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [
+    {
+      "token": "stg_lab_own05",
+      "amountAgorot": 9600,
+      "block": false,
+      "bulk": false,
+      "requiredRole": "owner"
+    }
+  ],
+  "state": {
+    "stagedTokens": 1,
+    "tokensCommitted": 1,
+    "approvalsDecided": 1
+  }
+}

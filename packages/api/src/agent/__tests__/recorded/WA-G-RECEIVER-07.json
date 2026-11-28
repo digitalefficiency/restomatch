@@ -1,0 +1,83 @@
+{
+  "caseId": "WA-G-RECEIVER-07",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "receiving.count",
+      "toolCalls": [
+        {
+          "name": "receiving.markGrLine",
+          "args": {
+            "receiptId": "gr-1",
+            "lineNo": 9,
+            "receivedQty": 8
+          },
+          "result": {
+            "ok": true,
+            "summary": {
+              "mismatches": [
+                {
+                  "product": "עגבניות שרי",
+                  "receivedQty": 32,
+                  "orderedQty": 40,
+                  "unit": "ק״ג"
+                },
+                {
+                  "product": "פטרוזיליה",
+                  "receivedQty": 0,
+                  "orderedQty": 12,
+                  "unit": "צרור"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "סיכום: 2 פריטים לא תואמים. עגבניות שרי: 32 מתוך 40 ק״ג. פטרוזיליה: לא הגיע. המנהל יקבל עדכון.",
+          "buttons": [
+            {
+              "id": "b:27",
+              "title": "שלח ספירה"
+            },
+            {
+              "id": "b:28",
+              "title": "תקן שורה"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "intent": null,
+      "toolCalls": [
+        {
+          "name": "receiving.submitReceipt",
+          "args": {
+            "receiptId": "gr-1"
+          },
+          "result": {
+            "status": "submitted"
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "text",
+          "text": "נשלח. הספירה נקלטה, והמנהל רואה את 2 הפריטים שלא תאמו.",
+          "buttons": []
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "grLinesMarked": 1,
+    "receiptsSubmitted": 1
+  }
+}

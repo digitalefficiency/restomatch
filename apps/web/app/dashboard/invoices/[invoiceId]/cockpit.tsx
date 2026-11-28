@@ -36,6 +36,8 @@ export interface CockpitCopy {
   segLabel: string;
   viewer: { title: string; zoomIn: string; zoomOut: string; rotate: string; zoomTemplate: string; openOriginal: string; noDoc: string };
   col: { item: string; ordered: string; received: string; billed: string; expected: string; invoicePrice: string; gap: string };
+  /** G-04 Q3: a closed receipt's line nobody counted — read-only, neutral, no ₪. */
+  notCounted: string;
   source: Record<'po_price' | 'receipt' | 'invoice', string>;
   decideTemplate: string;
   decideOneTemplate: string;
@@ -101,6 +103,16 @@ export function Cockpit({
   const ils = (agorot: number | null) => (agorot == null ? null : formatIls(agorot / 100, { maximumFractionDigits: 2, locale }));
   const price = (v: number | null) => (v == null ? null : formatIls(v, { maximumFractionDigits: 2, locale }));
   const qty = (v: number | null) => (v == null ? null : formatNumber(v, locale, { maximumFractionDigits: 3 }));
+  // G-04 Q3: a closed receipt's line nobody counted has no quantity check — say so
+  // (neutral tag, no ₪), never a "received 0" that reads like a shortage.
+  const receivedCell = (l: Line) =>
+    l.notCounted ? (
+      <span className="rounded bg-surface-2 px-1.5 py-0.5 text-xs font-medium text-muted" data-testid="line-not-counted">
+        {t.notCounted}
+      </span>
+    ) : (
+      <bdi>{qty(l.qtyReceived)}</bdi>
+    );
 
   // English names (receiver legacy): filled in the background, never before the first paint (approvals-48).
   const ensureEnglish = trpc.receiving.ensureEnglish.useMutation();
@@ -225,7 +237,7 @@ export function Cockpit({
                     {lowConf(l) ? reviewMark : null}
                   </td>
                   <td className="px-2 py-2 text-right tabular-nums text-muted"><bdi>{qty(l.qtyOrdered)}</bdi></td>
-                  <td className="px-2 py-2 text-right tabular-nums text-muted"><bdi>{qty(l.qtyReceived)}</bdi></td>
+                  <td className="px-2 py-2 text-right tabular-nums text-muted">{receivedCell(l)}</td>
                   <td className="px-2 py-2 text-right tabular-nums text-ink"><bdi>{qty(l.qtyBilled)}</bdi></td>
                   {showMoney ? (
                     <>
@@ -265,7 +277,7 @@ export function Cockpit({
           </div>
           <dl className="mt-2 grid grid-cols-3 gap-2 text-xs">
             <div><dt className="text-muted">{t.col.ordered}</dt><dd className="text-right text-sm"><bdi>{qty(l.qtyOrdered)}</bdi></dd></div>
-            <div><dt className="text-muted">{t.col.received}</dt><dd className="text-right text-sm"><bdi>{qty(l.qtyReceived)}</bdi></dd></div>
+            <div><dt className="text-muted">{t.col.received}</dt><dd className="text-right text-sm">{receivedCell(l)}</dd></div>
             <div><dt className="text-muted">{t.col.billed}</dt><dd className="text-right text-sm"><bdi>{qty(l.qtyBilled)}</bdi></dd></div>
             {showMoney ? (
               <>

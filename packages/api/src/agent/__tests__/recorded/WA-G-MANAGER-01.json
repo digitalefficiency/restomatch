@@ -1,0 +1,63 @@
+{
+  "caseId": "WA-G-MANAGER-01",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "queue.mine",
+      "toolCalls": [
+        {
+          "name": "approvals.myQueue",
+          "args": {},
+          "result": {
+            "items": [
+              {
+                "discrepancyId": "d-bakery-551-2",
+                "type": "QTY_SHORT",
+                "supplier": "מאפיית ברנר",
+                "invoiceNumber": "551",
+                "product": "פיתות",
+                "orderedQty": 120,
+                "invoicedQty": 120,
+                "receivedQty": 100,
+                "unit": "יח׳",
+                "deltaIls": 18,
+                "requiredRole": "manager"
+              }
+            ],
+            "ownerOnlyCount": 2
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "פער 1 מתוך 1 · מאפיית ברנר\nחשבונית 551\nפיתות: חויבו 120 יח׳, הגיעו 100\nפער: 18 ₪",
+          "buttons": [
+            {
+              "id": "card:claim:d-bakery-551-2",
+              "title": "לבקש זיכוי"
+            },
+            {
+              "id": "card:waive:d-bakery-551-2",
+              "title": "לשלם כפי שחויב"
+            },
+            {
+              "id": "card:info:d-bakery-551-2",
+              "title": "פרטים"
+            }
+          ]
+        },
+        {
+          "origin": "server",
+          "kind": "text",
+          "text": "2 פערים מחכים לבעלים (מעל סף האישור שלך). אין צורך בפעולה ממך.",
+          "buttons": []
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {}
+}

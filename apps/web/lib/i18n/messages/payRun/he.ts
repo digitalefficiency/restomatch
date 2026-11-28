@@ -146,7 +146,7 @@ export const he = {
     openLeak: 'יש פערים בחשבונית · החליטו לפני סימון כשולם',
     conflict: 'החשבונית השתנתה מאז שנטענה · רעננו',
     notYet: 'סימון כשולם ייפתח אחרי עדכון המערכת',
-    methods: { bank_transfer: 'העברה בנקאית', check: 'צ׳ק', cash: 'מזומן', credit_card: 'כרטיס אשראי', other: 'אחר' },
+    methods: { bank_transfer: 'העברה בנקאית', check: 'צ׳ק', cash: 'מזומן', card: 'כרטיס אשראי', offset: 'קיזוז מזיכוי', other: 'אחר' },
   },
   errorPage: {
     title: 'ריצת התשלומים לא נטענה',
