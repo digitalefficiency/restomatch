@@ -41,6 +41,8 @@ const APPROVAL_FIELDS: FieldDef[] = [
   { key: 'cumulativeLargePct', kind: 'percent' },
   { key: 'cumulativeMediumAmountMin', kind: 'currency' },
   { key: 'cumulativeMediumPctMin', kind: 'percent' },
+  // G-15b (owner 11.11, Q3): ₪N incl. VAT and above → only the owner approves for payment.
+  { key: 'payApprovalOverAmount', kind: 'currency', hint: 'payApprovalOverAmountHint' },
 ];
 
 // Percent fields are stored 0..1 but edited as whole percents (5 = 0.05).

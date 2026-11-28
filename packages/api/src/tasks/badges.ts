@@ -5,7 +5,7 @@ import type { Task, TaskType } from './types';
  * folded per nav source. The keys mirror `apps/web/lib/nav/types.ts`
  * `BADGE_KEYS` (the web registry test pins every key).
  */
-export const NAV_BADGE_KEYS = ['approvals', 'payRun', 'claims', 'receiving', 'count', 'intake', 'priceAlerts'] as const;
+export const NAV_BADGE_KEYS = ['approvals', 'payRun', 'claims', 'receiving', 'count', 'intake', 'priceAlerts', 'connections'] as const;
 export type NavBadgeKey = (typeof NAV_BADGE_KEYS)[number];
 
 export interface NavBadge {
@@ -38,6 +38,14 @@ export const BADGE_OF: Partial<Record<TaskType, NavBadgeKey>> = {
 
 /** Money badges show ₪; the rest show a count. */
 export const MONEY_BADGES: ReadonlySet<NavBadgeKey> = new Set(['approvals', 'payRun', 'claims']);
+
+/**
+ * W3-07a · the "חיבורים" dot: 'warn' while at least one connection needs action
+ * (see integrations isSyncStale), otherwise no badge. Never danger, never ₪.
+ */
+export function connectionsBadge(needsAction: number): NavBadge | null {
+  return needsAction > 0 ? { count: needsAction, ilsAgorot: null, block: false, tone: 'warn' } : null;
+}
 
 export function foldBadges(tasks: readonly Task[], extra: Partial<Record<NavBadgeKey, number>> = {}): Partial<Record<NavBadgeKey, NavBadge>> {
   const out: Partial<Record<NavBadgeKey, NavBadge>> = {};

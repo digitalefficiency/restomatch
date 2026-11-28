@@ -3,6 +3,9 @@ import { createDb, eq, invoiceLines, invoices, poLines, purchaseOrders, restaura
 import type { AppContext, Session } from '../context';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
 
+/** W3-07a: every admin write carries a reason. */
+const R = 'בדיקה אוטומטית';
+
 /**
  * G-08 kill switch (rounds 10–11): admin.setFeatures + releaseOrderQuestionHolds.
  *   - the sweep throws → the save still stands and the result says how to recover;
@@ -69,7 +72,7 @@ describe('admin.setFeatures orderQuestions OFF — a failed release', () => {
   it('the sweep throws → { ok: false, error } with the ops command; the flag IS saved', async () => {
     await orderHeldInvoice(['unlinkedPo']);
     sweep.fail = true;
-    const res = await admin().admin.setFeatures({ restaurantId: T.restaurantId, features: { orderQuestions: false } });
+    const res = await admin().admin.setFeatures({ reason: R, restaurantId: T.restaurantId, features: { orderQuestions: false } });
     expect(res).toMatchObject({ release: { ok: false } });
     expect((res as { release: { error: string } }).release.error).toContain(`release-order-holds --restaurant ${T.restaurantId}`);
     const [r] = await db.select({ s: restaurants.settings }).from(restaurants).where(eq(restaurants.id, T.restaurantId));

@@ -10,11 +10,12 @@ import {
   type Database,
   type RecoveryStatus,
 } from '@restomatch/db';
+import { TOLERATED_SQL } from '@restomatch/charts';
 import { assertSupplierOwned } from '../tenant';
 import { appError } from '../errors';
 import { HELD_FOR_RECEIPTS_KEY } from '@restomatch/charts';
 import { CLAIM_ANSWER_DAYS, NEVER_CLAIMABLE_TYPES } from '../lib/claims';
-import { REMIND_EVERY_CALENDAR_DAYS, awaitingChaseSql, pastAnswerWindowSql } from './overdue';
+import { CHASE_STATUSES, REMIND_EVERY_CALENDAR_DAYS, awaitingChaseSql, pastAnswerWindowSql } from './overdue';
 import {
   AWAITING_SUPPLIER,
   CREDITABLE,
@@ -62,8 +63,15 @@ const NEVER_CLAIMABLE_SQL = sql.join(
 const ACCEPTED_FILTER = sql`d.severity IN ('warn','block')
   AND d.type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL')
   AND d.resolution_status IN ('accepted','resolved')`;
-/** A NEW claim is made only for this: accepted AND not a never-claimable type (lib/claims, owner 31.10). */
-const CLAIMABLE_FILTER = sql`${ACCEPTED_FILTER} AND d.type NOT IN (${NEVER_CLAIMABLE_SQL})`;
+/**
+ * A NEW claim is made only for this: accepted AND not a never-claimable type (lib/claims, owner 31.10)
+ * AND not a tolerance row the engine auto-approved (charts TOLERATED_SQL: accepted by an engine
+ * rule, no person — the system decision `tolerate`, DECISION_RULES → waive; owner M7, 7.11). The same rule as
+ * lib/claims' claimableLines, so a letter never asks for more than the stored claim. Existing
+ * claims on such rows are left as they are (a data fix needs a report + approval, decision 24).
+ */
+const CLAIMABLE_FILTER = sql`${ACCEPTED_FILTER} AND d.type NOT IN (${NEVER_CLAIMABLE_SQL})
+  AND NOT ${TOLERATED_SQL}`;
 /** The discrepancy (alias d) is a type never asked back from a supplier. */
 export const NEVER_CLAIMABLE_TYPE_SQL = sql`d.type IN (${NEVER_CLAIMABLE_SQL})`;
 
@@ -567,12 +575,13 @@ export async function listClaims(
       closedAt: isoOrNull(r.closed_at),
       lastReminderAt: isoOrNull(r.last_reminder_at),
       ageDays: int(r.age_days),
-      overdue: (AWAITING_SUPPLIER as readonly string[]).includes(status) && r.waiting_overdue === true,
+      // A chase figure: only a claim whose letter went out (train-C gate 11.11 — never an unsent request).
+      overdue: (CHASE_STATUSES as readonly string[]).includes(status) && r.waiting_overdue === true,
       creditNoteNumber: (r.credit_note_number as string | null) ?? null,
       note: (r.note as string | null) ?? null,
       next: nextEdges(status, { amountAgorot: amount, creditedAgorot: credited }),
       vatRateBp: int(r.vat_rate_bp),
-      daysOverdue: (AWAITING_SUPPLIER as readonly string[]).includes(status) && r.waiting_overdue === true ? int(r.days_past) : 0,
+      daysOverdue: (CHASE_STATUSES as readonly string[]).includes(status) && r.waiting_overdue === true ? int(r.days_past) : 0,
     };
   });
 }

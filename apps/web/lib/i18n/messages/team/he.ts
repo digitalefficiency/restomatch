@@ -31,6 +31,7 @@ export const he = {
     },
     copyLinkTitle: 'העתקת קישור ההזמנה',
     whatsapp: 'שליחה בוואטסאפ',
+    qrAlt: 'קוד QR של קישור ההצטרפות, לסריקה במצלמה.',
     whatsappText: 'הוזמנתם להצטרף לצוות של {restaurant} ב-RestoMatch. להצטרפות: {url}',
     rateLimited: 'נשלחו יותר מדי הזמנות בשעה האחרונה. נסו שוב מאוחר יותר.',
     copied: 'הועתק',

@@ -102,6 +102,17 @@ test('W3-01 · the chain matrix: total row, T4 empty branch, scope chips, ≤2-c
     await expect(page.getByTestId('matrix-partial')).toHaveCount(0);
   });
 
+  await test.step('every [data-drill] door carries its total (G-16), and the leak doors sum to the total row', async () => {
+    const totals = await page.locator('[data-drill]').evaluateAll((els) => els.map((e) => e.getAttribute('data-drill-total')));
+    expect(totals.length).toBeGreaterThan(0);
+    for (const v of totals) expect(v, 'data-drill-total').toMatch(/^-?\d+$/);
+    const leakDoors = await page
+      .locator('a[data-drill]:has([data-testid="matrix-leak"])')
+      .evaluateAll((els) => els.map((e) => Number(e.getAttribute('data-drill-total'))));
+    const totalText = (await page.getByTestId('matrix-total-leak').innerText()).replace(/[^\d]/g, '');
+    expect(leakDoors.reduce((a, b) => a + b, 0)).toBe(Number(totalText) * 100);
+  });
+
   await markDocument(page);
 
   await test.step('scope chip narrows to one branch and back (URL, soft navigation)', async () => {
@@ -126,6 +137,21 @@ test('W3-01 · the chain matrix: total row, T4 empty branch, scope chips, ≤2-c
     await page.getByTestId('matrix-peek-open').first().click(); // click 2: the invoice
     await expect(page).toHaveURL(/\/dashboard\/invoices\/[0-9a-f-]{36}/, { timeout: 120_000 });
     await expectSameDocument(page);
+  });
+
+  await test.step('the "לפי סניף" strip on approvals and the pay run: one row per branch, switch only on the others', async () => {
+    for (const [path, kind] of [
+      ['/dashboard/approvals', 'approvals'],
+      ['/dashboard/approvals/pay-run', 'payRun'],
+    ] as const) {
+      await page.goto(path);
+      const strip = page.getByTestId(`branch-strip-${kind}`);
+      await expect(strip).toBeVisible({ timeout: 120_000 });
+      const stripRows = strip.getByTestId('branch-strip-row');
+      await expect(stripRows).toHaveCount(2);
+      await expect(stripRows.filter({ hasText: SECOND_BRANCH }).getByRole('button')).toHaveCount(1);
+      await expect(page.locator(`[data-testid="branch-strip-row"][data-branch="${mainId}"]`).getByRole('button')).toHaveCount(0);
+    }
   });
 
   expect(errors, 'no page errors').toEqual([]);
