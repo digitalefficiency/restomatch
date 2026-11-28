@@ -121,9 +121,12 @@ export const DECIDED_PERIODS = ['today', 'yesterday', 'week'] as const;
 export type DecidedPeriod = (typeof DECIDED_PERIODS)[number];
 
 /**
- * One decided gap for the approvals desk's "הוחלט היום": every key of an `approvals.myQueue`
- * row, with its types, so the desk draws the same evidence in grey from the same row model,
- * plus the decision. A decided row: `canAct` false; `claimable` and `claimAgorot` say what the
+ * One decided gap for the approvals desk's "הוחלט היום": the queue row's keys as of this
+ * contract (main's, DS3-04's invoiceDate, unitPriceBilled, lineTotal and unitPriceExpected,
+ * and INV-00's routing, since and claimBasis), with their types, so the desk draws the same
+ * evidence in grey, plus the decision. A key a later pull request adds to the queue row is
+ * added here as a contract addition; the desk types its grey evidence as the shared keys
+ * (`DecidedEvidenceKey` in apps/web/lib/invoices/types.ts), never as the whole queue row. A decided row: `canAct` false; `claimable` and `claimAgorot` say what the
  * decision put in the credit request (`credit`, `duplicate_held`), else false and 0;
  * `passedOn` null; `reason` the rule that first routed it (as `invoices.history`).
  */
@@ -186,7 +189,9 @@ export interface DecidedRow {
 
 /**
  * `approvals.decided`: every member's decisions of the period in this restaurant (`byYou` marks
- * the caller's), never the system's, newest first, with the head's totals from the server.
+ * the caller's), never the system's, newest first, with the head's totals from the server. A
+ * decision whose gap a re-match replaced without carrying it (its severity changed or its ₪
+ * grew) has no gap row left and is not listed. At most DECIDED_MAX_ROWS rows; `count` counts all.
  */
 export interface DecidedList {
   rows: DecidedRow[];

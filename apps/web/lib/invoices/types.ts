@@ -72,3 +72,10 @@ export type DecidedInput = In['approvals']['decided'];
 export type DecidedPeriod = DecidedInput['period'];
 export type DecidedList = Out['approvals']['decided'];
 export type DecidedRow = DecidedList['rows'][number];
+/**
+ * The keys a decided row shares with a queue row, with the same types: the desk draws a decided
+ * gap's grey evidence from `Pick<QueueRow, DecidedEvidenceKey>`, never from the whole queue row,
+ * so a key another pull request adds to the queue row (#369's `claimed`, #190's `pageQuestion`)
+ * breaks nothing.
+ */
+export type DecidedEvidenceKey = Extract<keyof QueueRow, keyof DecidedRow>;

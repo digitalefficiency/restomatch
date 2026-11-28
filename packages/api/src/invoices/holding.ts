@@ -20,13 +20,17 @@ import { vatBasisOf, type VatBasis } from '../lib/claims';
 import type { WAIVE_REASON_CODES } from '../routers/approvals';
 import { canActOn } from '../lib/roles';
 import { localDateKeyInTz } from '../lib/time';
-import { discrepancyDecidableSql } from '../lifecycle/predicates';
+import { DISCREPANCY_CLAIMED, discrepancyDecidableSql } from '../lifecycle/predicates';
 import type { InvoiceState } from './state';
 
 /**
  * INV-00 · with whom an invoice's gap is, since when and why (`holding`), and what a person
  * decided last (`lastDecision`): ONE definition that every screen of the invoices area reads,
  * on `invoices.list` rows, `invoices.detail`, `invoices.holding` and the approvals queue row.
+ *
+ * Import rule: this module sits in the cycle routers/approvals.ts → here → approvals/awaiting.ts
+ * → routers/approvals.ts (the last edge is on main). No top-level statement here may use a
+ * value imported from approvals/** or routers/**: only functions read them, at call time.
  *
  * Reads only. The row set is the approvals queue's own (open or escalated, without the
  * engine's ₪0 QTY_SHORT twin: `routers/approvals.ts` myQueue), so every screen counts what the
@@ -117,11 +121,17 @@ export interface GapReason {
   bandAgorot: { min: number; max: number } | null;
 }
 
-/** A gap that was passed on to the owner (`approvals.escalate`). */
+/**
+ * A gap that was passed on to the owner (`approvals.escalate`). Non-null exactly while the gap's
+ * `resolution_status` is 'escalated': a pass-on undone by `approvals.reopen` is none, although
+ * its append-only audit row stays. An escalated gap whose escalation row cannot be read (a
+ * re-match carries one only when it knows who passed it on) still gets a PassedOn, with
+ * `byRole`, `at` and `waitedDays` null and `carried` true.
+ */
 export interface PassedOn {
   /** The role that passed it on; null when the audit row does not record it. */
   byRole: GapRole | null;
-  /** When it was passed on; null when it was carried through a re-match (the time is not known). */
+  /** When it was passed on; null when the time is not known (carried through a re-match, or no readable row). */
   at: Date | null;
   /** Whole days, in the restaurant's zone, the gap had waited before it was passed on; null when carried. */
   waitedDays: number | null;
@@ -954,8 +964,11 @@ export async function gapFactsOf(
 // A person's decisions: `lastDecision`, a finding's `decision`, `approvals.decided`, history.
 // ───────────────────────────────────────────────────────────────────────────────
 
-/** The statuses a decided gap can carry (`resolved` only in seeded data). */
-export const DECIDED_STATUSES = ['accepted', 'rejected', 'resolved'] as const;
+/**
+ * The statuses a decided gap can carry: the lifecycle's decided-as-claim set (`accepted`, and
+ * `resolved`, which only seeded data holds) and the waive (`rejected`).
+ */
+export const DECIDED_STATUSES = [...DISCREPANCY_CLAIMED, 'rejected'] as const;
 
 /**
  * Pure: a person decided this gap. `approvals.decide()` stamps `resolved_at` (and an undo clears

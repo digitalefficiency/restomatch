@@ -623,6 +623,8 @@ export const invoicesRouter = router({
         // the ₪0 twin): the role it waits for, its rule and since when. A decided one: the
         // decision. All null without money.view (the receiver reads this procedure).
         routing: (gapFacts && isQueueRow(f) ? gapRoleOf(f.requiresRole) : null) as GapRole | null,
+        /** The gap has a routed role (`requires_role` set); false for one `routing` reads as the manager's. */
+        routed: (gapFacts && isQueueRow(f) ? f.requiresRole != null : null) as boolean | null,
         reason: (gapFacts && isQueueRow(f) ? gapFacts.reasonOf(f) : null) as GapReason | null,
         since: (gapFacts && isQueueRow(f) ? (gapFacts.passedOnOf(f.id)?.at ?? f.createdAt) : null) as Date | null,
         passedOn: (gapFacts && isQueueRow(f) ? gapFacts.passedOnOf(f.id) : null) as PassedOn | null,
@@ -738,9 +740,9 @@ export const invoicesRouter = router({
       orderSentAt: (money ? (run?.poOrderDate ?? null) : null) as Date | null,
       /**
        * The restaurant's IANA zone (`restaurants.timezone`): the calendar every wait and "today"
-       * of this screen is counted on. Not money: every reader gets it.
+       * of this screen is counted on. Null without money.view, like every INV-00 field.
        */
-      timeZone: await areaTimeZone(ctx.db, rid),
+      timeZone: (money ? await areaTimeZone(ctx.db, rid) : null) as string | null,
     };
   }),
   /**

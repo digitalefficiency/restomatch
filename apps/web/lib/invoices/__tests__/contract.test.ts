@@ -1,13 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { PLACE_IDS, PLACE_STATES } from '../places';
-import type { DecidedRow, Holding, InvoiceListRow, QueueRow } from '../types';
+import type { DecidedEvidenceKey, DecidedRow, Holding, InvoiceListRow, QueueRow } from '../types';
 
 /**
  * INV-00 · the contract the area's screens build on, checked at compile time (web typecheck)
- * and at run time. A decided row is drawn by the desk's own row model, so it must be a queue
- * row; the row the views and the walk read must carry the old `noAllocation` set's facts.
+ * and at run time. A decided row carries the queue row's evidence keys with their types, so the
+ * desk draws it with its own row model (the shared keys only: a key another pull request adds
+ * to the queue row must not turn this red); the row the views and the walk read must carry the
+ * old `noAllocation` set's facts.
  */
-const decidedIsAQueueRow = (d: DecidedRow): QueueRow => d;
+const decidedIsAQueueRow = (d: DecidedRow): Pick<QueueRow, DecidedEvidenceKey> => d;
+// Every evidence key the desk reads today is shared (none silently dropped from the pick).
+type MustShare = 'id' | 'type' | 'severity' | 'resolutionStatus' | 'requiredRole' | 'deltaAmount' | 'expectedValue'
+  | 'actualValue' | 'toleranceUsed' | 'ruleId' | 'productName' | 'supplierName' | 'invoiceNumber' | 'invoiceId'
+  | 'qtyBilled' | 'qtyOrdered' | 'qtyReceived' | 'poRef' | 'poDate' | 'claimAgorot' | 'canAct' | 'waitingOn'
+  | 'reason' | 'passedOn' | 'routing' | 'since' | 'claimBasis';
+const sharesEveryEvidenceKey: Exclude<MustShare, DecidedEvidenceKey> extends never ? true : never = true;
+void sharesEveryEvidenceKey;
 const leadingIsNotTheLink = (h: Holding): [string, string | null] => [h.leadingGapId, h.decideGapId];
 const rowHasAllocationFacts = (r: InvoiceListRow): [boolean, boolean] => [r.hasAllocation, r.allocationMissing];
 
