@@ -10,7 +10,7 @@ import { HomeSection } from './section';
 import { BoardSkeleton, CardSkeleton } from './skeletons';
 import { ReceivingBoard } from './receiving-board';
 import { NeedsYou } from './needs-you';
-import { NeedsSkeleton } from './skeletons';
+import { StaffNeedsSkeleton } from './skeletons';
 import { staffNeedRowsOf } from './need-rows';
 import type { Task } from '@/lib/components/notifications/model';
 
@@ -23,7 +23,7 @@ import type { Task } from '@/lib/components/notifications/model';
  */
 export function StaffNeeds({ load, homed = [], t, locale, fail }: { load: () => Promise<{ tasks: Task[]; failed: string[] }>; homed?: readonly Task['type'][]; t: T; locale: Locale; fail: Set<string> }) {
   return (
-    <HomeSection name="needs" fallback={<NeedsSkeleton rows={2} />} forceFail={fail.has('needs')}>
+    <HomeSection name="needs" fallback={<StaffNeedsSkeleton />} forceFail={fail.has('needs')}>
       <StaffNeedsBody load={load} homed={homed} t={t} locale={locale} />
     </HomeSection>
   );
