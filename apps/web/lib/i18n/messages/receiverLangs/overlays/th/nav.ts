@@ -61,6 +61,8 @@ export const nav: Shape<typeof he> = {
     integrations: 'การเชื่อมต่อ',
     settings: 'ตั้งค่า',
     automations: 'ระบบอัตโนมัติ',
+    notificationSettings: 'การแจ้งเตือน', // review
+    share: 'แชร์', // review
   },
   bar: {
     today: 'วันนี้',

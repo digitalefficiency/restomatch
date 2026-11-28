@@ -61,6 +61,8 @@ export const nav: Shape<typeof he> = {
     integrations: 'Интеграции',
     settings: 'Настройки',
     automations: 'Автоматизации',
+    notificationSettings: 'Уведомления', // review
+    share: 'Поделиться', // review
   },
   bar: {
     today: 'Сегодня',

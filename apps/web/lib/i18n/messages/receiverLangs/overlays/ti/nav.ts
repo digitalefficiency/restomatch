@@ -61,6 +61,8 @@ export const nav: Shape<typeof he> = {
     integrations: 'ምትእስሳራት',
     settings: 'ቅጥዕታት',
     automations: 'ኣውቶሜሽን',
+    notificationSettings: 'መፍለጢታት', // review
+    share: 'ምክፋል', // review
   },
   bar: {
     today: 'ሎሚ',

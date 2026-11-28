@@ -78,6 +78,8 @@ export const SCREEN_CLASS: Readonly<Record<string, ScreenClass>> = {
   // System pages.
   forbidden: 'home',
   go: 'home',
+  // W3-03b: the PWA share target (any role lands here; text → order capture, files kept on the phone).
+  share: 'home',
   lab: 'admin',
 };
 
