@@ -145,7 +145,7 @@ describe('receiving.priceContext (flag dockPriceContext)', () => {
     expect(r.lines.map((l) => l.invoiceLineId)).toEqual([A.invoiceLineId]);
   });
 
-  it('the receiver gets no ₪, no % and no count: only priceHigher (H-11, owner Q1)', async () => {
+  it('the receiver gets no ₪, no % and no count: only priceHigher and aboveUsual (H-11, owner Q1)', async () => {
     await seedHistory(A, [[5, '8.00'], [20, '8.00'], [40, '8.00']]);
     const owner = await caller(A).receiving.priceContext({ invoiceId: A.invoiceId });
     expect(owner.lines[0]).toMatchObject({ usualUnitPrice: 8, samples: 3 });
@@ -153,6 +153,26 @@ describe('receiving.priceContext (flag dockPriceContext)', () => {
     expect(r.lines).toEqual(
       owner.lines.map((l) => ({ ...l, billedUnitPrice: null, usualUnitPrice: null, pctVsUsual: null, samples: null })),
     );
+  });
+
+  it('aboveUsual: a PRICE_HIGHER line that is not above the usual price stays false for every role', async () => {
+    // Usual (p50) 12 > billed 10, but the matcher flagged the line (e.g. against the PO price or the p90).
+    await seedHistory(A, [[5, '12.00'], [20, '12.00'], [40, '12.00']]);
+    await db.update(discrepancies).set({ invoiceLineId: A.invoiceLineId }).where(eq(discrepancies.id, A.discrepancyId));
+    const owner = await caller(A).receiving.priceContext({ invoiceId: A.invoiceId });
+    expect(owner.lines[0]).toMatchObject({ priceHigher: true, aboveUsual: false, usualUnitPrice: 12 });
+    expect(owner.lines[0]!.pctVsUsual).toBeLessThan(0);
+    const r = await caller(A, 'receiver').receiving.priceContext({ invoiceId: A.invoiceId });
+    expect(r.lines[0]).toMatchObject({ priceHigher: true, aboveUsual: false, pctVsUsual: null, usualUnitPrice: null });
+  });
+
+  it('aboveUsual: above the usual price is true for owner and receiver alike', async () => {
+    await seedHistory(A, [[5, '8.00'], [20, '8.00'], [40, '8.00']]);
+    await db.update(discrepancies).set({ invoiceLineId: A.invoiceLineId }).where(eq(discrepancies.id, A.discrepancyId));
+    const owner = await caller(A).receiving.priceContext({ invoiceId: A.invoiceId });
+    expect(owner.lines[0]).toMatchObject({ priceHigher: true, aboveUsual: true });
+    const r = await caller(A, 'receiver').receiving.priceContext({ invoiceId: A.invoiceId });
+    expect(r.lines[0]).toMatchObject({ priceHigher: true, aboveUsual: true, pctVsUsual: null });
   });
 
   it('a chef cannot read invoice prices (same roles as receiving.getInvoice)', async () => {

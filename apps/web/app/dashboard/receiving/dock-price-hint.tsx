@@ -15,6 +15,8 @@ export interface DockPriceHintData {
   pctVsUsual: number | null;
   /** null for a role without ₪ (H-11). */
   samples: number | null;
+  /** The billed price is above the usual price (the server's `pctVsUsual > 0`); set for every role. */
+  aboveUsual: boolean;
 }
 
 export const DOCK_PRICE_DAYS = 90;
@@ -28,9 +30,10 @@ export function DockPriceHint({ data }: { data: DockPriceHintData }) {
   const t = useT(dockPrice);
   const locale = useLocale();
   const pct = data.pctVsUsual;
-  // A role without ₪ (H-11, owner Q1(ב)): only the words "higher than usual", no %, no count.
-  // The caller shows the hint only on a price-higher line.
+  // A role without ₪ (H-11, owner Q1(ב)): only the words "higher than usual", no %, no count,
+  // and only when the server says the price is above the usual one.
   if (data.usualUnitPrice === null) {
+    if (!data.aboveUsual) return null;
     return (
       <p className="mt-1 text-sm text-muted" data-testid="dock-price-hint">
         {t('higher')}

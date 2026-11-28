@@ -77,13 +77,20 @@ import { invoiceQuestionCount } from '../catalog/linkQuestions';
 
 /**
  * A dock price line as priceContext returns it. For a role without ₪ (H-11) the
- * prices, the % over usual and the invoice count are null: only `priceHigher` stays.
+ * prices, the % over usual and the invoice count are null; `priceHigher` and
+ * `aboveUsual` stay.
  */
 type DockPriceContextView = Omit<DockPriceContextLine, 'billedUnitPrice' | 'usualUnitPrice' | 'pctVsUsual' | 'samples'> & {
   billedUnitPrice: number | null;
   usualUnitPrice: number | null;
   pctVsUsual: number | null;
   samples: number | null;
+  /**
+   * The billed price is above the usual (p50) price: `pctVsUsual > 0`, computed on
+   * the server so a role without the % still gets the same answer. `priceHigher`
+   * alone is not enough: the matcher also flags against the PO price or the p90.
+   */
+  aboveUsual: boolean;
 };
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
@@ -1822,9 +1829,11 @@ export const receivingRouter = router({
     .query(async ({ ctx, input }) => {
       const enabled = await isFeatureOn(ctx.db, ctx.session.restaurantId, 'dockPriceContext');
       if (!enabled || !input.invoiceId) return { enabled, lines: [] as DockPriceContextView[] };
-      const lines: DockPriceContextView[] = await dockPriceContext(ctx.db, ctx.session.restaurantId, input.invoiceId);
+      const lines: DockPriceContextView[] = (
+        await dockPriceContext(ctx.db, ctx.session.restaurantId, input.invoiceId)
+      ).map((l) => ({ ...l, aboveUsual: l.pctVsUsual > 0 }));
       // H-11 strip (slice c + owner Q1(ב), 14.11): the receiver keeps only the
-      // flag behind "מחיר גבוה מהרגיל" (priceHigher): no prices, no %, no count.
+      // yes/no behind "מחיר גבוה מהרגיל" (priceHigher, aboveUsual): no prices, no %, no count.
       if (!seesNoMoney(ctx.session.role)) return { enabled, lines };
       return {
         enabled,
