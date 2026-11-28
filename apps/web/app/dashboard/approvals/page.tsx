@@ -2,14 +2,15 @@ import { Suspense } from 'react';
 import { ReceiptText } from 'lucide-react';
 import { auth } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
-import { LinkButton, SectionHeader, Skeleton } from '@/lib/components';
+import { LinkButton, SectionHeader } from '@/lib/components';
 import { ViewToolbar, hasFilters, localDay, parseView } from '@/lib/components/views';
+import { viewDefaults } from '@/lib/components/views/defaults';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { approvals } from '@/lib/i18n/messages/approvals';
-import { overview } from '@/lib/i18n/messages/overview';
 import { views as viewsNs } from '@/lib/i18n/messages/views';
 import { payRun as payRunNs } from '@/lib/i18n/messages/payRun';
 import { ApprovalsList, FiltersDisclosure, type QueueFilters } from './list';
+import { ApprovalsSkeleton } from './skeleton';
 import { BranchStrip } from '../chain/branch-strip';
 import { discrepancyLabel, displayName, severityLabel } from './vocab';
 
@@ -39,21 +40,23 @@ export default function ApprovalsPage({ searchParams }: { searchParams: SearchPa
 }
 
 async function ApprovalsContent({ searchParams }: { searchParams: SearchParams }) {
-  // View controls: type / severity / supplier filters + density, all in the URL.
+  // View controls: type / severity / supplier filters + density, all in the URL. The filters (and so the queries and
+  // the list's key) come from the address alone; the density's default is the device preference, read once the
+  // role is known (below).
   const sp = await searchParams;
-  const view = parseView(sp);
+  const filterView = parseView(sp);
   // The notification deep link (`/dashboard/go?…&to=/dashboard/approvals?invoice=<id>`):
   // the queue narrows to that invoice. A foreign or malformed id matches nothing.
   const invoiceParam = typeof sp.invoice === 'string' && UUID.test(sp.invoice) ? sp.invoice : null;
   const filters: QueueFilters = {
     ...(invoiceParam ? { invoiceIds: [invoiceParam] } : {}),
-    ...(view.filters.types.length ? { types: view.filters.types } : {}),
-    ...(view.filters.severities.length ? { severities: view.filters.severities } : {}),
-    ...(view.filters.supplierIds.length ? { supplierIds: view.filters.supplierIds } : {}),
+    ...(filterView.filters.types.length ? { types: filterView.filters.types } : {}),
+    ...(filterView.filters.severities.length ? { severities: filterView.filters.severities } : {}),
+    ...(filterView.filters.supplierIds.length ? { supplierIds: filterView.filters.supplierIds } : {}),
   };
-  const filtered = hasFilters(view) || invoiceParam != null;
+  const filtered = hasFilters(filterView) || invoiceParam != null;
   const activeFilters =
-    view.filters.types.length + view.filters.severities.length + view.filters.supplierIds.length;
+    filterView.filters.types.length + filterView.filters.severities.length + filterView.filters.supplierIds.length;
   const caller = await createServerCaller();
   const [t, tv, tp, locale] = await Promise.all([
     getT(approvals),
@@ -73,6 +76,9 @@ async function ApprovalsContent({ searchParams }: { searchParams: SearchParams }
   const viewerRole =
     (memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0])
       ?.role ?? null;
+  // The view with the device preference as the density default (the stored choice, else the role's — the bookkeeper
+  // starts compact — and the regular size on a phone or tablet); an explicit `d` in the address still wins.
+  const view = parseView(sp, await viewDefaults(viewerRole));
   // Pay run (flag payRun): finance roles get a link to this month's pay run.
   const showPayRun =
     viewerRole === 'owner' || viewerRole === 'manager' || viewerRole === 'bookkeeper'
@@ -82,7 +88,8 @@ async function ApprovalsContent({ searchParams }: { searchParams: SearchParams }
   const showToolbar = queue.length > 0 || filtered;
 
   return (
-    <div>
+    // ≥1280: the desk fills the window below the shell's header (both panes scroll inside it, spec §4.1).
+    <div className="xl:flex xl:h-[calc(100dvh-var(--rm-header-h,var(--chrome-header-h))-var(--rm-shell-pad-y,6rem)-var(--consent-h,0px))] xl:min-h-[36rem] xl:flex-col">
       <SectionHeader
         level={1}
         title={t('title')}
@@ -153,49 +160,6 @@ async function ApprovalsContent({ searchParams }: { searchParams: SearchParams }
         // #418: the server's clock for this render — the deadline days hydrate unchanged.
         nowMs={Date.now()}
       />
-    </div>
-  );
-}
-
-/**
- * Layout-true skeleton (approvals-19), the Suspense fallback of page.tsx: the same header, the phone summary line /
- * desktop 4 tiles, and decision cards at the real card height with the 50/50
- * 48 px button row — so nothing jumps when the queue paints.
- */
-async function ApprovalsSkeleton() {
-  const t = await getT(overview);
-  return (
-    <div role="status" aria-label={t('loading')} data-testid="approvals-loading">
-      <div className="mb-6 space-y-2">
-        <div className="h-0.5 w-10 rounded-full flow-stream" />
-        <Skeleton className="h-8 w-44" />
-      </div>
-      <Skeleton className="mb-3 h-12 w-40 rounded-full sm:hidden" />
-      <Skeleton className="mb-4 h-5 w-64 sm:hidden" />
-      <div className="mb-5 hidden gap-3 sm:grid sm:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Skeleton key={i} className="h-[88px]" />
-        ))}
-      </div>
-      <div className="space-y-3">
-        {Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} className="rounded-2xl border border-line bg-surface p-4 ps-5">
-            <div className="flex items-start justify-between gap-2">
-              <div className="space-y-2">
-                <Skeleton className="h-6 w-48" />
-                <Skeleton className="h-4 w-56" />
-              </div>
-              <Skeleton className="h-12 w-12 sm:h-10 sm:w-10" />
-            </div>
-            <Skeleton className="mt-3 h-7 w-40" />
-            <Skeleton className="mt-2 h-10 w-full sm:h-6" />
-            <div className="mt-3 grid grid-cols-2 gap-2 sm:flex">
-              <Skeleton className="h-12 sm:w-44" />
-              <Skeleton className="h-12 sm:w-44" />
-            </div>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }

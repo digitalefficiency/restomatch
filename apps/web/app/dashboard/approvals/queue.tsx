@@ -171,6 +171,8 @@ export function QueueColumn({
           data-record=""
           data-testid="approvals-list"
           data-desk-rows=""
+          // The rows scroll: the one global focus outline is drawn inside each cell (DS3-00 hook), never clipped.
+          data-focus="inset"
           onKeyDown={onRowsKeyDown}
           className="hidden xl:block xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:px-2 xl:pb-2 xl:pt-1.5"
         >
