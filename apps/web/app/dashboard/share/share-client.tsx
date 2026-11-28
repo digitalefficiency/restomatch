@@ -6,7 +6,7 @@ import { FileText, Share2 } from 'lucide-react';
 import { Button, Card, LinkButton, SectionHeader, useToast } from '@/lib/components';
 import { useT } from '@/lib/i18n/client';
 import { common } from '@/lib/i18n/messages/common';
-import { dropShare, readShare, routeShare, shareText, type SharedItem, type ShareRoute } from '@/lib/pwa/shareInbox';
+import { claimSharesFor, dropShare, readShare, routeShare, shareText, type SharedItem, type ShareRoute } from '@/lib/pwa/shareInbox';
 
 type View = { state: 'loading' } | { state: 'ready'; item: SharedItem | null; route: ShareRoute };
 
@@ -16,12 +16,15 @@ export function ShareClient({
   filesLost,
   orderCapture,
   canReceive,
+  userId,
 }: {
   id: string | null;
   fallback: { title: string; text: string; url: string };
   filesLost: boolean;
   orderCapture: boolean;
   canReceive: boolean;
+  /** Another user's parked shares are wiped before anything is read (shared phone). */
+  userId: string | null;
 }) {
   const t = useT(common);
   const router = useRouter();
@@ -31,7 +34,9 @@ export function ShareClient({
   useEffect(() => {
     let live = true;
     void (async () => {
-      const parked = id ? await readShare(id) : null;
+      // No session id → nothing parked is shown (never another user's share).
+      const owned = userId ? (await claimSharesFor(userId), true) : false;
+      const parked = id && owned ? await readShare(id) : null;
       const item: SharedItem | null =
         parked ?? (shareText(fallback) ? { id: '', at: 0, ...fallback, skipped: 0, files: [] } : null);
       const route = routeShare(item);

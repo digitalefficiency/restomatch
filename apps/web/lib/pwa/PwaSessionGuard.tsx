@@ -9,6 +9,7 @@ import { runLogoutGuard, type LogoutChoice } from './logoutGuard';
 import { clearMineOnDevice, countMineOnDevice } from './fieldOutbox';
 import { LOGOUT_FORM_ATTR, queueDbExists } from './offlineQueue';
 import { purgeFieldSnapshot, purgeSnapshotIfNotOwner } from './fieldSnapshot';
+import { claimSharesFor } from './shareInbox';
 import { drainNow, useOutboxDrainer } from './useOutboxDrainer';
 import { AppPwa } from './AppPwa';
 
@@ -46,6 +47,8 @@ export function PwaSessionGuard({
   // Another user's read snapshot never survives a user switch on this device (sign-out or not).
   useEffect(() => {
     void purgeSnapshotIfNotOwner(userId);
+    // …and another user's parked shares (W3-03b); this user's are stamped as theirs.
+    void claimSharesFor(userId);
   }, [userId]);
   const photosOnlyRef = useRef(true);
   const [sheet, setSheet] = useState<Sheet>(null);

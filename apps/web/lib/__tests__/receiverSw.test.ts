@@ -170,7 +170,7 @@ describe('receiver service worker', () => {
       share_target?: { action: string; method: string };
     };
     expect(m.scope).toBe('/dashboard/');
-    expect(m.start_url.startsWith('/dashboard')).toBe(true);
+    expect(m.start_url.startsWith(m.scope)).toBe(true);
     expect(m.icons.every((i) => i.src.startsWith('/pwa/'))).toBe(true);
     // W3-03b share target: inside the scope; the POST is answered by the worker on the device
     // (or by a redirect-only route that stores nothing), never by an authed write.

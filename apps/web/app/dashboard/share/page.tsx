@@ -28,6 +28,7 @@ export default async function SharePage({
       filesLost={one('files') === 'lost'}
       orderCapture={features.includes('orderCapture')}
       canReceive={role === 'owner' || role === 'manager' || role === 'receiver'}
+      userId={session?.user?.id ?? null}
     />
   );
 }

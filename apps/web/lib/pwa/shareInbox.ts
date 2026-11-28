@@ -3,11 +3,20 @@
  * share (POST from the OS share sheet) in Cache Storage "rm-share-v1" and sends
  * the page /dashboard/share?id=… ; this module reads it back. Nothing here goes
  * to the network. A text-only share is read once and deleted; a share with
- * files stays (the worker drops it after a day, sign-out drops it at once)
- * until a capture screen takes the files with `takeShareFiles`.
+ * files stays (the worker drops it after a day) until a capture screen takes
+ * the files with `takeShareFiles`.
+ *
+ * Shares are this user's content on a possibly shared phone, so:
+ * - sign-out deletes the whole cache (`purgeFieldSnapshot` → `purgeShares`);
+ * - the cache is stamped with its owner on every signed-in mount
+ *   (`claimSharesFor`); a different user signing in wipes it first. A share
+ *   parked before anyone signed in (the share sheet opened while signed out)
+ *   goes to the first user who signs in.
  */
 
 export const SHARE_CACHE = 'rm-share-v1';
+/** Synthetic entry naming whose shares these are (a user id). Not a share itself. */
+export const SHARE_OWNER_PATH = '/__share/owner';
 const ID = /^[0-9a-f]{24}$/;
 
 export interface SharedFileMeta {
@@ -112,4 +121,44 @@ export function routeShare(item: SharedItem | null): ShareRoute {
   if (item.files.length > 0) return { kind: 'files', count: item.files.length };
   const text = shareText(item);
   return text ? { kind: 'orderText', text } : { kind: 'empty' };
+}
+
+/** The part of CacheStorage the owner checks need (injectable for tests). */
+export interface CacheStorageLike {
+  keys(): Promise<string[]>;
+  delete(name: string): Promise<boolean>;
+  open(name: string): Promise<{ match(key: string): Promise<Response | undefined>; put(key: string, res: Response): Promise<void> }>;
+}
+const storage = (): CacheStorageLike | null => (typeof caches === 'undefined' ? null : (caches as unknown as CacheStorageLike));
+
+/** Delete every parked share on this device. Never throws. */
+export async function purgeShares(api: CacheStorageLike | null = storage()): Promise<void> {
+  try {
+    await api?.delete(SHARE_CACHE);
+  } catch {
+    /* storage blocked */
+  }
+}
+
+/**
+ * Make the parked shares this user's: another user's shares are deleted, then
+ * the cache is stamped with `userId`. Run on every signed-in shell mount and
+ * before the share page reads. Returns whether it purged. Never throws.
+ */
+export async function claimSharesFor(userId: string, api: CacheStorageLike | null = storage()): Promise<boolean> {
+  if (!api || !userId) return false;
+  try {
+    if (!(await api.keys()).includes(SHARE_CACHE)) return false;
+    const stamp = await (await api.open(SHARE_CACHE)).match(SHARE_OWNER_PATH);
+    const owner = stamp ? (await stamp.text()).trim() : null;
+    let purged = false;
+    if (owner && owner !== userId) {
+      await api.delete(SHARE_CACHE);
+      purged = true;
+    }
+    await (await api.open(SHARE_CACHE)).put(SHARE_OWNER_PATH, new Response(userId, { headers: { 'content-type': 'text/plain' } }));
+    return purged;
+  } catch {
+    return false;
+  }
 }

@@ -4,7 +4,9 @@ import { runInNewContext } from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
 import { GET } from '../../../app/receiver-sw.js/route';
 import { POST as receivePost, GET as receiveGet } from '../../../app/dashboard/share/receive/route';
-import { readShare, routeShare, shareText, takeShareFiles, isShareId, type CacheLike } from '../shareInbox';
+import { claimSharesFor, readShare, routeShare, shareText, takeShareFiles, isShareId, type CacheLike, type CacheStorageLike } from '../shareInbox';
+import { purgeFieldSnapshot } from '../fieldSnapshot';
+import { MANIFEST_BASE, manifestFor } from '../manifest';
 
 const ORIGIN = 'https://app.test';
 
@@ -104,7 +106,7 @@ describe('share target in the worker (W3-03b)', () => {
     expect(await readShare(id, open)).toBeNull(); // taken once
   });
 
-  it('a text-only share routes to the order capture; sign-out purges shares', async () => {
+  it('a text-only share routes to the order capture', async () => {
     const w = await loadWorker();
     const form = new FormData();
     form.set('text', '5 ק״ג עגבניות');
@@ -113,8 +115,41 @@ describe('share target in the worker (W3-03b)', () => {
     const id = new URL(res.headers.get('location')!, ORIGIN).searchParams.get('id');
     const open = async () => (await w.caches.open('rm-share-v1')) as unknown as CacheLike;
     expect(routeShare(await readShare(id, open))).toEqual({ kind: 'orderText', text: '5 ק״ג עגבניות\nhttps://wa.me/x' });
-    await w.run('message', { data: { type: 'rm-purge-snapshot' } });
+  });
+
+  it("the real sign-out step deletes parked shares; another user's sign-in wipes them, the owner's keeps them", async () => {
+    const w = await loadWorker();
+    const park = async () => {
+      const form = new FormData();
+      form.set('title', 'ספק');
+      form.append('files', new File([new Uint8Array([9])], 'owner.pdf', { type: 'application/pdf' }));
+      const res = (await w.run('fetch', { request: shareRequest(form) }))!;
+      return new URL(res.headers.get('location')!, ORIGIN).searchParams.get('id');
+    };
+    const api = w.caches.api as unknown as CacheStorageLike;
+    const open = async () => (await w.caches.open('rm-share-v1')) as unknown as CacheLike;
+
+    // The owner signs in on this phone: their share is stamped as theirs and survives a re-mount.
+    let id = await park();
+    expect(await claimSharesFor('owner-1', api)).toBe(false);
+    expect(await claimSharesFor('owner-1', api)).toBe(false);
+    expect((await readShare(id, open))?.files).toHaveLength(1);
+
+    // A receiver signs in next (no sign-out in between): the owner's share is gone before anything reads it.
+    expect(await claimSharesFor('receiver-2', api)).toBe(true);
+    expect(await readShare(id, open)).toBeNull();
+
+    // The guarded sign-out's purge (PwaSessionGuard → purgeFieldSnapshot) deletes rm-share-v1.
+    id = await park();
+    expect((await readShare(id, open))?.files).toHaveLength(1);
+    vi.stubGlobal('caches', w.caches.api);
+    try {
+      await purgeFieldSnapshot();
+    } finally {
+      vi.unstubAllGlobals();
+    }
     expect(w.caches.stores.has('rm-share-v1')).toBe(false);
+    expect(await readShare(id, open)).toBeNull();
   });
 
   it('rejects garbage ids and dedupes repeated lines', async () => {
@@ -191,16 +226,28 @@ describe('push + notification click (W3-03b)', () => {
 
 describe('app-wide manifest (W3-03b)', () => {
   const m = JSON.parse(readFileSync(join(__dirname, '../../../public/pwa/manifest.webmanifest'), 'utf8'));
-  it('keeps the id, scopes the whole dashboard, has the four field shortcuts', () => {
+  it('the static file is the base: id kept, whole dashboard in scope, start_url inside it, no shortcuts', () => {
+    expect(m).toEqual(JSON.parse(JSON.stringify(MANIFEST_BASE)));
     expect(m.id).toBe('/dashboard/receiving');
     expect(m.scope).toBe('/dashboard/');
-    expect(m.start_url).toBe('/dashboard?source=pwa');
-    expect(m.shortcuts.map((s: { name: string }) => s.name)).toEqual(['קבלת משלוח', 'ספירה', 'הזמנה חדשה', 'אישורים']);
-    for (const s of m.shortcuts) expect(s.url.startsWith('/dashboard/')).toBe(true);
+    expect(m.start_url.startsWith(m.scope)).toBe(true);
+    expect(m.shortcuts).toBeUndefined();
   });
   it('shares by POST multipart (images, PDF, text) to the receive route', () => {
     expect(m.share_target).toMatchObject({ action: '/dashboard/share/receive', method: 'POST', enctype: 'multipart/form-data' });
     expect(m.share_target.params.files[0].accept).toEqual(['image/*', 'application/pdf']);
+  });
+  it('offers each role only the shortcuts it can open (no 403, no money screen for chef/receiver)', () => {
+    const names = (role: Parameters<typeof manifestFor>[0] extends infer V ? (V extends { role: infer R } ? R : never) : never, features: string[] = ['inventoryCount']) =>
+      (manifestFor({ role, features }) as { shortcuts?: Array<{ name: string; url: string }> }).shortcuts?.map((s) => s.name) ?? [];
+    expect(names('owner')).toEqual(['קבלת משלוח', 'ספירה', 'הזמנה חדשה', 'אישורים']);
+    expect(names('receiver')).toEqual(['קבלת משלוח']);
+    expect(names('chef')).toEqual(['ספירה', 'הזמנה חדשה']);
+    expect(names('bookkeeper')).toEqual(['ספירה', 'אישורים']);
+    expect(manifestFor(null)).not.toHaveProperty('shortcuts');
+    for (const s of (manifestFor({ role: 'owner', features: ['inventoryCount'] }) as { shortcuts: Array<{ url: string }> }).shortcuts) {
+      expect(s.url.startsWith(MANIFEST_BASE.scope)).toBe(true);
+    }
   });
 });
 
