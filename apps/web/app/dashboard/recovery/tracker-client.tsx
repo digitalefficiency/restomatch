@@ -555,7 +555,7 @@ export function TrackerClient({
       </Card>
 
       {suggestions.length > 0 ? (
-        <Card padding="lg">
+        <Card padding="lg" id="credit-suggestions">
           <h2 className="text-sm font-bold text-ink">{t('tracker.suggestionsTitle')}</h2>
           <p className="mt-1 text-xs text-muted">{t('tracker.suggestionsHint')}</p>
           <ul className="mt-3 divide-y divide-line/60" data-record="">

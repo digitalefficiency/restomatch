@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   and,
+  asc,
   applyAuditImmutableRls,
   applyCoreTenantRls,
   auditLog,
@@ -71,7 +72,10 @@ async function invoiceAudits() {
   return ownerDb
     .select({ action: auditLog.action })
     .from(auditLog)
-    .where(and(eq(auditLog.entityType, 'invoice'), eq(auditLog.entityId, A.invoiceId)));
+    .where(and(eq(auditLog.entityType, 'invoice'), eq(auditLog.entityId, A.invoiceId)))
+    // Each move is its own transaction, so `at` (now() at tx start) orders them. Without an
+    // ORDER BY Postgres may return heap order, which made the sequence assertions flaky in CI.
+    .orderBy(asc(auditLog.at));
 }
 async function invoiceStatus() {
   const [i] = await ownerDb.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, A.invoiceId));

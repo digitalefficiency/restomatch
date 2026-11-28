@@ -2,7 +2,7 @@
 
 import { Pause, Play } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { PHONE_MEDIA, loopSourcesFor, replaceVideoSources } from '@/lib/heroMedia';
+import { PHONE_MEDIA, heroMedia, loopSourcesFor, replaceVideoSources } from '@/lib/heroMedia';
 
 /**
  * Hero product loop (used when heroMedia.available).
@@ -51,7 +51,7 @@ export function HeroVideo({
   pauseLabel: string;
   playLabel: string;
   minWidth?: string;
-  phone?: { webm: string; mp4: string; poster: string } | null;
+  phone?: { webm: string; mp4: string; poster: string; posterSrcSet?: string } | null;
   fallback?: ReactNode;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
@@ -103,7 +103,9 @@ export function HeroVideo({
         {/* Static 1280×720 poster, preloaded with fetchpriority=high; next/image would add a hop. */}
         <picture>
           {minWidth ? <source media={`not all and ${minWidth}`} srcSet={BLANK_PIXEL} /> : null}
-          {phone ? <source media={PHONE_MEDIA} srcSet={phone.poster} /> : null}
+          {phone ? (
+            <source media={PHONE_MEDIA} srcSet={phone.posterSrcSet ?? phone.poster} sizes={phone.posterSrcSet ? heroMedia.phonePosterSizes : undefined} />
+          ) : null}
           <img
             src={poster}
             srcSet={posterSrcSet}

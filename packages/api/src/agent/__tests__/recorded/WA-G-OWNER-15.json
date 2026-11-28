@@ -1,0 +1,33 @@
+{
+  "caseId": "WA-G-OWNER-15",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "brief.mute",
+      "toolCalls": [
+        {
+          "name": "notifications.muteToday",
+          "args": {
+            "channel": "whatsapp"
+          },
+          "result": {
+            "mutedUntil": "2026-10-26T06:00:00+02:00"
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "text",
+          "text": "בסדר. לא נשלח היום עוד התראות בוואטסאפ. הכל נשאר באפליקציה.",
+          "buttons": []
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "proactiveSent": 0
+  }
+}

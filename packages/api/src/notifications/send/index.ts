@@ -34,3 +34,6 @@ export {
 export { SKIPPED_NO_SUBSCRIPTION, deliverOutboxRow, type DeliverableRow, type DeliveryOutcome } from './deliver';
 export { DIGEST_MAX_ITEMS, foldDigest, isDigestRow, type DigestCandidate, type DigestMessage } from './digest';
 export { CHASE_COURTESY_DAY3, chaseStepDue, type ChaseInput, type ChaseStep } from './chaseCadence';
+export { applyDeliveryOutcome, outcomeStatus, type AppliedStatus } from './applyOutcome';
+export { FOLDED_INTO_DIGEST, foldDueDigests } from './digestRun';
+export { OUTBOX_HEAVY_KEYS, OUTBOX_PAYLOAD_KEEP_DAYS, minimiseOutboxPayloads } from './outboxMinimise';

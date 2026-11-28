@@ -11,6 +11,8 @@ export const en: Shape<typeof he> = {
   status: {
     matched: 'Matches the delivery notes',
     matchedBody: 'Everything billed was delivered, at the order price.',
+    pending: 'Waiting for a count to finish',
+    pendingBody: 'A delivery note this invoice lists is still being counted. The cross-match completes when the receipt is closed.',
     differences: 'Differences against the delivery notes',
     differencesBody: 'The invoice is {amount} above what was delivered at order prices.',
     differencesBodyLines: 'Differences on the lines billed against their delivery notes. Notes this invoice does not bill are not counted.',

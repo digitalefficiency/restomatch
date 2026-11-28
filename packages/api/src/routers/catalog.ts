@@ -34,6 +34,9 @@ import {
   type ParsedTable,
 } from '../catalog/parse';
 import { commitCatalogRows } from '../catalog/commit';
+import { buildImportDiff } from '../catalog/importDiff';
+import { loadCurrentForDiff } from '../catalog/importDiffLoad';
+import { toPriceUnits } from '../lib/parseMoneyCell';
 import { catalogUnitPrice, cheapestComparable } from '../lib/unitPrice';
 
 /**
@@ -362,6 +365,17 @@ export const catalogRouter = router({
         };
       });
       const flagged = priced.filter((r) => r.flag != null);
+      // W3-10 · "מה ישתנה": ↑/↓ with ₪/month (integer agorot), rows the file
+      // drops (to disable, never automatic) and unclear rows, before any write.
+      const diff = buildImportDiff(await loadCurrentForDiff(ctx.db, restaurantId, input.supplierId), [
+        ...analysis.rows.map((r) => ({
+          rowNumber: r.rowNumber,
+          supplierSku: r.supplierSku,
+          name: r.supplierNameRaw,
+          priceUnits: r.listPrice == null ? null : toPriceUnits(r.listPrice),
+        })),
+        ...analysis.held.map((h) => ({ rowNumber: h.rowNumber, supplierSku: h.supplierSku, name: h.supplierNameRaw, priceUnits: null })),
+      ]);
       return {
         headers: table.headers,
         sample: table.rows.slice(0, 20),
@@ -377,6 +391,13 @@ export const catalogRouter = router({
           heldCount: analysis.held.length,
           flagged: flagged.slice(0, LIST_CAP),
           flaggedCount: flagged.length,
+        },
+        diff: {
+          counts: diff.counts,
+          upAgorot: diff.upAgorot,
+          downAgorot: diff.downAgorot,
+          netAgorot: diff.netAgorot,
+          lines: diff.lines.filter((l) => l.kind !== 'same').slice(0, LIST_CAP),
         },
       };
     }),

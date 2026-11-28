@@ -126,14 +126,16 @@ describe('admin writes require a reason (W3-07a)', () => {
     expect(rows[0]!.after).toEqual({ role: 'chef', reason: 'עבר למטבח' });
   });
 
-  it('setFeatures: reason optional (AU-01 carve-out) but recorded when given', async () => {
+  it('setFeatures requires a reason (AU-01 carve-out ended) and records it', async () => {
     const c = adminCaller(adminUserId);
-    await c.admin.setFeatures({ restaurantId: T.restaurantId, features: { contracts: true } });
+    await expect(
+      c.admin.setFeatures({ restaurantId: T.restaurantId, features: { contracts: true } }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(await auditRows('admin.features')).toHaveLength(0);
     await c.admin.setFeatures({ restaurantId: T.restaurantId, features: { contracts: false }, reason: 'כיבוי זמני' });
     const rows = await auditRows('admin.features');
-    expect(rows).toHaveLength(2);
-    const reasons = rows.map((r) => (r.after as { reason?: string }).reason ?? null).sort();
-    expect(reasons).toEqual(['כיבוי זמני', null].sort());
+    expect(rows).toHaveLength(1);
+    expect((rows[0]!.after as { reason?: string }).reason).toBe('כיבוי זמני');
     await expect(
       c.admin.setFeatures({ restaurantId: T.restaurantId, features: { contracts: true }, reason: ' ' }),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });

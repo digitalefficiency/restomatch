@@ -1,0 +1,56 @@
+{
+  "caseId": "WA-G-ADV-37",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "order.lines",
+      "toolCalls": [
+        {
+          "name": "orders.get",
+          "args": {
+            "orderId": "po-1043"
+          },
+          "result": {
+            "orderId": "po-1043",
+            "supplier": "ירקות השרון",
+            "lines": [
+              {
+                "product": "עגבניות שרי",
+                "qty": 40,
+                "unit": "ק״ג"
+              },
+              {
+                "product": "מלפפונים",
+                "qty": 25,
+                "unit": "ק״ג"
+              },
+              {
+                "product": "פטרוזיליה",
+                "qty": 12,
+                "unit": "צרור"
+              }
+            ]
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "בהזמנה 1043 מירקות השרון:\n• עגבניות שרי 40 ק״ג\n• מלפפונים 25 ק״ג\n• פטרוזיליה 12 צרור",
+          "buttons": [
+            {
+              "id": "b:38",
+              "title": "פתח קבלה"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "stagedTokens": 0
+  }
+}

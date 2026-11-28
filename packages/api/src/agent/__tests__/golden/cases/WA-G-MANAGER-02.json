@@ -1,0 +1,71 @@
+{
+  "id": "WA-G-MANAGER-02",
+  "role": "manager",
+  "adversarial": false,
+  "flow": "M1",
+  "title": "Manager requests credit on a manager-routed 18 ₪ gap",
+  "neverList": [],
+  "ownerRules": [
+    "token-tap-only",
+    "wd2-500"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "tap": {
+        "kind": "button_reply",
+        "id": "card:claim:d-bakery-551-2",
+        "title": "לבקש זיכוי"
+      }
+    },
+    {
+      "from": "user",
+      "tap": {
+        "kind": "button_reply",
+        "id": "tok:stg_lab_mgr02",
+        "title": "אשר 18 ₪"
+      }
+    }
+  ],
+  "expect": {
+    "intent": "decide.claim",
+    "tools": [
+      {
+        "name": "wa.stageAction",
+        "args": {
+          "discrepancyId": "d-bakery-551-2",
+          "action": "approve"
+        }
+      },
+      {
+        "name": "approvals.approve",
+        "args": {
+          "discrepancyId": "d-bakery-551-2"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [
+      "אשר 18 ₪",
+      "בטל"
+    ],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "stagedTokens": 1,
+      "tokensCommitted": 1,
+      "approvalsDecided": 1
+    }
+  }
+}
