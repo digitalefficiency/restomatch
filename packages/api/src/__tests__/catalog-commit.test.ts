@@ -16,6 +16,7 @@ import { MockEmbeddingProvider } from '@restomatch/catalog';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { commitCatalogRows } from '../catalog/commit';
+import { parsePackSize } from '../catalog/parse';
 import { catalogUnitPrice, cheapestComparable } from '../lib/unitPrice';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 
@@ -252,6 +253,35 @@ describe('catalog.commitImport / parsePreview (catalog-02 / -18 / -37)', () => {
     expect(enqueueCatalogImport).toHaveBeenCalledTimes(1);
     const payload = enqueueCatalogImport.mock.calls[0]![0] as { mapping: Record<string, string> };
     expect(payload.mapping).toMatchObject({ vatBasis: 'ex', vatRate: '0.1800' });
+  });
+
+  it("a pack cell of '0' / '0.0004' is no pack: the file commits, valid rows included (CHECK pack_size > 0)", async () => {
+    const packText = ['sku,name,unit,pack,price', 'Z,מיץ,ארגז,0,66', 'Y,מיץ ענבים,ארגז,0.0004,70', 'V,מיץ תפוזים,ארגז,6,80'].join('\n');
+    const res = await callerFor(A).catalog.commitImport({
+      supplierId: A.supplierId,
+      file: { filename: 'pack.csv', text: packText },
+      mapping: { sku: 'sku', name: 'name', unit: 'unit', packSize: 'pack', price: 'price' },
+      vatBasis: 'ex',
+    });
+    expect(res.rowCount).toBe(3);
+    const items = await db
+      .select({ sku: supplierCatalogItems.supplierSku, packSize: supplierCatalogItems.packSize, listPrice: supplierCatalogItems.listPrice })
+      .from(supplierCatalogItems)
+      .where(eq(supplierCatalogItems.restaurantId, A.restaurantId));
+    const by = new Map(items.map((i) => [i.sku, i]));
+    expect(by.get('Z')).toMatchObject({ packSize: null, listPrice: '66.0000' });
+    expect(by.get('Y')).toMatchObject({ packSize: null, listPrice: '70.0000' });
+    expect(by.get('V')).toMatchObject({ packSize: '6.000', listPrice: '80.0000' });
+  });
+
+  it('parsePackSize: zero after rounding to 3 dp is null; a real pack is kept', () => {
+    expect(parsePackSize('0')).toBeNull();
+    expect(parsePackSize('0.0004')).toBeNull();
+    expect(parsePackSize('0.0005')).toBe(0.0005);
+    expect(parsePackSize('-3')).toBeNull();
+    expect(parsePackSize('abc')).toBeNull();
+    expect(parsePackSize(null)).toBeNull();
+    expect(parsePackSize('12')).toBe(12);
   });
 });
 
