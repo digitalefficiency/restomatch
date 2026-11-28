@@ -642,7 +642,7 @@ describe('G-04: only closed receipts are delivery notes (pending note → "not r
     expect(p.totals.leakIls).toBe(0);
     expect(p.pendingNotes).toEqual([{ number: '9002', billedIls: 30 }]);
     expect(p.findings.filter((f) => f.notReceivedYet).every((f) => f.deliveryNoteNumber === '9002' && !f.countsAsLeak)).toBe(true);
-    expect(p.status).toBe('matched');
+    expect(p.status).toBe('pending'); // Q6 (owner 11.11 (ב)): neutral "ממתינה" while the note is counted, never "תואמת"
   });
   it('without the pending mark (a note no receipt will ever carry) the same line stays a claimable finding', () => {
     const delivered = invLine(CHALLAH, 10, 5);
@@ -661,5 +661,68 @@ describe('G-04: only closed receipts are delivery notes (pending note → "not r
     });
     expect(p.claim.exclIls).toBeGreaterThan(0);
     expect(p.pendingNotes).toEqual([]);
+  });
+});
+
+describe('G-04 Q6 (owner 11.11 (ב)): a ריכוז with a note still being counted is neutral "pending", never "matched"', () => {
+  const common = {
+    invoiceId: 'inv-1',
+    supplierId: 's',
+    periodStart: new Date('2026-09-27T21:00:00Z'),
+    periodEnd: new Date('2026-11-02T22:00:00Z'),
+  };
+  it('the same ריכוז reads "matched" once nothing is being counted', () => {
+    const delivered = invLine(CHALLAH, 10, 5);
+    const p = buildConsolidatedProposal({
+      ...common,
+      base: base([delivered]),
+      notes: [note('gr-1', 5, [noteLine(CHALLAH, 10, 5)], '9001')],
+      invoiceLineNotes: new Map([[delivered.id, '9001']]),
+    });
+    expect(p.status).toBe('matched');
+  });
+  it('every listed note still being counted (no closed one yet) is "pending", not "no delivery notes"', () => {
+    const notYet = invLine(CHALLAH, 6, 5);
+    const p = buildConsolidatedProposal({
+      ...common,
+      base: base([notYet]),
+      notes: [],
+      invoiceLineNotes: new Map([[notYet.id, '9002']]),
+      pendingNoteNumbers: new Set(['9002']),
+    });
+    expect(p.pendingNotes).toEqual([{ number: '9002', billedIls: 30 }]);
+    expect(p.claim).toEqual({ exclIls: 0, inclIls: 0 });
+    expect(p.status).toBe('pending');
+  });
+  it('a real difference still wins over a note being counted: "differences", with its claim', () => {
+    const overpriced = invLine(CHALLAH, 10, 6); // billed ₪6, the note's PO price is ₪5
+    const notYet = invLine(CHALLAH, 6, 5);
+    const p = buildConsolidatedProposal({
+      ...common,
+      base: base([overpriced, notYet]),
+      notes: [note('gr-1', 5, [noteLine(CHALLAH, 10, 5)], '9001')],
+      invoiceLineNotes: new Map([
+        [overpriced.id, '9001'],
+        [notYet.id, '9002'],
+      ]),
+      pendingNoteNumbers: new Set(['9002']),
+    });
+    expect(p.claim.exclIls).toBeGreaterThan(0);
+    expect(p.pendingNotes).toEqual([{ number: '9002', billedIls: 30 }]);
+    expect(p.status).toBe('differences');
+  });
+  it('a note not in the system still blocks: "differences", even with another note being counted', () => {
+    const delivered = invLine(CHALLAH, 10, 5);
+    const notYet = invLine(CHALLAH, 6, 5);
+    const p = buildConsolidatedProposal({
+      ...common,
+      base: base([delivered, notYet]),
+      notes: [note('gr-1', 5, [noteLine(CHALLAH, 10, 5)], '9001')],
+      invoiceLineNotes: new Map([[delivered.id, '9001'], [notYet.id, '9002']]),
+      pendingNoteNumbers: new Set(['9002']),
+      missingNoteNumbers: new Set(['7822']),
+    });
+    expect(p.reviewItems?.some((r) => r.flag === 'note_not_in_system' && r.blocksMatched)).toBe(true);
+    expect(p.status).toBe('differences');
   });
 });

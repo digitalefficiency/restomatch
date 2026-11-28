@@ -1,0 +1,55 @@
+{
+  "caseId": "WA-G-CHEF-02",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "order.edit",
+      "toolCalls": [
+        {
+          "name": "orders.captureFromText",
+          "args": {
+            "text": "עגבניות 50, בלי פטרוזיליה",
+            "supplierId": "sup-veg"
+          },
+          "result": {
+            "edits": [
+              {
+                "product": "עגבניות שרי",
+                "qty": 50
+              },
+              {
+                "product": "פטרוזיליה",
+                "qty": 0
+              }
+            ],
+            "estimatedTotalIls": 2233
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "עודכן בטיוטה (עוד לא נשלחה):\n• עגבניות שרי 50 ק״ג\n• פטרוזיליה הוסרה\nסה״כ משוער 2,233 ₪",
+          "buttons": [
+            {
+              "id": "b:14",
+              "title": "צור טיוטה"
+            },
+            {
+              "id": "b:15",
+              "title": "שנה כמויות"
+            },
+            {
+              "id": "b:16",
+              "title": "ביטול"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {}
+}

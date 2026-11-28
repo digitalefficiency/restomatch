@@ -1,0 +1,69 @@
+{
+  "caseId": "WA-G-OWNER-08",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "leak.bySupplier",
+      "toolCalls": [
+        {
+          "name": "suppliers.resolve",
+          "args": {
+            "query": "קצביית הכרם"
+          },
+          "result": {
+            "matches": [
+              {
+                "supplierId": "sup-meat",
+                "name": "קצביית הכרם"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner.leakGrouped",
+          "args": {
+            "supplierId": "sup-meat",
+            "month": "2026-10"
+          },
+          "result": {
+            "supplier": "קצביית הכרם",
+            "month": "2026-10",
+            "leakIls": 1240,
+            "lineCount": 9,
+            "top": {
+              "product": "חזה עוף",
+              "invoices": 3,
+              "leakIls": 610
+            },
+            "claimableIls": 860,
+            "inClaimIls": 380
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "קצביית הכרם, אוקטובר עד היום: דליפה של 1,240 ₪ ב-9 שורות.\nהגדול ביותר: חזה עוף, 3 חשבוניות מעל המחיר המוסכם (610 ₪).\nמתוך זה 860 ₪ אפשר לבקש זיכוי, ו-380 ₪ כבר בבקשת זיכוי.",
+          "buttons": [
+            {
+              "id": "b:2",
+              "title": "להכין בקשת זיכוי"
+            },
+            {
+              "id": "b:3",
+              "title": "פירוט לפי מוצר"
+            },
+            {
+              "id": "b:4",
+              "title": "חודש קודם"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {}
+}

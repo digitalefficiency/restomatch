@@ -1,5 +1,7 @@
 import { normalizeLinkName } from '@restomatch/catalog';
-import { priceUnitsTimesQtyToAgorot } from './rounding';
+import { unitConversionFactor } from '@restomatch/matching';
+import { sameUnit } from '../lib/unitPrice';
+import { divRoundHalfAway, priceUnitsTimesQtyToAgorot, qtyToMilli } from './rounding';
 
 /**
  * W3-10 · "מה ישתנה" — the preview step of one "ייבוא מחירון", computed before
@@ -20,6 +22,9 @@ export interface CurrentCatalogRow {
   /** Quantity bought in the last 30 days, in this row's unit (0 when unknown). */
   monthlyQty: number;
   active: boolean;
+  /** The row's unit and pack (numeric(12,3) string; null = a pack of 1) — the basis its price is in. */
+  unit?: string | null;
+  packSize?: string | null;
 }
 
 export interface IncomingCatalogRow {
@@ -29,10 +34,20 @@ export interface IncomingCatalogRow {
   name: string;
   /** Parsed price in price units; null when the cell could not be read unambiguously. */
   priceUnits: number | null;
+  /**
+   * The current row the commit will write (W3-10 revert merge): when given, it
+   * replaces the diff's own matching, so the preview and the commit agree row
+   * for row. null = the commit creates a new row. Omitted = match here.
+   */
+  matchId?: string | null;
+  /** The unit / pack the commit will store (storedBasis). Omitted = the current row's basis. */
+  unit?: string | null;
+  packSize?: string | null;
 }
 
 export type DiffKind = 'up' | 'down' | 'same' | 'new' | 'unclear' | 'missing';
-export type UnclearReason = 'NO_PRICE' | 'DUPLICATE_IN_FILE' | 'NO_NAME';
+/** BASIS_NOT_COMPARABLE: the unit / pack changes to one the old price cannot be restated in (a case → kg). */
+export type UnclearReason = 'NO_PRICE' | 'DUPLICATE_IN_FILE' | 'NO_NAME' | 'BASIS_NOT_COMPARABLE';
 
 export interface DiffLine {
   kind: DiffKind;
@@ -43,8 +58,10 @@ export interface DiffLine {
   name: string;
   beforeUnits: number | null;
   afterUnits: number | null;
-  /** after − before, price units; null unless both sides have a price. */
+  /** after − before, price units (on the new basis when it changes); null unless both sides have a price. */
   deltaUnits: number | null;
+  /** The unit / pack changes: before is restated on the new basis for the delta and the ₪/month. */
+  basisChanged?: boolean;
   /** Signed ₪/month in agorot (+ = we pay more); 0 when no quantity history. */
   monthlyImpactAgorot: number;
   unclearReason?: UnclearReason;
@@ -77,6 +94,7 @@ function skuKey(sku: string | null): string | null {
 export function buildImportDiff(current: CurrentCatalogRow[], incoming: IncomingCatalogRow[]): ImportDiff {
   const bySku = new Map<string, CurrentCatalogRow>();
   const byName = new Map<string, CurrentCatalogRow>();
+  const byId = new Map(current.map((c) => [c.id, c]));
   for (const c of current) {
     const k = skuKey(c.supplierSku);
     if (k && !bySku.has(k)) bySku.set(k, c);
@@ -90,7 +108,7 @@ export function buildImportDiff(current: CurrentCatalogRow[], incoming: Incoming
 
   for (const row of incoming) {
     const nk = normalizeLinkName(row.name);
-    const key = skuKey(row.supplierSku) ?? (nk ? `name:${nk}` : null);
+    const key = row.matchId ? `id:${row.matchId}` : (skuKey(row.supplierSku) ?? (nk ? `name:${nk}` : null));
     const base = {
       rowNumber: row.rowNumber,
       supplierSku: row.supplierSku,
@@ -102,7 +120,10 @@ export function buildImportDiff(current: CurrentCatalogRow[], incoming: Incoming
       lines.push({ ...base, kind: 'unclear', currentId: null, beforeUnits: null, deltaUnits: null, unclearReason: 'NO_NAME' });
       continue;
     }
-    const match = (row.supplierSku ? bySku.get(key) : undefined) ?? (nk ? byName.get(nk) : undefined);
+    const match =
+      row.matchId !== undefined
+        ? (row.matchId ? byId.get(row.matchId) : undefined)
+        : ((row.supplierSku ? bySku.get(key) : undefined) ?? (nk ? byName.get(nk) : undefined));
     if (seenKeys.has(key)) {
       lines.push({
         ...base,
@@ -134,6 +155,36 @@ export function buildImportDiff(current: CurrentCatalogRow[], incoming: Incoming
     }
     if (match.priceUnits == null) {
       lines.push({ ...base, kind: 'new', currentId: match.id, beforeUnits: null, deltaUnits: null });
+      continue;
+    }
+    const basis = basisChange(match, row);
+    if (basis === 'NOT_COMPARABLE') {
+      lines.push({
+        ...base,
+        kind: 'unclear',
+        currentId: match.id,
+        beforeUnits: match.priceUnits,
+        deltaUnits: null,
+        basisChanged: true,
+        unclearReason: 'BASIS_NOT_COMPARABLE',
+      });
+      continue;
+    }
+    if (basis) {
+      // On the new basis: the same physical quantity, priced before and after.
+      const { a0, a1 } = basis;
+      const num = BigInt(row.priceUnits) * a0 - BigInt(match.priceUnits) * a1;
+      const restatedDelta = Number(divRoundHalfAway(num, a0));
+      const impact = Number(divRoundHalfAway(num * qtyToMilli(Math.max(0, match.monthlyQty)), a1 * 1000n * 100n));
+      lines.push({
+        ...base,
+        kind: restatedDelta > 0 ? 'up' : restatedDelta < 0 ? 'down' : 'same',
+        currentId: match.id,
+        beforeUnits: match.priceUnits,
+        deltaUnits: restatedDelta,
+        basisChanged: true,
+        monthlyImpactAgorot: impact,
+      });
       continue;
     }
     const delta = row.priceUnits - match.priceUnits;
@@ -180,4 +231,32 @@ export function buildImportDiff(current: CurrentCatalogRow[], incoming: Incoming
     else downAgorot -= l.monthlyImpactAgorot;
   }
   return { lines, counts, upAgorot, downAgorot, netAgorot: upAgorot - downAgorot };
+}
+
+/** A pack (numeric string, null = 1) in thousandths. */
+const packMilli = (p: string | null | undefined): bigint => (p == null ? 1000n : BigInt(Math.round(Number(p) * 1000)));
+
+/**
+ * Does the row's basis change, and how do the two priced units compare? null:
+ * the same basis. Otherwise a0 / a1 are the physical amount in one old / new
+ * priced unit, in one common scale (pack × unit factor, both in thousandths),
+ * so `qty_new = qty_old × a0 / a1` and `price_old_on_new = price_old × a1 / a0`.
+ * NOT_COMPARABLE: no restatement exists (unknown units, a case → kg).
+ */
+function basisChange(cur: CurrentCatalogRow, row: IncomingCatalogRow): { a0: bigint; a1: bigint } | null | 'NOT_COMPARABLE' {
+  if (row.unit === undefined && row.packSize === undefined) return null;
+  const u0 = cur.unit ?? null;
+  const u1 = row.unit === undefined ? u0 : row.unit;
+  const k0 = packMilli(cur.packSize);
+  const k1 = packMilli(row.packSize === undefined ? cur.packSize : row.packSize);
+  let f0: bigint;
+  if (u0 == null || u1 == null ? u0 === u1 : sameUnit(u0, u1)) {
+    if (k0 === k1) return null;
+    f0 = 1000n;
+  } else {
+    const f = u0 && u1 ? unitConversionFactor(u0, u1) : null; // qty_u1 = qty_u0 × f
+    if (f == null) return 'NOT_COMPARABLE';
+    f0 = BigInt(Math.round(f * 1000));
+  }
+  return { a0: k0 * f0, a1: k1 * 1000n };
 }

@@ -16,7 +16,7 @@ import { enqueueNotification } from '../notifications/outbox';
 import { MANAGER_ROLES, recipientsForRestaurant } from '../notifications/recipients';
 import { renderEmail, ilsSpan, type RenderedEmail } from '../notifications/templates';
 import type { ReportLocale } from '../reports/money';
-import { chaseMoney, ddMM } from './chase';
+import { chaseMoney, ddMM, validEmail, waPhoneE164 } from './chase';
 import { creditSuggestions } from './creditSuggest';
 import { CHASE_DEFAULTS, awaitingChaseSql, chaseKindOf, rechaseDueSql, type ChaseKind, type ChaseOptions } from './overdue';
 import { OVERDUE_DAYS, syncClaims } from './service';
@@ -38,7 +38,7 @@ export interface OverdueSupplier {
   supplierId: string | null;
   supplierName: string;
   supplierNameEn: string | null;
-  /** How the supplier's waiting claims are shown (unsent letter / no reply / acknowledged). */
+  /** How the supplier's waiting claims are shown (no reply / acknowledged). Unsent letters are never chased. */
   kind: ChaseKind;
   count: number;
   outstandingAgorot: number;
@@ -117,7 +117,17 @@ export async function findOverdue(
   };
 }
 
-const KIND_ORDER: ChaseKind[] = ['no_reply', 'acknowledged', 'unsent'];
+const KIND_ORDER: ChaseKind[] = ['no_reply', 'acknowledged'];
+
+/**
+ * Desk landing links (train-C gate 11.11: "recovery digest links land on the
+ * right desk row"). The recovery desk opens the supplier reminder drafts only
+ * on ?tab=track&remind=1 (owner decision 16) and anchors them at
+ * #reminder-drafts; the credit lines waiting for a human confirm sit in the
+ * desk card anchored at #credit-suggestions (W3-11 "שיוך זיכוי").
+ */
+export const DESK_REMINDERS_PATH = '/dashboard/recovery?tab=track&remind=1#reminder-drafts';
+export const DESK_CREDIT_SUGGESTIONS_PATH = '/dashboard/recovery?tab=track#credit-suggestions';
 
 export function recoveryReminderEmail(args: {
   suppliers: OverdueSupplier[];
@@ -148,23 +158,14 @@ export function recoveryReminderEmail(args: {
     ? `Credit requests waiting ${OVERDUE_DAYS}+ days · ${supplierCount} ${supplierCount === 1 ? 'supplier' : 'suppliers'} · ${ils(total)}`
     : `בקשות זיכוי שממתינות ${OVERDUE_DAYS}+ ימים · ${supplierCount === 1 ? 'ספק אחד' : `${supplierCount} ספקים`} · ${ils(total)}`;
   const heading: Record<ChaseKind, string> = en
-    ? { no_reply: `No reply for ${OVERDUE_DAYS}+ days`, acknowledged: 'Supplier agreed · credit invoice not received yet', unsent: 'Letter not sent yet' }
-    : { no_reply: `אין תשובה ${OVERDUE_DAYS}+ ימים`, acknowledged: 'הספק אישר · ממתינים לחשבונית זיכוי', unsent: 'טרם נשלח מכתב' };
+    ? { no_reply: `No reply for ${OVERDUE_DAYS}+ days`, acknowledged: 'Supplier agreed · credit invoice not received yet' }
+    : { no_reply: `אין תשובה ${OVERDUE_DAYS}+ ימים`, acknowledged: 'הספק אישר · ממתינים לחשבונית זיכוי' };
   const lineOf = (s: OverdueSupplier): { text: string; href: string | null; cta: string } => {
     const n = en ? `${s.count} ${s.count === 1 ? 'request' : 'requests'}` : s.count === 1 ? 'בקשה אחת' : `${s.count} בקשות`;
-    const when =
-      s.kind === 'unsent'
-        ? en ? 'letter not sent yet' : 'טרם נשלח מכתב'
-        : s.latestLetterAt
-          ? en ? `letter sent ${ddMM(s.latestLetterAt)}` : `מכתב נשלח ${ddMM(s.latestLetterAt)}`
-          : '';
+    const when = s.latestLetterAt ? (en ? `letter sent ${ddMM(s.latestLetterAt)}` : `מכתב נשלח ${ddMM(s.latestLetterAt)}`) : '';
     const text = [name(s), n, ils(s.outstandingAgorot), when].filter(Boolean).join(' · ');
-    const sid = s.supplierId ? `?s=${s.supplierId}` : '';
-    const href =
-      s.kind === 'unsent'
-        ? go(`/dashboard/leaks/claims${sid}`)
-        : go(`/dashboard/recovery${sid}${sid ? '&' : '?'}draft=1`);
-    const cta = s.kind === 'unsent' ? (en ? 'Send the letter' : 'שליחת המכתב') : en ? 'Prepare a reminder' : 'הכנת תזכורת';
+    const href = go(DESK_REMINDERS_PATH);
+    const cta = en ? 'Prepare a reminder' : 'הכנת תזכורת';
     return { text, href, cta };
   };
   const sections = KIND_ORDER.map((k) => ({ k, rows: args.suppliers.filter((s) => s.kind === k) })).filter((x) => x.rows.length);
@@ -188,7 +189,7 @@ export function recoveryReminderEmail(args: {
       ? `Credits waiting for your confirmation: ${cs.count} · ${ils(cs.agorot)}`
       : `זיכויים שמחכים לאישור: ${cs.count} · ${ils(cs.agorot)}`
     : null;
-  const csHref = cs ? go('/dashboard/recovery?credit=1') : null;
+  const csHref = cs ? go(DESK_CREDIT_SUGGESTIONS_PATH) : null;
   const html = renderEmail({
     locale,
     accent: '#b45309',
@@ -320,11 +321,17 @@ export interface SupplierReminderDraft {
 /**
  * Owner decision 16: an overdue reminder to a SUPPLIER is a per-supplier DRAFT
  * that the web opens in wa.me / mailto only on a click. This only reads:
- * nothing is queued, sent or stamped. The overdue rule is findOverdue's exactly
- * (overdueSql: more than OVERDUE_DAYS calendar days in the restaurant's zone
- * since the letter, or the claim; never a never-claimable type), so a draft
- * never chases a claim the reminder job would not — only the re-chase cadence
- * (last_reminder_at) is the job's own. A foreign or unknown supplier is NOT_FOUND.
+ * nothing is queued, sent or stamped. A foreign or unknown supplier is NOT_FOUND.
+ *
+ * AU-03 (train-C gate 11.11): the claims are exactly the ONE chase predicate
+ * the 08:30 digest uses (recovery/overdue.ts awaitingChaseSql): a sent letter
+ * past the answer window in whole restaurant-calendar days, ₪ still owed,
+ * never a never-claimable type — and never an UNSENT letter (`claimed`).
+ * `acknowledged` claims count only while the restaurant's `chaseAcknowledged`
+ * option is on. The hand-off contacts are pre-addressed: the WhatsApp number
+ * as E.164 digits (972…; null when it cannot be a phone) and a plausible
+ * e-mail (null otherwise), so the wa.me link never goes to the share picker
+ * with a local 05x number.
  */
 export async function supplierReminderDraft(
   db: Database,
@@ -337,19 +344,18 @@ export async function supplierReminderDraft(
     .from(suppliers)
     .where(and(eq(suppliers.id, supplierId), eq(suppliers.restaurantId, restaurantId)));
   if (!s) throw new TRPCError({ code: 'NOT_FOUND', message: 'supplier not found' });
+  const [r] = await db.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, restaurantId));
+  const options = chaseOptionsFor(r?.settings);
   const res = await db.execute(sql`
     SELECT c.id, GREATEST(0, c.amount_agorot - c.credited_agorot) AS outstanding,
            COALESCE(c.letter_sent_at, c.claimed_at) AS sent_at,
-           -- Whole calendar days in the restaurant's zone — findOverdue's basis, never 24h blocks.
            ((${now.toISOString()}::timestamptz AT TIME ZONE tz.tz)::date
              - (COALESCE(c.letter_sent_at, c.claimed_at) AT TIME ZONE tz.tz)::date)::int AS waiting
     FROM recovery_claims c
     CROSS JOIN (SELECT COALESCE(timezone, 'Asia/Jerusalem') AS tz FROM restaurants WHERE id = ${restaurantId}) tz
     JOIN discrepancies d ON d.id = c.discrepancy_id AND d.restaurant_id = ${restaurantId}
     WHERE c.restaurant_id = ${restaurantId} AND c.supplier_id = ${supplierId}
-      -- The ONE chase predicate (recovery/overdue.ts) findOverdue uses: awaiting statuses, ₪ still
-      -- owed, never a never-claimable type, more than CLAIM_ANSWER_DAYS calendar days in the zone.
-      AND ${awaitingChaseSql(now, sql`tz.tz`)}
+      AND ${awaitingChaseSql(now, sql`tz.tz`, { chaseAcknowledged: options.chaseAcknowledged })}
     ORDER BY waiting DESC, c.id
   `);
   const rows = (Array.isArray(res) ? res : ((res as { rows?: unknown[] }).rows ?? [])) as Array<Record<string, unknown>>;
@@ -357,8 +363,8 @@ export async function supplierReminderDraft(
     supplierId: s.id,
     supplierName: s.name,
     supplierNameEn: s.nameEn ?? null,
-    whatsapp: s.whatsapp?.trim() || null,
-    email: s.email?.trim() || null,
+    whatsapp: waPhoneE164(s.whatsapp),
+    email: validEmail(s.email),
     count: rows.length,
     outstandingAgorot: rows.reduce((a, r) => a + Number(r.outstanding), 0),
     oldestDays: rows.length ? Number(rows[0]!.waiting) : 0,

@@ -1,0 +1,100 @@
+{
+  "caseId": "WA-G-RECEIVER-05",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "receiving.count",
+      "toolCalls": [
+        {
+          "name": "receiving.startReceipt",
+          "args": {
+            "orderId": "po-1043",
+            "scanId": "scan-1"
+          },
+          "result": {
+            "receiptId": "gr-1",
+            "line": {
+              "receiptId": "gr-1",
+              "lineNo": 1,
+              "of": 9,
+              "product": "עגבניות שרי",
+              "orderedQty": 40,
+              "unit": "ק״ג"
+            }
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "1/9 · עגבניות שרי · הוזמנו 40 ק״ג",
+          "buttons": [
+            {
+              "id": "gr:all:1",
+              "title": "הגיע הכל"
+            },
+            {
+              "id": "gr:diff:1",
+              "title": "חסר / שונה"
+            },
+            {
+              "id": "gr:skip:1",
+              "title": "דלג"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "intent": null,
+      "toolCalls": [
+        {
+          "name": "receiving.markGrLine",
+          "args": {
+            "receiptId": "gr-1",
+            "lineNo": 1,
+            "receivedQty": 40
+          },
+          "result": {
+            "ok": true,
+            "next": {
+              "receiptId": "gr-1",
+              "lineNo": 2,
+              "of": 9,
+              "product": "מלפפונים",
+              "orderedQty": 25,
+              "unit": "ק״ג"
+            }
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "2/9 · מלפפונים · הוזמנו 25 ק״ג",
+          "buttons": [
+            {
+              "id": "gr:all:2",
+              "title": "הגיע הכל"
+            },
+            {
+              "id": "gr:diff:2",
+              "title": "חסר / שונה"
+            },
+            {
+              "id": "gr:skip:2",
+              "title": "דלג"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "grLinesMarked": 1
+  }
+}

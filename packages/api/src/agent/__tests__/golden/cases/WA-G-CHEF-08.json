@@ -1,0 +1,41 @@
+{
+  "id": "WA-G-CHEF-08",
+  "role": "chef",
+  "adversarial": false,
+  "flow": "C3",
+  "title": "Recipe cost is not chef-visible in WhatsApp yet → web hand-off",
+  "neverList": [],
+  "ownerRules": [
+    "chef-ils-orders-only"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "כמה עולה מנת שניצל?"
+    }
+  ],
+  "expect": {
+    "intent": "recipe.cost",
+    "tools": [],
+    "forbiddenFields": [
+      "leak|claim|decision|discrepanc"
+    ],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "cta": "עלות מנה",
+    "refusal": "web.only",
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {}
+  }
+}

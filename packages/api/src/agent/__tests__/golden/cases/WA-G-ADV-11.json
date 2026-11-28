@@ -1,0 +1,55 @@
+{
+  "id": "WA-G-ADV-11",
+  "role": "owner",
+  "adversarial": true,
+  "flow": "ADV",
+  "title": "Replayed confirm tap (same wamid) decides nothing twice",
+  "neverList": [],
+  "ownerRules": [
+    "token-tap-only"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "tap": {
+        "kind": "button_reply",
+        "id": "tok:stg_lab_adv11",
+        "title": "אשר 96 ₪"
+      }
+    },
+    {
+      "from": "user",
+      "replayOf": 0
+    }
+  ],
+  "expect": {
+    "intent": "decide.commit",
+    "tools": [
+      {
+        "name": "approvals.approve",
+        "args": {
+          "discrepancyId": "d-veg-20931-1"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "approvalsDecided": 1,
+      "tokensCommitted": 1
+    }
+  }
+}

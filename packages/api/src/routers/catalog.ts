@@ -35,6 +35,9 @@ import {
 import { commitCatalogRows, lockSupplierCatalog, samePack, sameUnitOrBlank, storedBasis } from '../catalog/commit';
 import { revertCatalogImport } from '../catalog/revert';
 import { anyOpenImport, expireStaleImports, importActiveSql } from '../catalog/importLifecycle';
+import { buildImportDiff } from '../catalog/importDiff';
+import { loadCurrentForDiff } from '../catalog/importDiffLoad';
+import { toPriceUnits } from '../lib/parseMoneyCell';
 import { catalogUnitPrice, cheapestComparable } from '../lib/unitPrice';
 
 /**
@@ -136,6 +139,7 @@ function priceFlag(price: number | null, current: number | null): PriceFlag | nu
 async function currentPrices(db: Database, restaurantId: string, supplierId: string) {
   const items = await db
     .select({
+      id: supplierCatalogItems.id,
       supplierSku: supplierCatalogItems.supplierSku,
       supplierNameRaw: supplierCatalogItems.supplierNameRaw,
       listPrice: supplierCatalogItems.listPrice,
@@ -145,11 +149,16 @@ async function currentPrices(db: Database, restaurantId: string, supplierId: str
     .from(supplierCatalogItems)
     .where(and(eq(supplierCatalogItems.restaurantId, restaurantId), eq(supplierCatalogItems.supplierId, supplierId)))
     .orderBy(asc(supplierCatalogItems.createdAt), asc(supplierCatalogItems.id));
-  type Current = { price: number | null; unit: string | null; packSize: string | null };
+  type Current = { id: string; price: number | null; unit: string | null; packSize: string | null };
   const bySku = new Map<string, Current>();
   const byName = new Map<string, Current>();
   for (const it of items) {
-    const v: Current = { price: it.listPrice == null ? null : Number(it.listPrice), unit: it.unit, packSize: it.packSize };
+    const v: Current = {
+      id: it.id,
+      price: it.listPrice == null ? null : Number(it.listPrice),
+      unit: it.unit,
+      packSize: it.packSize,
+    };
     if (it.supplierSku) {
       if (!bySku.has(it.supplierSku)) bySku.set(it.supplierSku, v);
     } else {
@@ -387,6 +396,28 @@ export const catalogRouter = router({
       // listed twice in one file is judged here against today's row each time,
       // while the commit applies the rows in order.
       const basisChangedCount = priced.filter((r) => r.basis?.change === 'changed').length;
+      // W3-10 · "מה ישתנה": ↑/↓ with ₪/month (integer agorot), rows the file
+      // drops (to disable, never automatic) and unclear rows, before any write.
+      // On the basis the import will write (revert merge): each row against the
+      // very row the commit writes, a blank price cell at the price it keeps
+      // (no ↑/↓, ₪0), and the unit / pack the commit stores — a basis change is
+      // priced on the new basis, or held as unclear when it cannot be restated.
+      const diff = buildImportDiff(await loadCurrentForDiff(ctx.db, restaurantId, input.supplierId), [
+        ...analysis.rows.map((r) => {
+          const row = current(r.supplierSku, r.supplierNameRaw);
+          const basis = row ? storedBasis(row, { unit: r.unit, packSize: r.packSize, listPrice: r.listPrice }, columns) : null;
+          const keptPrice = r.listPrice == null && row?.price != null ? row.price : null;
+          return {
+            rowNumber: r.rowNumber,
+            supplierSku: r.supplierSku,
+            name: r.supplierNameRaw,
+            priceUnits: r.listPrice != null ? toPriceUnits(r.listPrice) : keptPrice != null ? toPriceUnits(keptPrice) : null,
+            matchId: row ? row.id : null,
+            ...(basis ? { unit: basis.unit, packSize: basis.packSize } : {}),
+          };
+        }),
+        ...analysis.held.map((h) => ({ rowNumber: h.rowNumber, supplierSku: h.supplierSku, name: h.supplierNameRaw, priceUnits: null })),
+      ]);
       return {
         headers: table.headers,
         sample: table.rows.slice(0, 20),
@@ -403,6 +434,13 @@ export const catalogRouter = router({
           flagged: flagged.slice(0, LIST_CAP),
           flaggedCount: flagged.length,
           basisChangedCount,
+        },
+        diff: {
+          counts: diff.counts,
+          upAgorot: diff.upAgorot,
+          downAgorot: diff.downAgorot,
+          netAgorot: diff.netAgorot,
+          lines: diff.lines.filter((l) => l.kind !== 'same').slice(0, LIST_CAP),
         },
       };
     }),

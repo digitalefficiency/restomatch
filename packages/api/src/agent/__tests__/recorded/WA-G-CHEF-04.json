@@ -1,0 +1,114 @@
+{
+  "caseId": "WA-G-CHEF-04",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "order.repeat",
+      "toolCalls": [
+        {
+          "name": "suppliers.resolve",
+          "args": {
+            "query": "מאפיית ברנר"
+          },
+          "result": {
+            "matches": [
+              {
+                "supplierId": "sup-bakery",
+                "name": "מאפיית ברנר"
+              }
+            ]
+          }
+        },
+        {
+          "name": "orders.list",
+          "args": {
+            "supplierId": "sup-bakery",
+            "last": 1
+          },
+          "result": {
+            "orders": [
+              {
+                "orderId": "po-1036",
+                "date": "2026-10-22"
+              }
+            ]
+          }
+        },
+        {
+          "name": "orders.previewRepeat",
+          "args": {
+            "fromOrderId": "po-1036"
+          },
+          "result": {
+            "fromOrderId": "po-1036",
+            "lines": [
+              {
+                "product": "לחמניות המבורגר",
+                "qty": 60,
+                "unit": "יח׳"
+              }
+            ],
+            "moreLines": 0,
+            "estimatedTotalIls": 144
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "טיוטה כמו ביום ה׳ 22.10 ממאפיית ברנר (עוד לא נשלחה):\n• לחמניות המבורגר 60 יח׳\nסה״כ משוער 144 ₪",
+          "buttons": [
+            {
+              "id": "b:17",
+              "title": "צור טיוטה"
+            },
+            {
+              "id": "b:18",
+              "title": "שנה כמויות"
+            },
+            {
+              "id": "b:19",
+              "title": "ביטול"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "intent": null,
+      "toolCalls": [
+        {
+          "name": "orders.createDraft",
+          "args": {
+            "supplierId": "sup-bakery",
+            "fromOrderId": "po-1036"
+          },
+          "result": {
+            "orderId": "po-1044",
+            "number": "1044",
+            "status": "draft",
+            "supplierHasWhatsapp": false
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "cta",
+          "text": "הטיוטה נשמרה (הזמנה 1044). למאפיית ברנר אין מספר וואטסאפ שמור, אז אפשר לשלוח מהאפליקציה או להתקשר.",
+          "cta": {
+            "title": "פתח טיוטה",
+            "url": "https://app.restomatch.test/dashboard/go?r=lab&to=orders/po-1044"
+          }
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "draftsCreated": 1,
+    "supplierOutboundRows": 0
+  }
+}

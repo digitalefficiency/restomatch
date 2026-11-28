@@ -1,3 +1,4 @@
+import { routeAccess } from '@/lib/roleLens';
 import { notFound } from 'next/navigation';
 import { auth } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
@@ -38,7 +39,7 @@ export default async function RecipesPage() {
           <PeriodCard compact />
         </div>
       ) : null}
-      <RecipesHome initial={initial} canSetTarget={canSetTarget} readOnly={active?.role === 'bookkeeper'} />
+      <RecipesHome initial={initial} canSetTarget={canSetTarget} readOnly={!!active && routeAccess(active.role, '/dashboard/recipes') === 'read'} />
     </div>
   );
 }

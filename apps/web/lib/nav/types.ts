@@ -40,7 +40,7 @@ export type BarSlot = 1 | 2 | 3 | 4;
  * every screen. Money queues carry ₪ (+ a block flag); capture queues carry a
  * count only. `priceAlerts` is neutral below W2-12's materiality.
  */
-export const BADGE_KEYS = ['approvals', 'payRun', 'claims', 'receiving', 'count', 'intake', 'priceAlerts'] as const;
+export const BADGE_KEYS = ['approvals', 'payRun', 'claims', 'receiving', 'count', 'intake', 'priceAlerts', 'connections'] as const;
 export type BadgeKey = (typeof BADGE_KEYS)[number];
 
 export interface RouteDef {

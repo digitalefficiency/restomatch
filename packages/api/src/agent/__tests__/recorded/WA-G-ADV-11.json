@@ -1,0 +1,52 @@
+{
+  "caseId": "WA-G-ADV-11",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "decide.commit",
+      "toolCalls": [
+        {
+          "name": "approvals.approve",
+          "args": {
+            "discrepancyId": "d-veg-20931-1"
+          },
+          "result": {
+            "status": "accepted"
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "נרשם: 96 ₪ נוספו לבקשת הזיכוי מול ירקות השרון. אפשר לבטל עד 07:52.",
+          "buttons": [
+            {
+              "id": "undo:d-veg-20931-1",
+              "title": "בטל"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "intent": null,
+      "toolCalls": [],
+      "outbound": []
+    }
+  ],
+  "staged": [
+    {
+      "token": "stg_lab_adv11",
+      "amountAgorot": 9600,
+      "block": false,
+      "bulk": false,
+      "requiredRole": "owner"
+    }
+  ],
+  "state": {
+    "approvalsDecided": 1,
+    "tokensCommitted": 1
+  }
+}

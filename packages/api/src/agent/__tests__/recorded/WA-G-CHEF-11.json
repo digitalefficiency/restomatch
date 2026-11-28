@@ -1,0 +1,49 @@
+{
+  "caseId": "WA-G-CHEF-11",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "delivery.when",
+      "toolCalls": [
+        {
+          "name": "suppliers.resolve",
+          "args": {
+            "query": "הבשר"
+          },
+          "result": {
+            "matches": [
+              {
+                "supplierId": "sup-meat",
+                "name": "קצביית הכרם"
+              }
+            ]
+          }
+        },
+        {
+          "name": "receiving.todayExpectations",
+          "args": {
+            "supplierId": "sup-meat"
+          },
+          "result": {
+            "deliveries": [],
+            "next": {
+              "day": "ב׳",
+              "until": "09:30"
+            }
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "text",
+          "text": "היום לא צפוי משלוח מקצביית הכרם. המשלוח הבא: מחר, יום ב׳, עד 09:30.",
+          "buttons": []
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {}
+}

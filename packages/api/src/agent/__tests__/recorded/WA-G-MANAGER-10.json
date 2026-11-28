@@ -1,0 +1,36 @@
+{
+  "caseId": "WA-G-MANAGER-10",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "order.confirmLink",
+      "toolCalls": [
+        {
+          "name": "supplierConfirm.createLink",
+          "args": {
+            "orderId": "po-1043"
+          },
+          "result": {
+            "path": "/s/lab-token-1043"
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "cta",
+          "text": "קישור האישור להזמנה 1043 מוכן. הספק יוכל לאשר או לעדכן כמויות.",
+          "cta": {
+            "title": "שלח מהוואטסאפ שלי",
+            "url": "https://wa.me/972521110101?text=%D7%A9%D7%9C%D7%95%D7%9D%2C%20%D7%90%D7%A4%D7%A9%D7%A8%20%D7%9C%D7%90%D7%A9%D7%A8%20%D7%90%D7%AA%20%D7%94%D7%96%D7%9E%D7%A0%D7%94%201043%20%D7%9B%D7%90%D7%9F%3A%20https%3A%2F%2Fapp.restomatch.test%2Fs%2Flab-token-1043"
+          }
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "supplierOutboundRows": 0
+  }
+}

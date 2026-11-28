@@ -187,6 +187,22 @@ const ConfigInput = z.object({
   }),
 });
 
+/**
+ * W3-07a · "needs action" for a connection: a LIVE (non-sample), enabled
+ * procurement connection that has not synced for 48 h — the sync is stuck or the
+ * account's access expired. The only state today that asks the owner to act;
+ * "not connected" and sample data never count. Shared by the hub and the nav dot.
+ */
+export const STALE_SYNC_MS = 48 * 60 * 60 * 1000;
+
+export function isSyncStale(
+  conn: { connected: boolean; mode: 'sample' | 'live' | null; lastSyncAt: Date | null },
+  now: Date = new Date(),
+): boolean {
+  if (!conn.connected || conn.mode !== 'live') return false;
+  return conn.lastSyncAt === null || now.getTime() - conn.lastSyncAt.getTime() > STALE_SYNC_MS;
+}
+
 export const integrationsRouter = router({
   /** Whether the integrations area is on for the active restaurant (nav / page visibility). */
   status: memberProcedure.query(async ({ ctx }) => {
@@ -473,15 +489,21 @@ export const integrationsRouter = router({
       .from(procurementConnections)
       .where(eq(procurementConnections.restaurantId, ctx.session.restaurantId));
     const supported = new Set(listSupportedPlatforms());
+    const now = new Date();
     return PROCUREMENT_PLATFORMS.map((platform) => {
       const conn = rows.find((r) => r.platform === platform);
+      const connected = !!conn?.enabled;
+      const mode = conn ? (conn.vaultRef.startsWith('fixture:') ? ('sample' as const) : ('live' as const)) : null;
+      const lastSyncAt = conn?.lastSyncAt ?? null;
       return {
         platform,
         displayName: getAdapter(platform).displayName,
         adapter: supported.has(platform),
-        connected: !!conn?.enabled,
-        mode: conn ? (conn.vaultRef.startsWith('fixture:') ? ('sample' as const) : ('live' as const)) : null,
-        lastSyncAt: conn?.lastSyncAt ?? null,
+        connected,
+        mode,
+        lastSyncAt,
+        /** W3-07a: needs the owner's action (drives the hub's error chip and the nav dot). */
+        syncStale: isSyncStale({ connected, mode, lastSyncAt }, now),
       };
     });
   }),

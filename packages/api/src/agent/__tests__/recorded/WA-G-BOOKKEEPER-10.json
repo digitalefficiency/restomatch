@@ -1,0 +1,44 @@
+{
+  "caseId": "WA-G-BOOKKEEPER-10",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "claims.noReply",
+      "toolCalls": [
+        {
+          "name": "recovery.list",
+          "args": {
+            "overdueOnly": true
+          },
+          "result": {
+            "overdue": 1,
+            "claims": [
+              {
+                "claimId": "claim-meat-1",
+                "supplier": "קצביית הכרם",
+                "ageDays": 8,
+                "claimIls": 380
+              }
+            ]
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "בקשת זיכוי אחת בלי תשובה יותר מ-7 ימים: קצביית הכרם, 380 ₪, אין תשובה 8 ימים.",
+          "buttons": [
+            {
+              "id": "b:33",
+              "title": "פרטים"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {}
+}

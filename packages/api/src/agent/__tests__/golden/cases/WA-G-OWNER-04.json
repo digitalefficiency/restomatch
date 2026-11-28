@@ -1,0 +1,67 @@
+{
+  "id": "WA-G-OWNER-04",
+  "role": "owner",
+  "adversarial": false,
+  "flow": "O1",
+  "title": "Brief counts only claims older than 7 days (day 6, 7, 8 seeded)",
+  "neverList": [],
+  "ownerRules": [
+    "claim-overdue-7d",
+    "partner-wording"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {
+      "letterSentDaysAgo": [
+        6,
+        7,
+        8
+      ]
+    }
+  },
+  "turns": [
+    {
+      "from": "system",
+      "trigger": "rm_owner_brief",
+      "at": "07:30"
+    }
+  ],
+  "expect": {
+    "intent": "brief.owner",
+    "tools": [
+      {
+        "name": "owner.leakHero",
+        "args": {
+          "month": "2026-10"
+        }
+      },
+      {
+        "name": "approvals.queueSummary",
+        "args": {}
+      },
+      {
+        "name": "recovery.list",
+        "args": {
+          "overdueOnly": true
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [
+      "באיחור"
+    ],
+    "buttons": [],
+    "noButtons": [],
+    "template": "rm_owner_brief",
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "proactiveSent": 1
+    }
+  }
+}

@@ -19,6 +19,7 @@ import { leakWhyLabels } from '../why-labels';
 import { HubTabs } from '../hub-tabs';
 import { approvedNotClaimed, sumAgora } from '../claims/letters';
 import { ALL_CLAIMS } from '../../recovery/logic';
+import { SHOW_CAUGHT_BEFORE_PAYMENT } from '@/lib/caughtGate';
 
 /**
  * "How did we get to ₪X?" (flag `leakProof`): a print-friendly sheet that
@@ -247,11 +248,13 @@ export default async function LeakProofPage({
 
       {/* T3 — the good news, with the hero's own definitions. */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 [&>*]:min-w-0">
-        <Card padding="lg" data-testid="proof-caught">
-          <h2 className="text-sm font-bold text-ink">{t('caughtTitle')}</h2>
-          <p className="mt-1 text-2xl font-bold tabular-nums text-gold">{exact(hero.caughtBeforePaymentIls)}</p>
-          <p className="mt-1 text-xs text-muted">{t('caught', { amount: exact(hero.caughtBeforePaymentIls) })}</p>
-        </Card>
+        {SHOW_CAUGHT_BEFORE_PAYMENT ? (
+          <Card padding="lg" data-testid="proof-caught">
+            <h2 className="text-sm font-bold text-ink">{t('caughtTitle')}</h2>
+            <p className="mt-1 text-2xl font-bold tabular-nums text-gold">{exact(hero.caughtBeforePaymentIls)}</p>
+            <p className="mt-1 text-xs text-muted">{t('caught', { amount: exact(hero.caughtBeforePaymentIls) })}</p>
+          </Card>
+        ) : null}
         <Card padding="lg" data-testid="proof-recovered">
           <h2 className="text-sm font-bold text-ink">{t('recoveredTitle')}</h2>
           <p className="mt-1 text-2xl font-bold tabular-nums text-primary">{exact(hero.recoveredIls)}</p>
