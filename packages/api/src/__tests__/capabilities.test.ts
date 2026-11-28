@@ -44,6 +44,10 @@ const MEMBER_MUTATION_ALLOW: Record<string, string> = {
   'approvals.reopen': 'deciderProcedure + ensureCanAct (ACT_ON); W2-04',
   'approvals.decideMany': 'per-row assertCanAct (ACT_ON) for every item, all-or-nothing, server ₪ caps (bulkPolicy); W2-04',
   'approvals.reopenMany': 'per-row assertCanAct (ACT_ON) for every item, all-or-nothing; W2-04',
+  'push.subscribe': 'self-service (W3-03b): this browser’s push subscription, keyed to the session restaurant + user only; no ₪',
+  'push.unsubscribe': 'self-service (W3-03b): revokes the caller’s own subscription row only (session restaurant + user)',
+  'push.setPref': 'self-service (W3-03b): the caller’s own per-event switch; events outside the role → FORBIDDEN',
+  'push.test': 'self-service (W3-03b): reads no tenant data, sends nothing until H-05 (skipped_no_provider)',
 };
 
 describe('procedure walk', () => {

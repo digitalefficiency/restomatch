@@ -183,4 +183,71 @@ export const common: Shape<CommonReceiverSlice> = {
       failed: 'ป้อนด้วยเสียงไม่สำเร็จ พิมพ์แทนได้', // review
     },
   },
+  // W3-03b PWA (share, install, notifications) — machine translation, pending native review.
+  pwa: {
+    notify: {
+      title: 'การแจ้งเตือน', // review
+      subtitle: 'อะไรส่งถึงคุณ และส่งไปที่ไหน: โทรศัพท์ อีเมล หรือ WhatsApp', // review
+      unavailable: 'การแจ้งเตือนบนโทรศัพท์จะเปิดเร็ว ๆ นี้ ระหว่างนี้ข้อความจะส่งทางอีเมล', // review
+      deviceTitle: 'โทรศัพท์เครื่องนี้', // review
+      deviceOn: 'เปิดการแจ้งเตือนบนโทรศัพท์เครื่องนี้แล้ว', // review
+      deviceOff: 'ปิดการแจ้งเตือนบนโทรศัพท์เครื่องนี้อยู่', // review
+      enable: 'เปิดการแจ้งเตือนบนโทรศัพท์เครื่องนี้', // review
+      disable: 'ปิดการแจ้งเตือนบนโทรศัพท์เครื่องนี้', // review
+      noKey: 'ยังไม่ได้เชื่อมต่อผู้ให้บริการแจ้งเตือน ปุ่มจะใช้ได้เมื่อเชื่อมต่อเสร็จ', // review
+      denied: 'เบราว์เซอร์บล็อกการแจ้งเตือนของเว็บนี้ อนุญาตได้ในการตั้งค่าเบราว์เซอร์', // review
+      unsupported: 'เบราว์เซอร์นี้ไม่รองรับการแจ้งเตือนบนโทรศัพท์', // review
+      needsInstall: 'บน iPhone การแจ้งเตือนใช้ได้เฉพาะในแอปที่ติดตั้งแล้ว ติดตั้งจากเมนูแชร์', // review
+      failed: 'ไม่สำเร็จ ลองอีกครั้ง', // review
+      enabled: 'เปิดการแจ้งเตือนบนโทรศัพท์เครื่องนี้แล้ว', // review
+      disabled: 'ปิดการแจ้งเตือนบนโทรศัพท์เครื่องนี้แล้ว', // review
+      eventsTitle: 'แจ้งเตือนเรื่องอะไร', // review
+      channelPush: 'โทรศัพท์', // review
+      channelEmail: 'อีเมล', // review
+      channelWhatsapp: 'WhatsApp', // review
+      saved: 'บันทึกแล้ว', // review
+      test: 'ส่งการแจ้งเตือนทดสอบ', // review
+      testSkipped: 'ไม่ได้ส่งการแจ้งเตือนทดสอบ: ยังไม่ได้เชื่อมต่อผู้ให้บริการแจ้งเตือน', // review
+      quiet: 'ไม่มีการแจ้งเตือนระหว่าง 23:00–06:00 และวันชะบัต สูงสุดวันละ 6 ครั้ง', // review
+      events: {
+        receiver_morning_brief: 'ของเข้าวันนี้ (06:00)', // review
+        delivery_late: 'ของมาส่งช้า', // review
+        approval_waiting: 'ใบแจ้งหนี้รออนุมัติ', // review
+        order_reminder: 'เตือนสั่งของ', // review
+        claim_overdue: 'คำขอเครดิตที่ยังไม่มีคำตอบ', // review
+        invoice_ocr_failed: 'ใบแจ้งหนี้ที่อ่านไม่ได้', // review
+      },
+    },
+    install: {
+      title: 'ติดตั้ง RestoMatch บนโทรศัพท์เครื่องนี้ไหม', // review
+      body: 'เปิดจากหน้าจอหลัก ทำงานได้แม้ไม่มีสัญญาณ และรับแจ้งเตือนเรื่องของเข้าและการอนุมัติ', // review
+      install: 'ติดตั้ง', // review
+      later: 'ไว้ทีหลัง', // review
+      iosTitle: 'ติดตั้งบน iPhone: สามขั้นตอน', // review
+      iosStep1: 'แตะปุ่มแชร์ที่ด้านล่างของหน้าจอ', // review
+      iosStep2: 'เลือก "เพิ่มไปยังหน้าจอโฮม"', // review
+      iosStep3: 'แตะ "เพิ่ม" ที่มุมจอ', // review
+      done: 'เข้าใจแล้ว', // review
+    },
+    share: {
+      title: 'แชร์ไปที่ RestoMatch', // review
+      loading: 'กำลังเปิดสิ่งที่คุณแชร์…', // review
+      toOrder: 'กำลังเปิดเป็นการรับคำสั่งซื้อ…', // review
+      filesTitle: '{count, plural, other {เก็บ # ไฟล์ไว้บนโทรศัพท์เครื่องนี้}}', // review
+      filesBody: 'ไฟล์จะอยู่บนโทรศัพท์เครื่องนี้ได้ถึง 24 ชั่วโมง เปิดรายการของเข้าแล้วแนบกับใบแจ้งหนี้', // review
+      filesOther: 'ไฟล์จะอยู่บนโทรศัพท์เครื่องนี้ได้ถึง 24 ชั่วโมง ส่งต่อให้ผู้จัดการหรือเจ้าของเพื่อแนบ', // review
+      toReceiving: 'ไปที่รับของ', // review
+      discard: 'ลบการแชร์', // review
+      discarded: 'ลบการแชร์ออกจากโทรศัพท์แล้ว', // review
+      skipped: '{count, plural, other {ไม่ได้เก็บ # ไฟล์ (เฉพาะรูปหรือ PDF ไม่เกิน 20MB)}}', // review
+      filesLost: 'ไฟล์ไม่มาถึง แชร์อีกครั้งจากแอปที่ติดตั้ง', // review
+      textTitle: 'ข้อความที่คุณแชร์', // review
+      textBody: 'การรับคำสั่งซื้อไม่ได้เปิดที่นี่ คัดลอกข้อความแล้วส่งต่อได้', // review
+      copy: 'คัดลอก', // review
+      copied: 'คัดลอกข้อความแล้ว', // review
+      emptyTitle: 'ไม่มีเนื้อหามาถึง', // review
+      emptyBody: 'การแชร์หมดอายุหรือเปิดไปแล้ว แชร์อีกครั้ง', // review
+      home: 'ไปหน้าหลัก', // review
+    },
+  },
 };

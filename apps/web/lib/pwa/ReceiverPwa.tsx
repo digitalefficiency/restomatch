@@ -1,5 +1,6 @@
 'use client';
 
+import { registerReceivingWorker } from './registerWorker';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CloudOff, Download, Loader2, UploadCloud } from 'lucide-react';
 import { claimOfflineChip } from '@/lib/net/offlineChipOwner';
@@ -191,9 +192,8 @@ export function ReceiverPwa({
       document.documentElement.dataset.pwa = 'installed';
       setInstalled(true);
     }
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/receiver-sw.js', { scope: '/dashboard/receiving' }).catch(() => null);
-    }
+    // The offline shell at the receiving scope (lib/pwa/registerWorker).
+    if ('serviceWorker' in navigator) void registerReceivingWorker();
     // Back online (browser event): start a sync. The chip itself follows useOnline().
     const onOnline = () => void sync();
     const onQueue = () => void refreshCount();

@@ -73,6 +73,8 @@ const RECEIVER: Array<{ ns: { name: string; he: MessageTree; extra?: unknown }; 
       'shell.listLast',
       // W3-03a field components (ScanButton / MicButton) — the receiver uses them at the dock.
       'field',
+      // W3-03b PWA: share target, install sheet, notification settings.
+      'pwa',
       'actions',
       'states',
     ],

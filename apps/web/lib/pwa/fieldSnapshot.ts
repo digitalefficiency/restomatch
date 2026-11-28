@@ -8,9 +8,11 @@
  * It is this user's tenant data, so:
  * - the cache records whose snapshot it is; a different user (or branch)
  *   wipes it before writing their own;
- * - sign-out purges it (PwaSessionGuard), and so does any 401 while refreshing it;
+ * - sign-out purges it, and the parked shares with it (PwaSessionGuard), and so does any 401 while refreshing it;
  * - nothing but same-origin `/dashboard/receiving` GET pages ever goes in.
  */
+
+import { purgeShares } from './shareInbox';
 
 export const SNAPSHOT_CACHE = 'rm-receiver-snapshot-v1';
 /** Synthetic entry that names the snapshot's owner (`<userId>:<restaurantId>`). */
@@ -30,12 +32,14 @@ function cachesApi(): CacheStorage | null {
   return typeof caches === 'undefined' ? null : caches;
 }
 
+/** Sign-out: this user's snapshot AND the shares they parked on this device (W3-03b) both go. */
 export async function purgeFieldSnapshot(): Promise<void> {
   try {
     await cachesApi()?.delete(SNAPSHOT_CACHE);
   } catch {
     /* storage blocked */
   }
+  await purgeShares();
 }
 
 /**

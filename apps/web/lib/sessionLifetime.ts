@@ -39,3 +39,15 @@ export function isSessionExpired(loginAtMs: number, rememberMe: boolean, nowMs: 
   const { tokenTtlSec } = sessionLifetime(rememberMe);
   return nowMs - loginAtMs > tokenTtlSec * 1000;
 }
+
+/**
+ * When this login really ends (epoch ms): `loginAt` + the window the jwt
+ * callback enforces (1 day, or 30 with "remember me"). Auth.js's own
+ * `session.expires` is always now + 30 days (sliding maxAge), so anything that
+ * must lapse with the login (W3-03b's parked-share owner stamp) uses this.
+ * Unknown `loginAt` → undefined.
+ */
+export function loginEndsAtMs(loginAtMs: number | undefined, rememberMe: boolean): number | undefined {
+  if (typeof loginAtMs !== 'number' || !Number.isFinite(loginAtMs)) return undefined;
+  return loginAtMs + sessionLifetime(rememberMe).tokenTtlSec * 1000;
+}

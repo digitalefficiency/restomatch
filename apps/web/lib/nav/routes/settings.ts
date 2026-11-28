@@ -22,4 +22,13 @@ export const routes: RouteDef[] = [
     roles: ['owner', 'manager', 'bookkeeper'],
     nav: 'hidden',
   },
+  {
+    // W3-03b: this phone's push subscription + per-event switches. Inherits the
+    // settings gate (every role); the data is the caller's own.
+    key: 'notificationSettings',
+    path: '/dashboard/settings/notifications',
+    parent: 'settings',
+    group: 'admin',
+    nav: 'hidden',
+  },
 ];

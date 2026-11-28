@@ -60,6 +60,8 @@ export const en: Shape<typeof he> = {
     settings: 'Settings',
     close: 'Month close',
     automations: 'Automations',
+    notificationSettings: 'Notifications',
+    share: 'Share',
   },
   bar: {
     today: 'Today',

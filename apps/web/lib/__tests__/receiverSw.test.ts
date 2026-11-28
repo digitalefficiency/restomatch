@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
 import { GET } from '../../app/receiver-sw.js/route';
-import { SNAPSHOT_CACHE, snapshotPathAllowed } from '../pwa/fieldSnapshot';
+import { SNAPSHOT_CACHE, SNAPSHOT_OWNER_PATH, snapshotPathAllowed } from '../pwa/fieldSnapshot';
 
 const ORIGIN = 'https://app.test';
 
@@ -28,8 +28,10 @@ function fakeCaches() {
       open,
       keys: async () => [...stores.keys()],
       delete: async (n: string) => stores.delete(n),
-      match: async (r: Request | string) => {
-        for (const m of stores.values()) {
+      match: async (r: Request | string, o?: { cacheName?: string }) => {
+        // Like CacheStorage.match: `cacheName` searches only that cache and never creates it.
+        for (const [name, m] of stores) {
+          if (o?.cacheName && name !== o.cacheName) continue;
           const hit = m.get(keyOf(r));
           if (hit) return hit.clone();
         }
@@ -94,8 +96,11 @@ describe('receiver service worker', () => {
       '/pwa/icon-512.png',
       '/pwa/icon-maskable-512.png',
     ]);
-    // W2-05: exactly one write, inside the /_next/static handler; the snapshot is never written here.
-    expect(src.match(/\.put\(/g)?.length).toBe(1);
+    // W2-05: one write for the network, inside the /_next/static handler; the snapshot is never written here.
+    // W3-03b: the only other writes park a share (the OS share sheet's POST) in SHARE_CACHE.
+    const shareFn = /async function parkShare\(req\) \{([\s\S]*?)\n\}/.exec(src)![1]!;
+    expect(shareFn).toMatch(/caches\.open\(SHARE_CACHE\)/);
+    expect(src.replace(shareFn, '').match(/\.put\(/g)?.length).toBe(1);
     const staticFn = /async function staticAsset\(req\) \{([\s\S]*?)\n\}/.exec(src)![1]!;
     expect(staticFn).toMatch(/\.put\(/);
     expect(staticFn).toMatch(/caches\.open\(STATIC_CACHE\)/);
@@ -125,13 +130,38 @@ describe('receiver service worker', () => {
     });
     const snap = await w.caches.api.open(SNAPSHOT_CACHE);
     await snap.put('/dashboard/receiving/11111111-1111-4111-8111-111111111111', new Response('<html>snapshot</html>'));
+    // The snapshot's owner, and that owner's live login on this phone (W3-03b: the worker checks both).
+    await snap.put(SNAPSHOT_OWNER_PATH, new Response('user-a:rest-1'));
+    await (await w.caches.api.open('rm-share-v1')).put('/__share/owner', new Response(JSON.stringify({ userId: 'user-a', exp: Date.now() + 3600_000 })));
     const po = '/dashboard/receiving/11111111-1111-4111-8111-111111111111';
     expect(await (await w.dispatch(po, { mode: 'navigate' }))!.text()).toBe('<html>fresh</html>');
     // Online, the worker never stores the page it fetched.
-    expect(w.caches.stores.get(SNAPSHOT_CACHE)!.size).toBe(1);
+    expect(w.caches.stores.get(SNAPSHOT_CACHE)!.size).toBe(2);
     online = false;
     expect(await (await w.dispatch(`${po}?x=1`, { mode: 'navigate' }))!.text()).toBe('<html>snapshot</html>');
     expect(await (await w.dispatch('/dashboard/receiving/other', { mode: 'navigate' }))!.text()).toBe('/pwa/offline.html');
+  });
+
+  it("offline, a snapshot whose owner has no live login on this phone is never served (W3-03b)", async () => {
+    const po = '/dashboard/receiving/11111111-1111-4111-8111-111111111111';
+    const cases: Array<[string, (w: Awaited<ReturnType<typeof loadWorker>>) => Promise<void>]> = [
+      ['no login stamp', async () => {}],
+      ['an expired login', async (w) => void (await (await w.caches.api.open('rm-share-v1')).put('/__share/owner', new Response(JSON.stringify({ userId: 'user-a', exp: Date.now() - 1 }))))],
+      ['another user signed in', async (w) => void (await (await w.caches.api.open('rm-share-v1')).put('/__share/owner', new Response(JSON.stringify({ userId: 'user-b', exp: Date.now() + 3600_000 }))))],
+    ];
+    for (const [, login] of cases) {
+      const w = await loadWorker(async () => Promise.reject(new TypeError('Failed to fetch')));
+      const snap = await w.caches.api.open(SNAPSHOT_CACHE);
+      await snap.put(po, new Response('<html>snapshot</html>'));
+      await snap.put(SNAPSHOT_OWNER_PATH, new Response('user-a:rest-1'));
+      await login(w);
+      expect(await (await w.dispatch(po, { mode: 'navigate' }))!.text()).not.toContain('snapshot');
+    }
+    // No stamp on the snapshot itself: not served either.
+    const w = await loadWorker(async () => Promise.reject(new TypeError('Failed to fetch')));
+    await (await w.caches.api.open(SNAPSHOT_CACHE)).put(po, new Response('<html>snapshot</html>'));
+    await (await w.caches.api.open('rm-share-v1')).put('/__share/owner', new Response(JSON.stringify({ userId: 'user-a', exp: Date.now() + 3600_000 })));
+    expect(await (await w.dispatch(po, { mode: 'navigate' }))!.text()).not.toContain('snapshot');
   });
 
   it('never intercepts a POST, an API / tRPC call or another origin', async () => {
@@ -159,18 +189,19 @@ describe('receiver service worker', () => {
     expect([...w.caches.stores.keys()].sort()).toEqual(['other-app', 'rm-receiver-snapshot-v1', 'rm-receiver-static-v1', 'rm-receiver-v2']);
   });
 
-  it('manifest scope + start_url stay inside the receiver flow', () => {
+  it('manifest scope + start_url cover the dashboard (W3-03b app-wide)', () => {
     const m = JSON.parse(readFileSync(join(__dirname, '../../public/pwa/manifest.webmanifest'), 'utf8')) as {
       scope: string;
       start_url: string;
       icons: Array<{ src: string }>;
       share_target?: { action: string; method: string };
     };
-    expect(m.scope).toBe('/dashboard/receiving');
-    expect(m.start_url.startsWith(m.scope)).toBe(true);
+    expect(m.scope).toBe('/dashboard');
+    expect(new URL(m.start_url, 'https://x').pathname.startsWith(m.scope)).toBe(true);
     expect(m.icons.every((i) => i.src.startsWith('/pwa/'))).toBe(true);
-    // orderCapture share target: inside the scope, GET only (no body to an authed route).
-    expect(m.share_target?.action.startsWith(`${m.scope}/`)).toBe(true);
-    expect(m.share_target?.method).toBe('GET');
+    // W3-03b share target: inside the scope; the POST is answered by the worker on the device
+    // (or by a redirect-only route that stores nothing), never by an authed write.
+    expect(m.share_target?.action.startsWith(m.scope)).toBe(true);
+    expect(m.share_target?.method).toBe('POST');
   });
 });

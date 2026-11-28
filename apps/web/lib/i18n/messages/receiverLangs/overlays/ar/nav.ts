@@ -61,6 +61,8 @@ export const nav: Shape<typeof he> = {
     integrations: 'الربط',
     settings: 'الإعدادات',
     automations: 'الأتمتة',
+    notificationSettings: 'الإشعارات', // review
+    share: 'مشاركة', // review
   },
   bar: {
     today: 'اليوم',

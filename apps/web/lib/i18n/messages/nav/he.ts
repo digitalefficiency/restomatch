@@ -63,6 +63,8 @@ export const he = {
     settings: 'הגדרות',
     close: 'סגירת חודש',
     automations: 'אוטומציות',
+    notificationSettings: 'התראות',
+    share: 'שיתוף',
   },
   /** Bottom-bar labels: short, never truncated at 360 px. */
   bar: {

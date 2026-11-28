@@ -11,4 +11,6 @@ export const routes: RouteDef[] = [
   { key: 'labTokens', path: '/dashboard/lab/tokens', group: 'top', nav: 'hidden' },
   { key: 'labDesk', path: '/dashboard/lab/desk', group: 'top', nav: 'hidden' },
   { key: 'labDeskRow', path: '/dashboard/lab/desk/[rowId]', group: 'top', parent: 'labDesk', nav: 'detail' },
+  // W3-03b: the PWA share target lands here (any role, never a 404); no menu entry.
+  { key: 'share', path: '/dashboard/share', group: 'top', nav: 'hidden' },
 ];

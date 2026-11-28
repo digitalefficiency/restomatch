@@ -9,13 +9,18 @@ import { runLogoutGuard, type LogoutChoice } from './logoutGuard';
 import { clearMineOnDevice, countMineOnDevice } from './fieldOutbox';
 import { LOGOUT_FORM_ATTR, queueDbExists } from './offlineQueue';
 import { purgeFieldSnapshot, purgeSnapshotIfNotOwner } from './fieldSnapshot';
+import { claimSharesFor } from './shareInbox';
 import { drainNow, useOutboxDrainer } from './useOutboxDrainer';
+import { AppPwa } from './AppPwa';
 
 /** Set on a sign-out form once the guard let it through, so the re-submit is not intercepted again. */
 const PASSED_ATTR = 'data-rm-logout-passed';
 
 /** `photosOnly`: every waiting item is an invoice photo (the W1 wording); otherwise counts, closes and photos. */
-type Sheet = { kind: 'flushing'; count: number; photosOnly: boolean } | { kind: 'ask'; count: number; photosOnly: boolean } | null;
+type Sheet =
+  | { kind: 'flushing'; count: number; photosOnly: boolean }
+  | { kind: 'ask'; count: number; photosOnly: boolean }
+  | null;
 
 /**
  * Sign-out on a shared back-door phone (mobile-field-01, auth-01 guard side).
@@ -28,7 +33,16 @@ type Sheet = { kind: 'flushing'; count: number; photosOnly: boolean } | { kind: 
  * it uploads through tRPC, so every mount needs a TrpcProvider above it.
  * Renders nothing until needed.
  */
-export function PwaSessionGuard({ userId }: { userId: string }) {
+export function PwaSessionGuard({
+  userId,
+  sessionExpires = null,
+  appPwa = false,
+}: {
+  userId: string;
+  /** W3-03b: when this login really ends (`session.loginEndsAt`, epoch ms); the parked-share owner stamp lapses with it. */
+  sessionExpires?: number | null;
+  /** W3-03b: the app-wide PWA shell (manifest, worker, install sheet, badge). Off by default. */ appPwa?: boolean;
+}) {
   const t = useT(receivingDelivery);
   const locale = useLocale();
   // The field outbox's background drainer (W2-05): counts, closes and photos left on the phone go out from any screen.
@@ -36,7 +50,9 @@ export function PwaSessionGuard({ userId }: { userId: string }) {
   // Another user's read snapshot never survives a user switch on this device (sign-out or not).
   useEffect(() => {
     void purgeSnapshotIfNotOwner(userId);
-  }, [userId]);
+    // …and another user's parked shares (W3-03b); this user's are stamped as theirs.
+    void claimSharesFor(userId, sessionExpires);
+  }, [userId, sessionExpires]);
   const photosOnlyRef = useRef(true);
   const [sheet, setSheet] = useState<Sheet>(null);
   const answerRef = useRef<((c: LogoutChoice) => void) | null>(null);
@@ -63,7 +79,8 @@ export function PwaSessionGuard({ userId }: { userId: string }) {
       void runLogoutGuard({
         countMine,
         online: () => navigator.onLine,
-        onFlushing: (count) => setSheet({ kind: 'flushing', count, photosOnly: photosOnlyRef.current }),
+        onFlushing: (count) =>
+          setSheet({ kind: 'flushing', count, photosOnly: photosOnlyRef.current }),
         flush: async () => {
           await drainNow();
           return countMine();
@@ -96,59 +113,64 @@ export function PwaSessionGuard({ userId }: { userId: string }) {
 
   const count = sheet ? formatNumber(sheet.count, locale) : '';
   return (
-    <dialog
-      ref={dialogRef}
-      aria-labelledby="rm-logout-guard-title"
-      data-testid="logout-queue-sheet"
-      onCancel={(e) => {
-        e.preventDefault();
-        if (sheet?.kind === 'ask') answer('wait');
-      }}
-      className="!m-auto w-[min(92vw,28rem)] rounded-2xl border border-line bg-surface p-0 text-ink shadow-card backdrop:bg-black/50"
-    >
-      {sheet?.kind === 'flushing' ? (
-        <div role="status" className="flex items-center gap-3 p-5 text-base">
-          <Loader2 className="h-5 w-5 shrink-0 animate-spin text-primary" aria-hidden="true" />
-          <h2 id="rm-logout-guard-title" className="font-semibold">
-            {t(sheet.photosOnly ? 'logoutGuard.flushing' : 'logoutGuard.flushingItems', { count })}
-          </h2>
-        </div>
-      ) : sheet?.kind === 'ask' ? (
-        <div className="space-y-3 p-5">
-          <h2 id="rm-logout-guard-title" className="flex items-center gap-2 text-lg font-bold">
-            <CloudOff className="h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
-            {t(sheet.photosOnly ? 'logoutGuard.title' : 'logoutGuard.titleItems', { count })}
-          </h2>
-          <p className="text-base text-muted">{t('logoutGuard.body')}</p>
-          <div className="flex flex-col gap-2 pt-1">
-            <button
-              type="button"
-              autoFocus
-              data-testid="logout-wait"
-              onClick={() => answer('wait')}
-              className="inline-flex min-h-14 items-center justify-center rounded-xl bg-primary px-4 text-base font-semibold text-on-primary"
-            >
-              {t('logoutGuard.wait')}
-            </button>
-            <button
-              type="button"
-              data-testid="logout-keep"
-              onClick={() => answer('keep')}
-              className="inline-flex min-h-12 items-center justify-center rounded-xl border border-line bg-surface-2 px-4 text-base font-medium text-ink"
-            >
-              {t('logoutGuard.keep')}
-            </button>
-            <button
-              type="button"
-              data-testid="logout-delete"
-              onClick={() => answer('delete')}
-              className="inline-flex min-h-12 items-center justify-center rounded-xl px-4 text-base font-medium text-danger underline underline-offset-4"
-            >
-              {t(sheet.photosOnly ? 'logoutGuard.delete' : 'logoutGuard.deleteItems', { count })}
-            </button>
+    <>
+      {appPwa ? <AppPwa /> : null}
+      <dialog
+        ref={dialogRef}
+        aria-labelledby="rm-logout-guard-title"
+        data-testid="logout-queue-sheet"
+        onCancel={(e) => {
+          e.preventDefault();
+          if (sheet?.kind === 'ask') answer('wait');
+        }}
+        className="!m-auto w-[min(92vw,28rem)] rounded-2xl border border-line bg-surface p-0 text-ink shadow-card backdrop:bg-black/50"
+      >
+        {sheet?.kind === 'flushing' ? (
+          <div role="status" className="flex items-center gap-3 p-5 text-base">
+            <Loader2 className="h-5 w-5 shrink-0 animate-spin text-primary" aria-hidden="true" />
+            <h2 id="rm-logout-guard-title" className="font-semibold">
+              {t(sheet.photosOnly ? 'logoutGuard.flushing' : 'logoutGuard.flushingItems', {
+                count,
+              })}
+            </h2>
           </div>
-        </div>
-      ) : null}
-    </dialog>
+        ) : sheet?.kind === 'ask' ? (
+          <div className="space-y-3 p-5">
+            <h2 id="rm-logout-guard-title" className="flex items-center gap-2 text-lg font-bold">
+              <CloudOff className="h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
+              {t(sheet.photosOnly ? 'logoutGuard.title' : 'logoutGuard.titleItems', { count })}
+            </h2>
+            <p className="text-base text-muted">{t('logoutGuard.body')}</p>
+            <div className="flex flex-col gap-2 pt-1">
+              <button
+                type="button"
+                autoFocus
+                data-testid="logout-wait"
+                onClick={() => answer('wait')}
+                className="inline-flex min-h-14 items-center justify-center rounded-xl bg-primary px-4 text-base font-semibold text-on-primary"
+              >
+                {t('logoutGuard.wait')}
+              </button>
+              <button
+                type="button"
+                data-testid="logout-keep"
+                onClick={() => answer('keep')}
+                className="inline-flex min-h-12 items-center justify-center rounded-xl border border-line bg-surface-2 px-4 text-base font-medium text-ink"
+              >
+                {t('logoutGuard.keep')}
+              </button>
+              <button
+                type="button"
+                data-testid="logout-delete"
+                onClick={() => answer('delete')}
+                className="inline-flex min-h-12 items-center justify-center rounded-xl px-4 text-base font-medium text-danger underline underline-offset-4"
+              >
+                {t(sheet.photosOnly ? 'logoutGuard.delete' : 'logoutGuard.deleteItems', { count })}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </dialog>
+    </>
   );
 }
