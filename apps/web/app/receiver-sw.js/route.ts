@@ -41,6 +41,7 @@ const SNAPSHOT_CACHE = 'rm-receiver-snapshot-v1';
 const SHARE_CACHE = 'rm-share-v1';
 const KEEP = [CACHE, STATIC_CACHE, SNAPSHOT_CACHE, SHARE_CACHE];
 const SHARE_ACTION = '/dashboard/share/receive';
+const SHARE_OWNER_PATH = '/__share/owner';
 // Two registrations run this script: scope /dashboard/receiving (W2-05, the
 // offline shell) and scope /dashboard/ (W3-03b, share/push). Only the first
 // answers page navigations. No registration info (an old test harness) = shell.
@@ -136,8 +137,13 @@ async function parkShare(req) {
   const cache = await caches.open(SHARE_CACHE);
   const now = Date.now();
   await dropOldShares(cache, now);
+  // Whose share this is: the signed-in page keeps /__share/owner current
+  // (claimSharesFor on mount; sign-out deletes the cache, so no stamp = signed out).
+  const stamp = await cache.match(SHARE_OWNER_PATH);
+  const owner = stamp ? (await stamp.text()).trim().slice(0, 200) : '';
   const meta = {
     at: now,
+    owner,
     title: str('title'),
     text: str('text'),
     url: str('url'),

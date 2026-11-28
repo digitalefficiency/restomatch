@@ -8,10 +8,12 @@
  *
  * Shares are this user's content on a possibly shared phone, so:
  * - sign-out deletes the whole cache (`purgeFieldSnapshot` → `purgeShares`);
- * - the cache is stamped with its owner on every signed-in mount
- *   (`claimSharesFor`); a different user signing in wipes it first. A share
- *   parked before anyone signed in (the share sheet opened while signed out)
- *   goes to the first user who signs in.
+ * - every signed-in mount writes the current user to `/__share/owner`
+ *   (`claimSharesFor`), and the worker copies it into each share's meta at
+ *   park time, so every share carries the user it was parked under;
+ * - `claimSharesFor` deletes only shares stamped with ANOTHER user. A share
+ *   with no stamp was parked while signed out (after a sign-out purge) and goes
+ *   to the first user who signs in, who is then stamped on it.
  */
 
 export const SHARE_CACHE = 'rm-share-v1';
@@ -28,6 +30,8 @@ export interface SharedFileMeta {
 export interface SharedItem {
   id: string;
   at: number;
+  /** The user signed in when it was parked; '' = parked while signed out. */
+  owner: string;
   title: string;
   text: string;
   url: string;
@@ -71,6 +75,7 @@ export async function readShare(id: unknown, open: OpenCache = browserShareCache
   return {
     id,
     at: Number(raw.at) || 0,
+    owner: str(raw.owner, 200),
     title: str(raw.title, 8000),
     text: str(raw.text, 8000),
     url: str(raw.url, 2000),
@@ -127,7 +132,12 @@ export function routeShare(item: SharedItem | null): ShareRoute {
 export interface CacheStorageLike {
   keys(): Promise<string[]>;
   delete(name: string): Promise<boolean>;
-  open(name: string): Promise<{ match(key: string): Promise<Response | undefined>; put(key: string, res: Response): Promise<void> }>;
+  open(name: string): Promise<{
+    match(key: string): Promise<Response | undefined>;
+    put(key: string, res: Response): Promise<void>;
+    keys(): Promise<ReadonlyArray<Request | string>>;
+    delete(key: string): Promise<boolean>;
+  }>;
 }
 const storage = (): CacheStorageLike | null => (typeof caches === 'undefined' ? null : (caches as unknown as CacheStorageLike));
 
@@ -140,23 +150,39 @@ export async function purgeShares(api: CacheStorageLike | null = storage()): Pro
   }
 }
 
+const pathOf = (k: Request | string) => new URL(typeof k === 'string' ? k : k.url, 'https://x').pathname;
+const plain = (body: string) => new Response(body, { headers: { 'content-type': 'text/plain' } });
+
 /**
- * Make the parked shares this user's: another user's shares are deleted, then
- * the cache is stamped with `userId`. Run on every signed-in shell mount and
- * before the share page reads. Returns whether it purged. Never throws.
+ * Make the parked shares this user's. Run on every signed-in shell mount and
+ * before the share page reads:
+ * 1. `/__share/owner` := `userId` (the worker stamps new shares with it);
+ * 2. each share stamped with another user is deleted (meta + files);
+ * 3. each unstamped share (parked while signed out) is stamped `userId`.
+ * Returns whether it deleted anything. Never throws.
  */
 export async function claimSharesFor(userId: string, api: CacheStorageLike | null = storage()): Promise<boolean> {
   if (!api || !userId) return false;
   try {
-    if (!(await api.keys()).includes(SHARE_CACHE)) return false;
-    const stamp = await (await api.open(SHARE_CACHE)).match(SHARE_OWNER_PATH);
-    const owner = stamp ? (await stamp.text()).trim() : null;
+    const cache = await api.open(SHARE_CACHE);
+    await cache.put(SHARE_OWNER_PATH, plain(userId));
+    const keys = (await cache.keys()).map(pathOf);
     let purged = false;
-    if (owner && owner !== userId) {
-      await api.delete(SHARE_CACHE);
+    for (const path of keys) {
+      if (!/^\/__share\/[0-9a-f]{24}\/meta$/.test(path)) continue;
+      const res = await cache.match(path);
+      const meta = res ? ((await res.json().catch(() => null)) as Record<string, unknown> | null) : null;
+      const owner = meta && typeof meta.owner === 'string' ? meta.owner : '';
+      if (meta && owner === userId) continue;
+      if (meta && owner === '') {
+        await cache.put(path, new Response(JSON.stringify({ ...meta, owner: userId }), { headers: { 'content-type': 'application/json' } }));
+        continue;
+      }
+      // Another user's share (or unreadable meta): the whole share goes.
+      const prefix = path.slice(0, -'meta'.length);
+      for (const k of keys) if (k.startsWith(prefix)) await cache.delete(k);
       purged = true;
     }
-    await (await api.open(SHARE_CACHE)).put(SHARE_OWNER_PATH, new Response(userId, { headers: { 'content-type': 'text/plain' } }));
     return purged;
   } catch {
     return false;

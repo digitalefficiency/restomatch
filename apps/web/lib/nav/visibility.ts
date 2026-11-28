@@ -19,9 +19,14 @@ export function canOpen(role: UserRole, def: RouteDef): boolean {
   return canOpenPath(role, def.path);
 }
 
-/** A flag-gated route whose flags are all off 404s, so nothing should link to it. */
+/**
+ * A flag-gated route whose flags are all off 404s, so nothing should link to it.
+ * A child page inherits its ancestors' flags (`/inventory/count` lives under
+ * `inventory`'s `inventoryCount`), so every ancestor's flags must be on too.
+ */
 function flagsOn(viewer: Pick<NavViewer, 'features'>, def: RouteDef | undefined): boolean {
-  return !def?.features || def.features.some((f) => viewer.features.includes(f));
+  if (!def) return true;
+  return ancestry(def).every((d) => !d.features || d.features.some((f) => viewer.features.includes(f)));
 }
 
 /**

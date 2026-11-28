@@ -105,7 +105,7 @@ export function AppPwa() {
 
   return (
     <>
-      <link rel="manifest" href="/dashboard/share/manifest" crossOrigin="use-credentials" />
+      <link rel="manifest" href="/pwa/manifest.webmanifest" />
       <Sheet
         open={sheet === 'prompt'}
         onClose={() => setSheet(null)}

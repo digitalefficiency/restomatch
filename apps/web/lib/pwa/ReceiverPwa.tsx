@@ -248,7 +248,7 @@ export function ReceiverPwa({
 
   return (
     <>
-      <link rel="manifest" href="/dashboard/share/manifest" crossOrigin="use-credentials" />
+      <link rel="manifest" href="/pwa/manifest.webmanifest" />
       <link rel="apple-touch-icon" href="/pwa/apple-touch-icon.png" />
       <meta name="theme-color" content="#F6F8F7" />
       <meta name="mobile-web-app-capable" content="yes" />

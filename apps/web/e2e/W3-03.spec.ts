@@ -4,7 +4,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 /**
  * W3-03b · the app-wide PWA, without the receiving pages (released later):
- * the manifest (scope /dashboard/, role-filtered shortcuts, POST share target), the
+ * the manifest (scope /dashboard, start_url a 200 inside it, no shortcuts, POST share target), the
  * share page (never a 404; text → order capture; empty share → calm card), the
  * server fallback for the share POST, and /dashboard/settings/notifications
  * (receiver: field events only, no ₪, 56 px controls; storage not deployed yet →
@@ -50,17 +50,17 @@ async function axeSerious(page: Page): Promise<string[]> {
   });
 }
 
-test('the manifest is app-wide with a POST share target; the receiver gets only her shortcut', async ({ page, request }) => {
+test('the manifest is app-wide with a POST share target and no per-device shortcuts', async ({ page, request }) => {
   const res = await request.get('/pwa/manifest.webmanifest');
   expect(res.ok()).toBe(true);
   const m = await res.json();
-  expect(m.scope).toBe('/dashboard/');
-  expect(m.start_url.startsWith(m.scope)).toBe(true);
+  expect(m.scope).toBe('/dashboard');
   expect(m.share_target).toMatchObject({ action: '/dashboard/share/receive', method: 'POST' });
-  // The linked, signed-in manifest: shortcuts filtered to what this role can open.
-  const mine = await (await page.request.get('/dashboard/share/manifest')).json();
-  expect(mine.scope).toBe('/dashboard/');
-  expect(mine.shortcuts.map((s: { name: string }) => s.name)).toEqual(['קבלת משלוח']);
+  expect(m.shortcuts).toBeUndefined();
+  // The launch: start_url answers 200 itself (no 308 out of scope), on a path inside the scope.
+  const launch = await page.request.get(m.start_url, { maxRedirects: 0 });
+  expect(launch.status()).toBe(200);
+  expect(new URL(launch.url()).pathname.startsWith(m.scope)).toBe(true);
 });
 
 test('an empty or expired share is a calm card, never a 404', async ({ page }) => {

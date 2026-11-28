@@ -6,7 +6,8 @@ import { GET } from '../../../app/receiver-sw.js/route';
 import { POST as receivePost, GET as receiveGet } from '../../../app/dashboard/share/receive/route';
 import { claimSharesFor, readShare, routeShare, shareText, takeShareFiles, isShareId, type CacheLike, type CacheStorageLike } from '../shareInbox';
 import { purgeFieldSnapshot } from '../fieldSnapshot';
-import { MANIFEST_BASE, manifestFor } from '../manifest';
+import { MANIFEST_BASE } from '../manifest';
+import { canFollowPath } from '../../nav/visibility';
 
 const ORIGIN = 'https://app.test';
 
@@ -152,6 +153,47 @@ describe('share target in the worker (W3-03b)', () => {
     expect(await readShare(id, open)).toBeNull();
   });
 
+  it('each share carries the user it was parked under: claim on an empty device → park → another user claims → gone', async () => {
+    const w = await loadWorker();
+    const api = w.caches.api as unknown as CacheStorageLike;
+    const open = async () => (await w.caches.open('rm-share-v1')) as unknown as CacheLike;
+    const park = async () => {
+      const form = new FormData();
+      form.append('files', new File([new Uint8Array([7])], 'a.pdf', { type: 'application/pdf' }));
+      const res = (await w.run('fetch', { request: shareRequest(form) }))!;
+      return new URL(res.headers.get('location')!, ORIGIN).searchParams.get('id');
+    };
+    expect(w.caches.stores.has('rm-share-v1')).toBe(false);
+    expect(await claimSharesFor('user-a', api)).toBe(false); // empty device: the stamp is written anyway
+    const id = await park();
+    expect((await readShare(id, open))?.owner).toBe('user-a');
+    expect(await claimSharesFor('user-b', api)).toBe(true);
+    expect(await readShare(id, open)).toBeNull();
+  });
+
+  it('a share parked while signed out goes to the first user who signs in, and only to them', async () => {
+    const w = await loadWorker();
+    const api = w.caches.api as unknown as CacheStorageLike;
+    const open = async () => (await w.caches.open('rm-share-v1')) as unknown as CacheLike;
+    // user A was here, then signed out (the purge deletes the cache, owner stamp included).
+    await claimSharesFor('user-a', api);
+    vi.stubGlobal('caches', w.caches.api);
+    try {
+      await purgeFieldSnapshot();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    const form = new FormData();
+    form.set('text', 'הזמנה מהווטסאפ');
+    const res = (await w.run('fetch', { request: shareRequest(form) }))!;
+    const id = new URL(res.headers.get('location')!, ORIGIN).searchParams.get('id');
+    expect((await readShare(id, open))?.owner).toBe('');
+    expect(await claimSharesFor('user-b', api)).toBe(false);
+    expect((await readShare(id, open))?.owner).toBe('user-b');
+    expect(await claimSharesFor('user-c', api)).toBe(true);
+    expect(await readShare(id, open)).toBeNull();
+  });
+
   it('rejects garbage ids and dedupes repeated lines', async () => {
     expect(isShareId('../meta')).toBe(false);
     expect(await readShare('nope')).toBeNull();
@@ -229,25 +271,33 @@ describe('app-wide manifest (W3-03b)', () => {
   it('the static file is the base: id kept, whole dashboard in scope, start_url inside it, no shortcuts', () => {
     expect(m).toEqual(JSON.parse(JSON.stringify(MANIFEST_BASE)));
     expect(m.id).toBe('/dashboard/receiving');
-    expect(m.scope).toBe('/dashboard/');
-    expect(m.start_url.startsWith(m.scope)).toBe(true);
+    // No trailing slash: Next 308s /dashboard/ → /dashboard, so the scope must cover /dashboard itself.
+    expect(m.scope).toBe('/dashboard');
+    expect(m.start_url).toBe('/dashboard?source=pwa');
+    expect(new URL(m.start_url, ORIGIN).pathname.startsWith(m.scope)).toBe(true);
+    expect(m.start_url).not.toMatch(/\/\?|\/$/);
+    // Installed shortcuts belong to the device, not the user (shared back-door phone).
     expect(m.shortcuts).toBeUndefined();
   });
   it('shares by POST multipart (images, PDF, text) to the receive route', () => {
     expect(m.share_target).toMatchObject({ action: '/dashboard/share/receive', method: 'POST', enctype: 'multipart/form-data' });
     expect(m.share_target.params.files[0].accept).toEqual(['image/*', 'application/pdf']);
   });
-  it('offers each role only the shortcuts it can open (no 403, no money screen for chef/receiver)', () => {
-    const names = (role: Parameters<typeof manifestFor>[0] extends infer V ? (V extends { role: infer R } ? R : never) : never, features: string[] = ['inventoryCount']) =>
-      (manifestFor({ role, features }) as { shortcuts?: Array<{ name: string; url: string }> }).shortcuts?.map((s) => s.name) ?? [];
-    expect(names('owner')).toEqual(['קבלת משלוח', 'ספירה', 'הזמנה חדשה', 'אישורים']);
-    expect(names('receiver')).toEqual(['קבלת משלוח']);
-    expect(names('chef')).toEqual(['ספירה', 'הזמנה חדשה']);
-    expect(names('bookkeeper')).toEqual(['ספירה', 'אישורים']);
-    expect(manifestFor(null)).not.toHaveProperty('shortcuts');
-    for (const s of (manifestFor({ role: 'owner', features: ['inventoryCount'] }) as { shortcuts: Array<{ url: string }> }).shortcuts) {
-      expect(s.url.startsWith(MANIFEST_BASE.scope)).toBe(true);
+  it('both shells link the one static manifest, without credentials', () => {
+    for (const f of ['AppPwa.tsx', 'ReceiverPwa.tsx']) {
+      const src = readFileSync(join(__dirname, '..', f), 'utf8');
+      expect(src).toContain('<link rel="manifest" href="/pwa/manifest.webmanifest" />');
+      expect(src).not.toContain('use-credentials');
     }
+  });
+});
+
+describe('a child route inherits its parent flags (canFollowPath)', () => {
+  it('with inventoryCount off, no role is offered /dashboard/inventory/count', () => {
+    for (const role of ['owner', 'manager', 'chef', 'receiver', 'bookkeeper'] as const) {
+      expect(canFollowPath({ role, features: [] }, '/dashboard/inventory/count')).toBe(false);
+    }
+    expect(canFollowPath({ role: 'owner', features: ['inventoryCount'] }, '/dashboard/inventory/count')).toBe(true);
   });
 });
 

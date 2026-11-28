@@ -38,7 +38,7 @@ export function ShareClient({
       const owned = userId ? (await claimSharesFor(userId), true) : false;
       const parked = id && owned ? await readShare(id) : null;
       const item: SharedItem | null =
-        parked ?? (shareText(fallback) ? { id: '', at: 0, ...fallback, skipped: 0, files: [] } : null);
+        parked ?? (shareText(fallback) ? { id: '', at: 0, owner: userId ?? '', ...fallback, skipped: 0, files: [] } : null);
       const route = routeShare(item);
       // A text-only share is read once: the order capture takes it from the URL.
       if (parked && route.kind === 'orderText') await dropShare(parked);
