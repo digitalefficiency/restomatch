@@ -140,14 +140,13 @@ describe('W3-10 "מה ישתנה" basis review fixes (orchestrator 28.11)', () =
     });
   });
 
-  it("a pack cell of '0' is a degenerate basis: unclear, ₪0, the preview still answers", async () => {
+  it("a pack cell of '0' is no pack (#382): read like a blank cell, the stored case of 12 stays, priced as before", async () => {
     await item({ sku: 'Z', name: 'מיץ', price: '120.0000', unit: 'ארגז', pack: '12' });
     await billed('Z', '5', 'ארגז');
     const res = await preview(['sku,name,unit,pack,price', 'Z,מיץ,ארגז,0,66'].join('\n'));
-    expect(res.diff.lines.find((l) => l.supplierSku === 'Z')).toMatchObject({
-      kind: 'unclear',
-      unclearReason: 'BASIS_NOT_COMPARABLE',
-      monthlyImpactAgorot: 0,
-    });
+    // Same basis (case of 12): ₪120 → ₪66 = −₪54 × 5 cases = −₪270.00.
+    const z = res.diff.lines.find((l) => l.supplierSku === 'Z');
+    expect(z).toMatchObject({ kind: 'down', deltaUnits: -540_000, monthlyImpactAgorot: -27_000 });
+    expect(z!.basisChanged).toBeUndefined();
   });
 });
